@@ -1,0 +1,4 @@
+[submodule "external/ps3recomp"]
+	path = external/ps3recomp
+	url = https://github.com/zdiemer/ps3recomp.git
+	branch = haze
