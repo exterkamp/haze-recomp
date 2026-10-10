@@ -5,7 +5,8 @@ analysis/
 generated/
 build/
 .venv/
-external/
+external/*
+!external/ps3recomp/
 __pycache__/
 *.log
 

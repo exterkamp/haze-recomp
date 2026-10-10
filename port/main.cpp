@@ -62,6 +62,10 @@ void     ppu_hle_init(void);                  /* firmware import NID -> HLE hand
 void     ppu_sysprx_register(void);           /* boot-critical CRT (sys_initialize_tls, ...) */
 void     ppu_fs_register(void);               /* cellFs over the real game directory */
 void     lv2_init_syscalls(void);             /* the lv2 syscall table */
+void     cellGame_init_from_paramsfo(const char* path);
+void     ppu_report_guest_lrs(void);
+extern uint32_t g_last_hle_nid;
+extern const char* g_last_hle_name;
 int      ppu_run(uint32_t entry_opd, uint32_t stack_top);
 
 /* This project's own: load whatever real system PRX modules the title needs
@@ -304,6 +308,28 @@ static bool alloc_guest_vm(void)
 /* ---------------------------------------------------------------------------
  * Main
  * -----------------------------------------------------------------------*/
+#ifdef _WIN32
+static LONG WINAPI haze_crash_filter(EXCEPTION_POINTERS* ep)
+{
+    fprintf(stderr, "[haze-crash] exception=0x%08lX address=%p last-hle=0x%08X (%s)\n",
+            ep->ExceptionRecord->ExceptionCode, ep->ExceptionRecord->ExceptionAddress,
+            g_last_hle_nid, g_last_hle_name ? g_last_hle_name : "");
+    ppu_report_guest_lrs();
+    fflush(stderr);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static DWORD WINAPI haze_boot_reporter(LPVOID)
+{
+    for (;;) {
+        Sleep(5000);
+        fprintf(stderr, "[haze-boot] last-hle=0x%08X (%s)\n",
+                g_last_hle_nid, g_last_hle_name ? g_last_hle_name : "");
+        ppu_report_guest_lrs();
+    }
+}
+#endif
+
 static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
                                  uint64_t a2, uint64_t a3, uint64_t a4,
                                  uint64_t a5, uint64_t a6, uint64_t a7)
@@ -325,6 +351,8 @@ int main(int argc, char** argv)
      * thing. POSIX timers are already fine-grained. */
     timeBeginPeriod(1);
     setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: do not lose prints on a kill */
+    setvbuf(stderr, NULL, _IONBF, 0);
+    SetUnhandledExceptionFilter(haze_crash_filter);
 #endif
 
     printf("=== ps3recomp game runner ===\n");
@@ -342,6 +370,9 @@ int main(int argc, char** argv)
 
     derive_vfs_root(argv[1]);
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
+    char sfo_path[1200];
+    snprintf(sfo_path, sizeof sfo_path, "%s/PS3_GAME/PARAM.SFO", ppu_vfs_root);
+    cellGame_init_from_paramsfo(sfo_path);
 
     ppu_recomp_register();   /* lifted function table -> address map */
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
@@ -354,6 +385,12 @@ int main(int argc, char** argv)
      * until the title registers its vblank and flip handlers during init. */
     g_ps3_guest_caller = harness_guest_caller;
     CreateThread(NULL, 4u * 1024 * 1024, frame_clock, NULL, 0, NULL);
+#ifdef _WIN32
+    if (getenv("HAZE_BOOT_REPORT")) {
+        HANDLE reporter = CreateThread(NULL, 0, haze_boot_reporter, NULL, 0, NULL);
+        if (reporter) CloseHandle(reporter);
+    }
+#endif
 
     printf("\n[boot] dispatching entry OPD 0x%08X (stack top 0x%08X)\n\n",
            entry, STACK_TOP);

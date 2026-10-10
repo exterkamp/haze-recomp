@@ -11,7 +11,7 @@ application version **01.00**. Other regions and updates are not validated.
 
 | Feature | Status |
 | --- | --- |
-| Standalone native Windows executable | Source generation and build bring-up in progress |
+| Standalone native Windows executable | Builds and executes translated Haze code; boot remains incomplete |
 | Campaign gameplay, rendering, audio, saves | Not validated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Planned; requires game input integration |
@@ -38,6 +38,9 @@ The source ISO is never modified. No PS3 game or firmware files are in this repo
 ```powershell
 git submodule update --init --recursive
 
+# The supplied USA ISO is already readable at the disc level:
+.\scripts\extract.ps1 -Iso 'S:\PS3\Haze (USA) (En,Fr,Es).iso'
+
 # After supplying the game files:
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r external/ps3recomp/requirements.txt
@@ -59,6 +62,12 @@ python -m venv .venv
 
 .\scripts\build.ps1 -RuntimeOnly
 .\scripts\build.ps1
+
+# Synthetic SDK regression checks (no game execution):
+.\scripts\build.ps1 -RuntimeOnly -Test
+
+# Bounded native boot diagnostic; logs and BMP captures remain local:
+.\scripts\run.ps1 -Seconds 60 -CaptureFrames 4
 ```
 
 The scripts emit binary inventory, import coverage, loader information, and
@@ -80,6 +89,47 @@ behavioral compatibility test.
   need further work.
 - The upstream runtime compiled locally with Clang 20.1.8.
 
+## Verified local progress and current blockers
+
+The Windows executable is `build/haze/HazeRecomp.exe`. A 60-second native
+boot test creates PPU worker threads, starts lifted SPU tasks, reads the game
+archives, configures GCM display buffers, and submits D3D12 draw calls. The
+first captured frame is black. No menu, campaign, or co-op session has been
+validated; a diagnostic timeout is not a successful gameplay test.
+
+The SDK fork on its `haze` branch includes the executable-segment fix, Windows
+DXGI GUID linkage, a read-only `cellSpursQueueSize` implementation, corrected
+game-data callback structure layout and first-run directory status, and a fix
+that makes the existing unresolved-import error policy take effect. The
+synthetic segment, queue, and callback checks pass. Fixing the callback removed
+the corrupt-game-data dialog in the subsequent local boot test; this does not
+establish a working installation or save system.
+
+An immediate obstacle is SPURS queue interoperability: upstream's default
+`cellSpursQueuePushBody` reports success without enqueueing, while its opt-in
+implementation is explicitly experimental. The translated SPU worker spins
+on the input queue and the PPU polls the completion queue. Queue push/pop,
+atomic synchronization, waiter signaling, and asset completion need validation
+together. Missing imports observed during boot include `cellSpursGetSpuThreadId`
+and `cellPadInfoSensorMode`. SPU overlays and graphics correctness also remain
+open.
+
+A separate 60-second probe with upstream's experimental queue push enabled
+submitted two elements and observed the SPU advance its input index. It still
+produced only a black captured frame and did not reach a menu. That probe
+does not validate the queue protocol or establish the sole cause of the stall.
+
+Haze's executable contains Demonware lobby references and Ubisoft auth/STUN
+hostnames. Peer-to-peer co-op will require tracing that game-specific session
+path and replacing service dependencies where necessary. Adding a generic
+socket transport by itself does not connect Haze's campaign state machines.
+
+`scripts/run.ps1` returns errors for unregistered firmware imports and writes
+`local/boot-result.json`, stdout/stderr logs, and milestone counts. Optional
+frame captures go to `local/frames`. It terminates the process after the chosen
+timeout; `gameplay_validated` remains false. Boot stack reports are best-effort
+diagnostics. The runner does not enable the experimental queue implementation.
+
 ## Development order
 
 1. Resolve build, SPU segment selection, and executable boot failures.
@@ -92,3 +142,6 @@ behavioral compatibility test.
 
 The SDK and port have separate histories. Commit and push source milestones;
 never publish decrypted binaries or generated game translations.
+
+The port scaffold derives from ps3recomp's MIT-licensed project template;
+the original license and attribution are retained in [LICENSE](LICENSE).

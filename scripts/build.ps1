@@ -1,5 +1,6 @@
 param(
     [switch]$RuntimeOnly,
+    [switch]$Test,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
     [int]$Jobs = 8
 )
@@ -39,4 +40,20 @@ $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr wa
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
+if ($Test) {
+    & $python "$sdk/tools/test_spu_text_selection.py"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
+    $queueTest = Join-Path $root 'local/test_queue_size.exe'
+    New-Item -ItemType Directory -Path (Split-Path $queueTest -Parent) -Force | Out-Null
+    & $clang /nologo /W0 "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$queueTest" "/Fo$root/local/test_queue_size.obj" "$sdk/libs/spurs/tests/test_queue_size.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPURS queue query test compilation failed.' }
+    & $queueTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPURS queue query contract test failed.' }
+    $gameDataTest = Join-Path $root 'local/test_gamedata_callback.exe'
+    & $clang /nologo /W0 "/I$sdk/include" "/Fe$gameDataTest" "/Fo$root/local/test_gamedata_callback.obj" "$sdk/libs/system/tests/test_gamedata_callback.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Game-data callback test compilation failed.' }
+    & $gameDataTest
+    if ($LASTEXITCODE -ne 0) { throw 'Game-data callback ABI test failed.' }
+    Write-Output 'SPU segment selection, SPURS queue query, and game-data callback tests passed.'
+}
 
