@@ -1,0 +1,11 @@
+# Local game data, keys, generated translations, and build products
+game/
+local/
+analysis/
+generated/
+build/
+.venv/
+external/
+__pycache__/
+*.log
+
