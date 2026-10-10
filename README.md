@@ -36,7 +36,9 @@ build outputs stay local and are excluded from Git. Supply your own game files.
 The source ISO is never modified. No PS3 game or firmware files are in this repo.
 
 ```powershell
-# After checking out the pinned SDK and supplying the game files:
+git submodule update --init --recursive
+
+# After supplying the game files:
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r external/ps3recomp/requirements.txt
 
@@ -72,8 +74,10 @@ behavioral compatibility test.
 - 216 firmware imports across 14 libraries.
 - 44 embedded SPU ELF images; several produce unsupported `.word` warnings.
 - SPU image at ELF offset `0x00d15f80` has multiple executable segments and
-  overlays. Upstream initially selected a 16-byte segment at `0x3000` and
-  missed the actual entry at `0x200f0`. Overlay execution needs further work.
+  overlays. The fork now selects the segment containing entry `0x200f0`,
+  fixing the missing entry symbol. Seven synthetic regression cases pass.
+  Overlay execution and unsupported instruction/data classification still
+  need further work.
 - The upstream runtime compiled locally with Clang 20.1.8.
 
 ## Development order
