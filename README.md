@@ -158,6 +158,12 @@ The current native trace reaches a later physics dispatch with an empty object
 and a null handler; first-mission loading still stalls. This is not a playable
 campaign milestone.
 
+The SPU instruction tracer now reports the actual destination of four-operand
+instructions, including shuffle and select operations. A regression checks all
+six encodings. A corrected campaign trace follows the empty object to a DMA
+list whose source is `0x80`; the physics allocator returns that invalid address
+before the list is built. The allocation path remains under investigation.
+
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
 waiters. A taskset scheduler scans for children created by persistent SPU
