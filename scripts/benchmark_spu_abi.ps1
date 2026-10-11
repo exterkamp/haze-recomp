@@ -1,4 +1,5 @@
 # Isolated first-use ABI benchmark; no game assets or native gameplay required.
+param([switch]$Heap)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -18,5 +19,5 @@ $output = Join-Path $root 'local/benchmark_spu_abi.exe'
 New-Item -ItemType Directory -Path (Join-Path $root 'local') -Force | Out-Null
 & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/runtime/spu" "/I$sdk/include" "/Fe$output" "/Fo$root/local/benchmark_spu_abi.obj" "$root/tests/benchmark_spu_abi.c"
 if ($LASTEXITCODE -ne 0) { throw 'ABI benchmark compilation failed.' }
-& $output
+if ($Heap) { & $output heap } else { & $output }
 if ($LASTEXITCODE -ne 0) { throw 'ABI benchmark failed.' }

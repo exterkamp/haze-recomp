@@ -43,6 +43,16 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    $coherencyTest = Join-Path $root 'local/test_coherency_lifetime.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$coherencyTest" "/Fo$root/local/" "$sdk/runtime/spu/tests/test_coherency_lifetime.c" "$sdk/runtime/spu/spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime test compilation failed.' }
+    & $coherencyTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime/holder-capacity test failed.' }
+    $abiStorageTest = Join-Path $root 'local/test_abi_storage.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$abiStorageTest" "/Fo$root/local/test_abi_storage.obj" "$sdk/runtime/spu/tests/test_abi_storage.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU ABI storage test compilation failed.' }
+    & $abiStorageTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU ABI storage semantics test failed.' }
     $depthTest = Join-Path $root 'local/test_depth_history.exe'
     & $clang /nologo /W0 /O2 /Gy /Gw "/I$sdk/include" "/Fe$depthTest" "/Fo$root/local/test_depth_history.obj" "$sdk/runtime/spu/tests/test_depth_history.c" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'SPU private-history test compilation failed.' }

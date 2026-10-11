@@ -132,8 +132,13 @@ frame ranges, CPU stages and rejected defaults. Bulk reference construction
 reduced its sampled cost from about 3.3 to 1.5 ms; direct dense remapping saved
 several tenths more. Both now run normally. The FIFO consumer also preserves
 synchronized callback ownership before callback entry, repairing a reproduced
-wrap race. Warmed gameplay comparisons still measured roughly 17–19 FPS with
-uneven pacing. Alternative texture hashing and timer waiting remain diagnostic
+wrap race. The subsequent [SPU storage comparison](docs/performance-spu-storage-2026-10-11.md)
+found repeatable gains from avoiding large per-job stack growth: heap blocks
+measured 20.25–21.36 FPS against 18.72–19.64 FPS for stack storage, with lower
+CPU use and p95 frame times. Heap contexts are now the Windows default. The
+experiment also exposed and fixed duplicate reservation-holder registrations
+that could leave dangling pointers after cleanup. The 30 FPS goal and consistent
+pacing remain open. Alternative texture hashing and timer waiting remain diagnostic
 options; private SPU diagnostic history fixes a race without a demonstrated FPS
 gain. **The 30 FPS target remains open.**
 

@@ -406,6 +406,16 @@ static bool alloc_guest_vm(void)
 #ifdef _WIN32
 static LONG WINAPI haze_crash_filter(EXCEPTION_POINTERS* ep)
 {
+    const uintptr_t module_base=(uintptr_t)GetModuleHandleW(nullptr);
+    fprintf(stderr,"[haze-crash-context] tid=%lu module_base=%p rip_offset=0x%llX rsp=%p rcx=%p rdx=%p r8=%p r9=%p\n",
+        GetCurrentThreadId(),(void*)module_base,
+        (unsigned long long)(ep->ContextRecord->Rip-module_base),
+        (void*)ep->ContextRecord->Rsp,(void*)ep->ContextRecord->Rcx,
+        (void*)ep->ContextRecord->Rdx,(void*)ep->ContextRecord->R8,(void*)ep->ContextRecord->R9);
+    if (ep->ExceptionRecord->NumberParameters>=2)
+        fprintf(stderr,"[haze-crash-access] operation=%llu address=%p\n",
+            (unsigned long long)ep->ExceptionRecord->ExceptionInformation[0],
+            (void*)ep->ExceptionRecord->ExceptionInformation[1]);
     fprintf(stderr, "[haze-crash] exception=0x%08lX address=%p last-hle=0x%08X (%s)\n",
             ep->ExceptionRecord->ExceptionCode, ep->ExceptionRecord->ExceptionAddress,
             g_last_hle_nid, g_last_hle_name ? g_last_hle_name : "");

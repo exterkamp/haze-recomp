@@ -15,6 +15,7 @@ int spu_run_with_halt(void (*entry)(spu_context*),spu_context* ctx) {
     entry(ctx); return 0;
 }
 static volatile unsigned checksum;
+static int heap_mode;
 static void entry(spu_context* ctx) { checksum += ctx->gpr[1]._u32[0]; }
 
 typedef struct Sample { uint64_t outside[2], inside[2]; } Sample;
@@ -23,20 +24,25 @@ typedef struct Sample { uint64_t outside[2], inside[2]; } Sample;
 __declspec(noinline) static int run_abi(spu_abi_profile* profile) {
     return spu_run_lifted_job_abi_profiled(entry,NULL,0,40,1,NULL,NULL,profile);
 }
+__declspec(noinline) static int run_heap_abi(spu_abi_profile* profile) {
+    return spu_run_lifted_job_abi_heap(entry,NULL,0,40,1,NULL,NULL,profile);
+}
 static DWORD WINAPI worker(void* arg) {
     Sample* s=(Sample*)arg;
     ULONG guarantee=256*1024; SetThreadStackGuarantee(&guarantee);
     for (unsigned i=0;i<2;i++) {
         ULONG64 begin=0,end=0; spu_abi_profile profile={0};
         QueryThreadCycleTime(GetCurrentThread(),&begin);
-        assert(run_abi(&profile)==0);
+        assert((heap_mode ? run_heap_abi(&profile) : run_abi(&profile))==0);
         QueryThreadCycleTime(GetCurrentThread(),&end);
         s->outside[i]=end-begin;
         s->inside[i]=profile.prepare_cycles+profile.execute_cycles+profile.finish_cycles;
     }
     return 0;
 }
-int main(void) {
+int main(int argc, char** argv) {
+    heap_mode = argc > 1 && !strcmp(argv[1], "heap");
+    printf("storage=%s\n", heap_mode ? "heap" : "stack");
     const unsigned count=1000;
     uint64_t outside[2]={0},inside[2]={0};
     for (unsigned n=0;n<count;n++) {

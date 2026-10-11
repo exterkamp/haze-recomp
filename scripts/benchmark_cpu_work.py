@@ -7,6 +7,7 @@ sleep backend if PS3_USLEEP_MODE_FILE points to this same control file.
 Bit 16 selects private SPU history if SPU_DEPTH_RING_FILE points to it too;
 without that diagnostic control, the corrected private history is always used.
 Zero selects the previous paths.
+Bit 32 selects heap SPU contexts if SPU_EXECUTION_MODE_FILE uses the same file.
 The runner stays muted. Compare individual stage costs as well as FPS: guest
 work and NPC activity can drift even when the camera remains stationary.
 """
@@ -16,6 +17,29 @@ import io
 import json
 from pathlib import Path
 import time
+
+
+def process_clock(pid):
+    """Return a read-only CPU clock; its window includes warmup and propagation."""
+    import ctypes as c
+    from ctypes import wintypes as w
+    k=c.WinDLL('kernel32',use_last_error=True)
+    k.OpenProcess.argtypes=[w.DWORD,w.BOOL,w.DWORD]; k.OpenProcess.restype=w.HANDLE
+    k.GetProcessTimes.argtypes=[w.HANDLE,c.c_void_p,c.c_void_p,c.c_void_p,c.c_void_p]
+    k.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,c.POINTER(w.DWORD)]
+    k.CloseHandle.argtypes=[w.HANDLE]
+    handle=k.OpenProcess(0x1000,False,pid)
+    if not handle: raise c.WinError(c.get_last_error())
+    path=c.create_unicode_buffer(32768); length=w.DWORD(len(path))
+    if not k.QueryFullProcessImageNameW(handle,0,path,c.byref(length)) or Path(path.value).name.lower()!='hazerecomp.exe':
+        k.CloseHandle(handle); raise RuntimeError('PID must identify HazeRecomp.exe')
+    def clock():
+        created,exited,kernel,user=[c.c_ulonglong() for _ in range(4)]
+        if not k.GetProcessTimes(handle,c.byref(created),c.byref(exited),c.byref(kernel),c.byref(user)):
+            raise c.WinError(c.get_last_error())
+        if exited.value: raise RuntimeError('Owned benchmark process has exited')
+        return (kernel.value+user.value)/10000
+    return clock,lambda:k.CloseHandle(handle)
 
 
 def tail_rows(path):
@@ -51,18 +75,23 @@ def main():
     p.add_argument('--warmup', type=int, default=80)
     p.add_argument('--frames', type=int, default=180)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--pid',type=int,help='Optional native process CPU accounting, including warmup/propagation.')
     a = p.parse_args()
-    if any(f < 0 or f > 31 for f in a.flags) or a.frames < 60 or a.warmup < 60:
-        p.error('Flags must be 0..31; use at least 60 warmup and measured frames.')
+    if any(f < 0 or f > 63 for f in a.flags) or a.frames < 60 or a.warmup < 60:
+        p.error('Flags must be 0..63; use at least 60 warmup and measured frames.')
     blocks = []
+    cpu_clock,close_clock=process_clock(a.pid) if a.pid else (None,None)
     try:
         for flags in a.flags:
             rows = tail_rows(a.csv)
             previous = int(rows[-1]['frame'])
+            cpu_begin=cpu_clock() if cpu_clock else None
+            wall_begin=time.perf_counter()
             a.control.write_text(f'{flags}\n')
             first = None
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
+                if cpu_clock: cpu_clock()  # Detect an exited process before waiting out the block.
                 rows = tail_rows(a.csv)
                 matched = [r for r in rows if r['frame'] > previous
                            and r['cpu_work'] == flags]
@@ -76,6 +105,12 @@ def main():
                         raise RuntimeError('Block does not match the verified gameplay workload.')
                     block = dict(flags=flags, first_frame=first, last_frame=first+a.frames-1,
                                  frames=a.frames, fps=1000/(sum(r['dt_ms'] for r in selected)/len(selected)))
+                    if cpu_clock:
+                        wall=time.perf_counter()-wall_begin
+                        cpu_ms=cpu_clock()-cpu_begin
+                        block['process_cpu_window']=dict(cpu_ms=cpu_ms,wall_s=wall,
+                            mean_cores=cpu_ms/1000/wall,
+                            note='Includes mode propagation and warmup; distinct from measured frame bounds.')
                     blocks.append(block)
                     a.output.write_text(json.dumps(dict(blocks=blocks, note=__doc__),indent=2))
                     print(json.dumps(block), flush=True)
@@ -84,6 +119,7 @@ def main():
             else:
                 raise TimeoutError(f'Variant {flags} did not finish in 180 seconds')
     finally:
+        if close_clock: close_clock()
         a.control.write_text('0\n')
 
 
