@@ -3,6 +3,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <cassert>
+#include <string>
 static bool focused=true;
 static bool keys[256];
 static ULONGLONG ticks=100;
@@ -10,12 +11,21 @@ static SHORT test_key(int vk) { return keys[vk] ? (SHORT)0x8000 : 0; }
 static HWND test_foreground() { return focused ? (HWND)1 : nullptr; }
 static DWORD test_owner(HWND hwnd,DWORD* pid) { *pid=hwnd ? GetCurrentProcessId() : 0; return 1; }
 static ULONGLONG test_time() { ticks+=8; return ticks; }
+static UINT forwarded_message;
+static std::string forwarded_caption;
+static LRESULT test_window_proc(WNDPROC,HWND,UINT msg,WPARAM,LPARAM lp) {
+    forwarded_message=msg;
+    if (msg==WM_SETTEXT) forwarded_caption=(const char*)lp;
+    return 0;
+}
 #define GetAsyncKeyState test_key
 #define GetForegroundWindow test_foreground
 #define GetWindowThreadProcessId test_owner
 #define GetTickCount64 test_time
+#define CallWindowProc test_window_proc
 #include "../port/haze_input.cpp"
 extern "C" void cellPad_set_host_input_callback(CellPadHostInputCallback,void*) {}
+extern "C" void cellSail_set_host_playback_callback(CellSailHostPlaybackCallback,void*) {}
 static CellPadHostInput sample() {
     CellPadHostInput input{0,128,128,128,128,0,0};
     assert(poll(0,&input,nullptr)==1);
@@ -47,5 +57,57 @@ int main() {
     assert(sample().ry<128);
     assert(mouse_axis(LONG_MAX,8)==255 && mouse_axis(LONG_MIN,8)==1);
     CellPadHostInput other{}; assert(poll(1,&other,nullptr)==0);
-    puts("Haze keyboard mapping, raw-mouse consumption, focus release and capture gating checks passed.");
+    captured=0; invert_y=false;
+    // A quick tap between pad polls survives repeated reads for 120ms.
+    window_proc(window,WM_KEYDOWN,VK_SPACE,0);
+    window_proc(window,WM_KEYUP,VK_SPACE,0);
+    assert(sample().buttons&CELL_PAD_CTRL_CROSS);
+    assert(sample().buttons&CELL_PAD_CTRL_CROSS);
+    ticks+=121;
+    assert(!(sample().buttons&CELL_PAD_CTRL_CROSS));
+    window_proc(window,WM_KEYDOWN,'W',0);
+    window_proc(window,WM_KILLFOCUS,0,0);
+    assert(sample().ly==128); // Focus loss cannot leave a held message key.
+    forwarded_message=0;
+    window_proc(window,WM_KEYDOWN,VK_ESCAPE,0);
+    assert(forwarded_message==0 && (sample().buttons&CELL_PAD_CTRL_START));
+    window_proc(window,WM_KEYUP,VK_ESCAPE,0); ticks+=121;
+    assert(!(sample().buttons&CELL_PAD_CTRL_START));
+    window_proc(window,WM_SETTEXT,0,(LPARAM)"Haze | FPS: 30.00");
+    assert(forwarded_caption.find("FPS: 30.00")!=std::string::npos &&
+           forwarded_caption.find("Space: Confirm")!=std::string::npos);
+    keys[VK_LBUTTON]=true; captured=1; capture_click=true;
+    assert(!(sample().buttons&CELL_PAD_CTRL_R1));
+    capture_click=false;
+    assert(sample().buttons&CELL_PAD_CTRL_R1);
+    memset(keys,0,sizeof(keys)); captured=0;
+    invert_y=true; captured=1; mouse_y=LONG_MIN;
+    assert(sample().ry==255);
+    captured=0; invert_y=false;
+    // Lifecycle-bounded skip survives unfocused boot, then cannot confirm a menu.
+    const char* uri="x-cell-fs:///dev_bdvd/PS3_GAME/USRDIR/assets/g5/pamf/frd.pam";
+    assert(startup_skip.playback(123,uri,true,ticks));
+    focused=false; ticks+=400;
+    assert(sample().buttons&CELL_PAD_CTRL_CROSS);
+    startup_skip.playback(123,uri,false,ticks);
+    assert(!sample().buttons);
+    enabled=false;
+    CellPadHostInput controller{0,128,128,128,128,0,0};
+    assert(poll(0,&controller,nullptr)==0); // XInput owns normal controller mode.
+    startup_skip.playback(123,uri,true,ticks); ticks+=400;
+    assert(poll(0,&controller,nullptr)==1 && (controller.buttons&CELL_PAD_CTRL_CROSS));
+    startup_skip.playback(123,uri,false,ticks);
+    assert(poll(0,&controller,nullptr)==0);
+    HazeStartupSkip isolated; bool pressed=true;
+    assert(!HazeStartupSkip::known_video(nullptr));
+    assert(!HazeStartupSkip::known_video("frd.pam"));
+    assert(!HazeStartupSkip::known_video("x-cell-fs:///dev_bdvd/PS3_GAME/USRDIR/assets/g5/pamf/story.pam"));
+    assert(isolated.playback(123,uri,true,100));
+    assert(isolated.sample(399,pressed) && !pressed);
+    assert(isolated.sample(400,pressed) && pressed);
+    assert(isolated.sample(800,pressed) && !pressed);
+    isolated.playback(456,uri,false,900); // An unrelated player cannot cancel it.
+    assert(isolated.sample(1100,pressed) && pressed);
+    assert(!isolated.sample(10100,pressed) && !pressed); // Bounded failure path.
+    puts("Haze keyboard taps, focus release, mouse capture gating and movie skip isolation passed.");
 }

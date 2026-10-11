@@ -85,12 +85,23 @@ behavioral compatibility test.
 
 PC input is configured in `config/input.ini`. WASD moves; arrows navigate;
 Space confirms/skips; Enter starts; Escape pauses and releases the mouse.
-F1 toggles raw mouse capture. All sixteen controller buttons have configurable
+Click inside the game or press F1 to capture the raw mouse; F1 also releases it.
+The initial capture click does not fire. Short keyboard taps are buffered for
+120 ms so they survive slow frames. All sixteen controller buttons have configurable
 keyboard/mouse bindings. Mouse buttons affect the game only while captured,
 and focus loss releases capture and neutralizes keyboard/mouse input. This is
 an initial mapping through the game's pad input, not direct mouse aiming;
 the game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
 configuration file. Closing the game window now ends its native process.
+
+The Ubisoft, Free Radical and menu attract videos currently have no decoder.
+The port automatically presses the game's skip button while those exact streams
+are active, then cancels it when the player stops/closes. This fixes the black
+screen after the logos without requiring manual skip presses or diagnostic
+input files. Story videos are excluded. A fresh native launch reached the
+rendered Press Start screen without any injected diagnostic input; Enter is
+still required to start. Skip retries stop after ten seconds if the title does
+not respond. Decoded movie playback remains unimplemented.
 
 ## Initial findings
 

@@ -4,6 +4,8 @@
 #define NOMINMAX
 #include <windows.h>
 #include "cellPad.h"
+#include "../external/ps3recomp/libs/codec/cellSail.h"
+#include "haze_startup.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +23,10 @@ bool enabled = true;
 double sensitivity = 0.20;
 int deadzone = 24;
 bool invert_y;
+HazeStartupSkip startup_skip;
+std::atomic<bool> message_keys[256];
+std::atomic<ULONGLONG> key_until[256];
+std::atomic<bool> capture_click;
 struct Binding { const char* name; const char* fallback; u16 button; int vk; };
 Binding bindings[] = {
     {"Cross", "Space", CELL_PAD_CTRL_CROSS},
@@ -48,7 +54,23 @@ int key_code(const char* name) {
     fprintf(stderr,"[input] Unknown key '%s'; binding disabled\n",name);
     return 0;
 }
-bool down(int vk) { return vk && (GetAsyncKeyState(vk) & 0x8000); }
+bool down(int vk, ULONGLONG now) {
+    return vk > 0 && vk < 256 && ((GetAsyncKeyState(vk) & 0x8000) ||
+        message_keys[vk].load() || now < key_until[vk].load());
+}
+void clear_keys() {
+    for (int i=0;i<256;i++) { message_keys[i]=false; key_until[i]=0; }
+    capture_click=false;
+}
+void record_key(int vk, bool held, ULONGLONG now) {
+    if (vk <= 0 || vk >= 256 || vk == VK_F1) return;
+    if (held && !message_keys[vk].exchange(true)) key_until[vk]=now+120;
+    if (!held) message_keys[vk]=false;
+}
+void update_title() {
+    SetWindowTextA(window, captured ? "Haze | Mouse captured | Esc: Pause | F1: Release mouse"
+        : "Haze | Space: Confirm | Enter: Start | Click/F1: Capture mouse | Esc: Pause");
+}
 void clip_cursor() {
     RECT rect;
     GetClientRect(window,&rect);
@@ -58,6 +80,7 @@ void clip_cursor() {
 void capture(bool on) {
     if (on == (InterlockedCompareExchange(&captured,0,0) != 0)) return;
     if (on && GetForegroundWindow() != window) return;
+    InterlockedExchange(&captured,on ? 1 : 0);
     InterlockedExchange(&mouse_x,0); InterlockedExchange(&mouse_y,0);
     InterlockedExchange(&wheel,0);
     if (on) {
@@ -70,17 +93,42 @@ void capture(bool on) {
         while (ShowCursor(TRUE) < 0) {}
         if (GetForegroundWindow() == window) SetCursorPos(old_cursor.x,old_cursor.y);
     }
-    InterlockedExchange(&captured,on ? 1 : 0);
+    update_title();
     fprintf(stderr,"[input] Mouse %s (F1 toggles capture)\n",on ? "captured" : "released");
 }
 LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_SETTEXT:
+        if (lp && std::strstr((const char*)lp," | FPS:")) {
+            char caption[512];
+            snprintf(caption,sizeof(caption),"%s | %s",(const char*)lp,
+                captured ? "Esc: Pause | F1: Release mouse"
+                         : "Space: Confirm | Enter: Start | Click/F1: Mouse | Esc: Pause");
+            return CallWindowProc(original_proc,hwnd,msg,wp,(LPARAM)caption);
+        }
+        break;
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        record_key((int)wp,true,GetTickCount64());
         if (wp == VK_F1) { if (!(lp & (1ll<<30))) capture(!captured); return 0; }
         if (wp == VK_ESCAPE) { capture(false); return 0; } // Pause, rather than SDK's quit.
         break;
+    case WM_KEYUP: case WM_SYSKEYUP:
+        record_key((int)wp,false,GetTickCount64()); break;
+    case WM_LBUTTONDOWN:
+        if (!captured && GetForegroundWindow() == hwnd) {
+            capture_click=true;
+            capture(true);
+            return 0; // The click that captures must not fire the weapon.
+        }
+        break;
+    case WM_LBUTTONUP:
+        capture_click=false; break;
     case WM_KILLFOCUS: case WM_CLOSE: case WM_DESTROY:
-        capture(false); break;
+        clear_keys(); capture(false); break;
+    case WM_CAPTURECHANGED:
+        if (captured && (HWND)lp != hwnd) capture(false);
+        break;
     case WM_MOVE: case WM_SIZE:
         if (captured) clip_cursor(); break;
     case WM_SETCURSOR:
@@ -102,7 +150,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     return CallWindowProc(original_proc,hwnd,msg,wp,lp);
 }
-u8 mouse_axis(LONG delta, double ms) {
+u8 mouse_axis(double delta, double ms) {
     if (!delta) return 128;
     double amount = std::min(127.0,deadzone + std::abs((double)delta)*1000.0*sensitivity/ms);
     return (u8)std::clamp(128 + (delta < 0 ? -(int)amount : (int)amount),0,255);
@@ -112,34 +160,47 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     static std::atomic<ULONGLONG> previous;
     ULONGLONG now = GetTickCount64();
     double elapsed = (double)std::clamp<ULONGLONG>(now-previous.exchange(now),1,50);
+    bool skip_pressed;
+    bool skipping=startup_skip.sample(now,skip_pressed);
+    if (skip_pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
+    if (!enabled) return skipping ? 1 : 0;
     HWND foreground=GetForegroundWindow();
     if (!foreground || foreground != window.load()) {
         InterlockedExchange(&mouse_x,0); InterlockedExchange(&mouse_y,0);
         InterlockedExchange(&wheel,0);
+        clear_keys();
         return 1; // All controls neutral immediately on focus loss.
     }
     for (const auto& b : bindings) {
         if (b.vk >= VK_LBUTTON && b.vk <= VK_XBUTTON2 && !captured) continue;
-        if (down(b.vk)) input->buttons |= b.button;
+        if (b.vk == VK_LBUTTON && capture_click) continue;
+        if (down(b.vk,now)) input->buttons |= b.button;
     }
     // Escape always pauses and releases mouse capture, even with Start rebound.
-    if (down(VK_ESCAPE)) input->buttons |= CELL_PAD_CTRL_START;
-    input->lx = (u8)(128 + 127*((int)down(movement[3])-(int)down(movement[2])));
-    input->ly = (u8)(128 + 127*((int)down(movement[1])-(int)down(movement[0])));
+    if (down(VK_ESCAPE,now)) input->buttons |= CELL_PAD_CTRL_START;
+    input->lx = (u8)(128 + 127*((int)down(movement[3],now)-(int)down(movement[2],now)));
+    input->ly = (u8)(128 + 127*((int)down(movement[1],now)-(int)down(movement[0],now)));
     if (captured) {
         input->rx=mouse_axis(InterlockedExchange(&mouse_x,0),elapsed);
         LONG dy=InterlockedExchange(&mouse_y,0);
-        input->ry=mouse_axis(invert_y ? -dy : dy,elapsed);
+        // Negate in a wider type: LONG_MIN is valid raw input, not signed UB.
+        input->ry=mouse_axis(invert_y ? -(double)dy : (double)dy,elapsed);
         if (InterlockedExchange(&wheel,0)) input->buttons |= CELL_PAD_CTRL_CIRCLE;
     }
     input->l2=(input->buttons & CELL_PAD_CTRL_L2) ? 255 : 0;
     input->r2=(input->buttons & CELL_PAD_CTRL_R2) ? 255 : 0;
     return 1;
 }
+void playback(u32 player, const char* uri, int started, void*) {
+    if (startup_skip.playback(player,uri,started!=0,GetTickCount64()))
+        fprintf(stderr,"[startup] Skipping undecoded startup video: %s\n",uri);
+}
 }
 void haze_input_initialize() {
     const char* mode=getenv("HAZE_INPUT");
     enabled=!(mode && !_stricmp(mode,"controller"));
+    cellSail_set_host_playback_callback(playback,nullptr);
+    cellPad_set_host_input_callback(poll,nullptr);
     if (!enabled) return;
     const char* config=getenv("HAZE_INPUT_CONFIG");
     char path[MAX_PATH]{};
@@ -162,8 +223,7 @@ void haze_input_initialize() {
     if (std::isfinite(requested) && requested > 0 && requested <= 10) sensitivity=requested;
     deadzone=(int)std::min(126u,GetPrivateProfileIntA("Mouse","StickDeadzone",24,path));
     invert_y=GetPrivateProfileIntA("Mouse","InvertY",0,path)!=0;
-    cellPad_set_host_input_callback(poll,nullptr);
-    fprintf(stderr,"[input] WASD keyboard profile enabled; F1 captures/releases raw mouse; Escape pauses\n");
+    fprintf(stderr,"[input] WASD keyboard profile enabled; click/F1 captures raw mouse; Escape pauses\n");
 }
 void haze_input_attach(void* hwnd) {
     if (!enabled || !hwnd) return;
@@ -174,6 +234,7 @@ void haze_input_attach(void* hwnd) {
     }
     original_proc=(WNDPROC)SetWindowLongPtr(window,GWLP_WNDPROC,(LONG_PTR)window_proc);
     if (!original_proc) fprintf(stderr,"[input] Window input hook failed: %lu\n",GetLastError());
+    update_title();
 }
 #else
 void haze_input_initialize() {}
