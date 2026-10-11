@@ -9,6 +9,8 @@ if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable fir
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The local decrypted Haze executable is missing.' }
 $session = Join-Path $root ('local\sessions\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $session -Force | Out-Null
+$shaderCache = Join-Path $root 'local\cache\rsx-shaders'
+New-Item -ItemType Directory -Path $shaderCache -Force | Out-Null
 $settings = @{
     PS3_VFS_ROOT = (Join-Path $root 'game\disc')
     PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $root 'local\tools\rpcs3\dev_flash' })
@@ -18,6 +20,7 @@ $settings = @{
     PS3_HLE_UNRESOLVED = 'fail'
     PS3_VERBOSE = '0'
     RSX_LIVE_DRAW = '1'
+    RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     HAZE_INPUT = $(if ($InputMode -eq 'Controller') { 'controller' } else { 'keyboard' })
     HAZE_INPUT_CONFIG = $(if ($env:HAZE_INPUT_CONFIG) { $env:HAZE_INPUT_CONFIG } else { Join-Path $root 'config\input.ini' })
 }

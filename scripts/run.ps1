@@ -14,6 +14,8 @@ if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable fir
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The decrypted Haze ELF is missing.' }
 $runDir = Join-Path $root ('local\runs\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
+$shaderCache = Join-Path $root 'local\cache\rsx-shaders'
+New-Item -ItemType Directory -Path $shaderCache -Force | Out-Null
 # This is a bounded diagnostic runner, not a claim of working gameplay.
 # Keep missing imports visible rather than relying on fabricated success.
 $settings = @{
@@ -28,6 +30,7 @@ $settings = @{
     HAZE_BOOT_REPORT = '1'
     PS3_VERBOSE = $(if ($null -ne $env:PS3_VERBOSE) { $env:PS3_VERBOSE } else { '0' })
     RSX_LIVE_DRAW = $(if ($Renderer -eq 'Live') { '1' } else { '0' })
+    RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     PS3_MILESTONE_OUT = (Join-Path $runDir 'boot-milestones.log')
     CELLMARK_DUMP = $(if ($CaptureFrames -gt 0) { [string]$CaptureFrames } else { $null })
     CELLMARK_DUMP_MINDRAWS = '1'

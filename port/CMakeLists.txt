@@ -181,12 +181,23 @@ add_executable(${PROJECT_NAME}
 #   -O2                 -- the target-wide -O1 exists for the huge PPU TUs; the
 #                          SPU sources are small and decode-hot, so they get
 #                          full optimization. The last -O on the line wins.
+option(HAZE_SPU_FMA "Use AVX/FMA3 for lifted SPU arithmetic (requires CPU support)" OFF)
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
     if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         set_source_files_properties(${SPU_SOURCES} PROPERTIES COMPILE_OPTIONS "-O2")
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|amd64|x86_64")
+            # The SDK's PRIVATE SSE4.1 flag never reached the lifted SPU TUs.
+            # Without this, their hot byte-shuffle helper uses a scalar loop.
+            set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY COMPILE_OPTIONS -msse4.1)
+            if(HAZE_SPU_FMA)
+                # Preserve fused rounding; do not enable fast-math or reassociation.
+                set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY COMPILE_OPTIONS -mavx -mfma)
+                set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_DEFINITIONS HAZE_REQUIRE_FMA)
+            endif()
+        endif()
     endif()
 endif()
 

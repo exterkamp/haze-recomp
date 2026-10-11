@@ -51,6 +51,9 @@
  * there is nothing to shim: the 15.6 ms default timer granularity this works
  * around is a Windows problem. */
 #include <timeapi.h>
+#ifdef HAZE_REQUIRE_FMA
+#include <intrin.h>
+#endif
 #endif
 
 /* ---------------------------------------------------------------------------
@@ -206,6 +209,7 @@ static int pump_messages(void)
 }
 
 static volatile LONG g_frames_presented = 0;
+static unsigned g_fifo_drains = 0;
 
 /* Frames handed to the backend at a guest FLIP boundary -- one per frame the
  * guest actually finished. The presents made before the guest's first flip, so
@@ -225,8 +229,8 @@ static void present_guest_frame(void)
         if (flip == previous_flip) ++duplicates;
         previous_flip = flip;
         if ((++presents & 127) == 0)
-            fprintf(stderr, "[frame-pump] presents=%u flips=%u duplicate=%u\n",
-                    presents, flip, duplicates);
+            fprintf(stderr, "[frame-pump] presents=%u flips=%u duplicate=%u drains=%u\n",
+                    presents, flip, duplicates, g_fifo_drains);
     }
     present_frame();
     /* This thread increments and guest threads read, so interlocked rather
@@ -238,6 +242,7 @@ static void present_guest_frame(void)
 
 static void drain_and_present(void)
 {
+    ++g_fifo_drains;
     haze_drain_frames(cellGcm_rsx_process_fifo, cellGcm_take_flip_pending,
                       present_guest_frame);
 }
@@ -270,7 +275,10 @@ static DWORD WINAPI frame_clock(LPVOID)
     ULONGLONG next_tick = GetTickCount64();
 
     for (;;) {
-        cellGcm_fifo_kick_wait(4);
+        /* Haze also waits on RSX labels, which do not signal the REF kick.
+         * Keep those render-pass dependencies responsive instead of adding
+         * a four-millisecond host delay to every producer/consumer round trip. */
+        cellGcm_fifo_kick_wait(1);
         ULONGLONG now = GetTickCount64();
 
         int fired = 0;
@@ -428,6 +436,15 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
 
 int main(int argc, char** argv)
 {
+#if defined(_WIN32) && defined(HAZE_REQUIRE_FMA)
+    int cpu[4];
+    __cpuid(cpu, 1);
+    if (!(cpu[2] & (1 << 12)) || !IsProcessorFeaturePresent(PF_AVX_INSTRUCTIONS_AVAILABLE)) {
+        fprintf(stderr, "This SPU build requires AVX/FMA3. Rebuild without -SpuFma for this CPU.\n");
+        return 2;
+    }
+    fprintf(stderr, "[boot] Lifted SPU SIMD: SSE4.1 + AVX/FMA3\n");
+#endif
     if (argc < 2) {
         printf("usage: %s <PPU ELF>\n", argv[0]);
         return 2;

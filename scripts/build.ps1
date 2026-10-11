@@ -2,6 +2,7 @@ param(
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
+    [switch]$SpuFma,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
     [int]$Jobs = 8
 )
@@ -37,11 +38,24 @@ if ($RuntimeOnly) {
     $build = Join-Path $root 'build\haze'
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)"
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    foreach ($primitive in @('test_spu_helpers', 'test_spu_shufb')) {
+        $primitiveTest = Join-Path $root "local/$primitive.exe"
+        & $clang /nologo /W0 /O1 /clang:-msse4.1 "/I$sdk/include" "/Fe$primitiveTest" "/Fo$root/local/$primitive.obj" "$sdk/runtime/spu/tests/$primitive.c"
+        if ($LASTEXITCODE -ne 0) { throw "SPU SIMD test compilation failed: $primitive" }
+        & $primitiveTest
+        if ($LASTEXITCODE -ne 0) { throw "SPU SIMD execution failed: $primitive" }
+    }
+    $fmaTest = Join-Path $root 'local/test_spu_fma.exe'
+    $fmaFlags = $(if ($SpuFma) { @('/clang:-mavx', '/clang:-mfma') } else { @() })
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 @fmaFlags "/I$sdk/include" "/Fe$fmaTest" "/Fo$root/local/test_spu_fma.obj" "$root/tests/test_spu_fma.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU fused arithmetic test compilation failed.' }
+    & $fmaTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU fused arithmetic differs from scalar reference.' }
     $frameTest = Join-Path $root 'local/test_frame_pump.exe'
     & $clang /nologo /W0 /O1 /std:c++20 "/Fe$frameTest" "/Fo$root/local/test_frame_pump.obj" "$root/tests/test_frame_pump.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Frame-pump test compilation failed.' }
@@ -146,6 +160,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Color clear test compilation failed.' }
     & $clearTest
     if ($LASTEXITCODE -ne 0) { throw 'D3D12 channel/scissor clear execution failed.' }
+    $textureTest = Join-Path $root 'local/test_live_textures.exe'
+    $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
+    & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
+    if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }
+    & $textureTest
+    if ($LASTEXITCODE -ne 0) { throw 'Live texture cache and D3D12 upload test failed.' }
     $saveTest = Join-Path $root 'local/test_savedata_persistence.exe'
     & $clang /nologo /W0 /O1 /Gy /Gw "/I$sdk/include" "/Fe$saveTest" "/Fo$root/local/test_savedata_persistence.obj" "$sdk/libs/system/tests/test_savedata_persistence.c" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Save persistence test compilation failed.' }

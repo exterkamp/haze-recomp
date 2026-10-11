@@ -16,7 +16,7 @@ application version **01.00**. Other regions and updates are not validated.
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
 | PC key prompts | Planned; requires UI/asset work |
-| Higher frame rates | Research after baseline gameplay works |
+| Higher frame rates | Duplicate presentations fixed; native simulation and frame pacing optimization in progress |
 | Ultrawide | Research after baseline rendering works; projection and HUD must both be addressed |
 
 The runtime building successfully does not establish that Haze works. Haze's
@@ -34,6 +34,39 @@ This fixes misleading telemetry and duplicate presentation; low simulation
 rates and remaining rendering artifacts still need work. Set
 `HAZE_FRAME_TRACE=1` for flip/present counts. `scripts/build.ps1 -ProfileRenderer`
 enables optional renderer timing counters; normal builds omit that overhead.
+
+The live renderer now handles Haze's `D8R8G8B8` texture format, preserves the
+128-byte spacing between complete cubemap mip pyramids, and includes mip count
+and dimension in texture-cache identity. The cache holds 4,096 descriptors and
+uses hashed lookups instead of scanning every entry at each binding. Asset-free
+WARP tests read back all six cube faces and opaque RGB texels through the actual
+uploader, and exercise cache collisions, replacement and mip-count differences.
+These repair specific rendering errors; they do not establish that all visible
+flicker, shadows or other graphical artifacts are resolved.
+
+Lifted SPU files now receive the SDK's SSE4.1 setting, enabling the SIMD byte
+shuffle. `scripts/build.ps1 -SpuFma -Test` additionally enables AVX/FMA3 for those
+files, with a startup CPU/OS check. This option preserves fused arithmetic and
+does not enable fast-math. The current local build uses it on the Ryzen 9800X3D;
+1.2 million FMA/FMS/FNMS lane results match the scalar reference. The SIMD-only
+carrier probe still ran around 9–10 actual FPS, so this is not a demonstrated
+gameplay speedup. Builds without `-SpuFma` retain the SSE4.1 baseline.
+
+Both launchers share generated shaders in `local/cache/rsx-shaders` across
+sessions. Previously every timestamped session started a fresh cache and
+recompiled the same shaders, causing repeated loading and first-use stalls.
+The SDK validates cache version, stage, complete generated source and blob
+length before reuse. `RSX_SHADER_CACHE_DIR` overrides the location.
+The fresh warm-cache probe recorded 46 vertex/256 pixel shader hits with no
+misses or rejected entries at that checkpoint. The final carrier probes report
+zero duplicate presents and texture decode failures, and movement across the
+deck still works. Native captures remain under `local/runs/20261011-191729-483`
+(before/after movement: `requested_012035`, `requested_012294`) and
+`local/runs/20261011-192350-729` (persistent-cache verification). The cache can
+still fill during a longer scene and retains fence-safe LRU eviction. The host
+FIFO idle wait was reduced from 4 ms to 1 ms for label dependencies; these
+changes have not established an acceptable steady gameplay rate or eliminated
+all visible artifacts. CPU simulation/rendering performance needs further work.
 
 ## Local development
 
