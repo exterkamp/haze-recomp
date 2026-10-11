@@ -140,7 +140,9 @@ experiment also exposed and fixed duplicate reservation-holder registrations
 that could leave dangling pointers after cleanup. The 30 FPS goal and consistent
 pacing remain open. Alternative texture hashing and timer waiting remain diagnostic
 options; private SPU diagnostic history fixes a race without a demonstrated FPS
-gain. **The 30 FPS target remains open.**
+gain. The [targeted SPU byte-operation experiment](docs/performance-spu-bytes-2026-10-11.md)
+passed 2.36 million independent oracle comparisons and lowered process CPU use
+in three pairs, but showed no repeatable FPS or pacing gain. **The 30 FPS target remains open.**
 
 For reproducible diagnostic captures:
 
