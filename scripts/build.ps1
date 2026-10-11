@@ -103,6 +103,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'GPU buffer-copy test compilation failed.' }
     & $m2mfTest
     if ($LASTEXITCODE -ne 0) { throw 'GPU buffer-copy contract test failed.' }
+    $fifoTest = Join-Path $root 'local/test_fifo_recycle.exe'
+    & $clang /nologo /W0 /O1 /Gy /Gw "/I$sdk/include" "/Fe$fifoTest" "/Fo$root/local/test_fifo_recycle.obj" "$sdk/libs/video/tests/test_fifo_recycle.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling test compilation failed.' }
+    & $fifoTest
+    if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling consumer acknowledgment test failed.' }
     $sailTest = Join-Path $root 'local/test_sail_lifecycle.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$sailTest" "/Fo$root/local/test_sail_lifecycle.obj" "$sdk/libs/codec/tests/test_sail_lifecycle.c"
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }

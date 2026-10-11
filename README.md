@@ -209,6 +209,23 @@ postprocessing chain remain under investigation. This is not playable yet.
 Non-unit transfer increments and notification DMA remain unsupported and
 produce diagnostics rather than fabricated completion.
 
+The live renderer also binds Haze's 16-bit depth render targets for sampling;
+previously only 24-bit depth textures used the GPU result. Native probes now
+record thousands of depth-SRV bindings. Paired draw captures can preserve the
+actual vertex inputs, shader programs and constants for independent execution.
+Some captured geometry projects inside the camera frustum, and a captured
+material shader produces nonzero colors with controlled texture inputs.
+
+FIFO history exposed commands being overwritten during decoding. The reserve
+callback formerly reused its buffer after a timeout, and the flip helper could
+rewind it while the tail was still pending. Recycling now waits for separate
+tail and wrap acknowledgments, and the callback retains ownership while waiting.
+The actual callback/drain regression covers a delayed consumer, stale GET at
+the ring start, flip insertion, and semaphore waits across twelve ticker passes.
+The full regression suite passes. A subsequent native opening-sequence probe
+advances without observed FIFO recoveries or PSO failures, but its captured
+scene remains black. Campaign gameplay and co-op are still unvalidated.
+
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
 waiters. A taskset scheduler scans for children created by persistent SPU
