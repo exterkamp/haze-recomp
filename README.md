@@ -12,9 +12,9 @@ application version **01.00**. Other regions and updates are not validated.
 | Feature | Status |
 | --- | --- |
 | Standalone native Windows executable | Renders menus and the opening campaign scene, including squad, weapons, carrier and sky |
-| Campaign gameplay, audio, saves | Campaign control and completion unvalidated; native profile/checkpoint writes observed, restart loading under test |
+| Campaign gameplay, audio, saves | Opening scene responds to movement/camera input; profile and checkpoint reload after restart; campaign completion and audible output unvalidated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
-| Full keyboard and mouse controls | Planned; requires game input integration |
+| Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
 | PC key prompts | Planned; requires UI/asset work |
 | Higher frame rates | Research after baseline gameplay works |
 | Ultrawide | Research after baseline rendering works; projection and HUD must both be addressed |
@@ -60,6 +60,11 @@ python -m venv .venv
 .\scripts\build.ps1 -RuntimeOnly
 .\scripts\build.ps1
 
+# Interactive development build (experimental):
+.\scripts\play.ps1
+# Or use an XInput controller:
+.\scripts\play.ps1 -InputMode Controller
+
 # Synthetic SDK regression checks (no game execution):
 .\scripts\build.ps1 -RuntimeOnly -Test
 
@@ -71,6 +76,15 @@ The scripts emit binary inventory, import coverage, loader information, and
 translation provenance under ignored local directories. Import coverage is a
 static inventory of symbols and context registrations; it is not an ABI or
 behavioral compatibility test.
+
+PC input is configured in `config/input.ini`. WASD moves; arrows navigate;
+Space confirms/skips; Enter starts; Escape pauses and releases the mouse.
+F1 toggles raw mouse capture. All sixteen controller buttons have configurable
+keyboard/mouse bindings. Mouse buttons affect the game only while captured,
+and focus loss releases capture and neutralizes keyboard/mouse input. This is
+an initial mapping through the game's pad input, not direct mouse aiming;
+the game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
+configuration file. Closing the game window now ends its native process.
 
 ## Initial findings
 
@@ -253,7 +267,22 @@ instead of treating an absent profile as successfully loaded. Native writes
 now include profile/checkpoint data and metadata, and later writes recognize
 the directory as existing. A regression checks missing-load behavior and an
 actual metadata/payload round trip after changing the working directory.
-Loading Haze's checkpoint after a restart remains under investigation.
+A subsequent native boot successfully loads both files, enables Continue
+Campaign, and resumes the carrier scene. Bounded analog-input probes visibly
+turn the camera and move the player along the deck. These tests establish
+opening-scene input and persistence; they do not establish mission completion.
+
+The SDK now exposes a port-owned pad-input callback. Haze uses it for its
+keyboard/raw-mouse mapping, while controller mode retains XInput. Regressions
+exercise actual guest pad packets, pressure values, neutral release, mouse
+delta consumption and focus/capture gating. A native window-close probe exits
+with code zero. Interactive mouse feel still needs validation.
+
+Audio device queries had four-byte sound modes at offset 6, while Haze reads
+eight-byte modes starting at offset 8. Correcting the device/mode ABI, device
+availability value and output-state offsets lets Haze initialize cellAudio and
+start its mixing ports. Byte-layout, endian and boundary regressions pass.
+The observed mixer output is still zero; audible campaign sound remains open.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

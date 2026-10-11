@@ -41,6 +41,21 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }
+    & $audioOutTest
+    if ($LASTEXITCODE -ne 0) { throw 'Audio-output device/state ABI test failed.' }
+    $padTest = Join-Path $root 'local/test_host_input.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$padTest" "/Fo$root/local/test_host_input.obj" "$sdk/libs/input/tests/test_host_input.c" /link user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Host pad input test compilation failed.' }
+    & $padTest
+    if ($LASTEXITCODE -ne 0) { throw 'Host pad input packet test failed.' }
+    $hazeInputTest = Join-Path $root 'local/test_haze_input.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse test compilation failed.' }
+    & $hazeInputTest
+    if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse mapping test failed.' }
     & $python "$sdk/tools/test_spu_text_selection.py"
     if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
     & $python "$sdk/tools/test_spu_trace_registers.py"

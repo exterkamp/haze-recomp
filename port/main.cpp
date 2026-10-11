@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "haze_input.h"
 
 #ifdef _WIN32
 /* timeBeginPeriod: <windows.h> arrives with WIN32_LEAN_AND_MEAN set, which
@@ -236,6 +237,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                                        WINDOW_HEIGHT, live_guest_ptr, nullptr) == 0) {
             s_rsx_live = true;
             rsx_null_backend_suppress_present(1);
+            haze_input_attach(rsx_null_backend_get_hwnd());
             fprintf(stderr, "[rsx] native live D3D12 renderer selected\n");
         } else {
             fprintf(stderr, "[rsx] native live renderer failed; stopping graphics\n");
@@ -288,8 +290,9 @@ static DWORD WINAPI frame_clock(LPVOID)
             cellGcm_rsx_process_fifo();
 
             if (pump_messages() != 0) {
-                rsx_ok = 0;              /* window closed */
-                continue;
+                // Closing the native game window ends the host, including its
+                // guest workers, rather than leaving an invisible game running.
+                exit(0);
             }
             /* Present on a guest flip. A present on a fixed clock can catch the
              * drain mid-frame and flash a partial one. Before the first flip
@@ -489,6 +492,7 @@ int main(int argc, char** argv)
     /* Install the guest-callback hook, then start the frame clock. It no-ops
      * until the title registers its vblank and flip handlers during init. */
     g_ps3_guest_caller = harness_guest_caller;
+    haze_input_initialize();
     CreateThread(NULL, 4u * 1024 * 1024, frame_clock, NULL, 0, NULL);
 #ifdef _WIN32
     if (getenv("HAZE_BOOT_REPORT")) {
