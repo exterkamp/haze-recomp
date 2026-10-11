@@ -69,6 +69,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }
     & $sailTest
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle ABI test failed.' }
-    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, and SAIL lifecycle tests passed.'
+    $dialogTest = Join-Path $root 'local/test_dialog_callbacks.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$dialogTest" "/Fo$root/local/test_dialog_callbacks.obj" "$sdk/libs/system/tests/test_dialog_callbacks.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Dialog callback test compilation failed.' }
+    & $dialogTest
+    if ($LASTEXITCODE -ne 0) { throw 'Dialog callback order test failed.' }
+    $fileTest = Join-Path $root 'local/test_host_file64.exe'
+    & $clang /nologo /W0 /O1 "/Fe$fileTest" "/Fo$root/local/test_host_file64.obj" "$sdk/runtime/platform/tests/test_host_file64.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Large-file test compilation failed.' }
+    & $fileTest
+    if ($LASTEXITCODE -ne 0) { throw 'Large-file stat and seek test failed.' }
+    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, SAIL lifecycle, dialog callbacks, and large-file tests passed.'
 }
 

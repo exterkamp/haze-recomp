@@ -11,7 +11,7 @@ application version **01.00**. Other regions and updates are not validated.
 
 | Feature | Status |
 | --- | --- |
-| Standalone native Windows executable | Renders startup screens and the interactive Press Start title screen; campaign remains unvalidated |
+| Standalone native Windows executable | Renders startup, title, main and campaign menus; campaign gameplay remains unvalidated |
 | Campaign gameplay, rendering, audio, saves | Not validated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Planned; requires game input integration |
@@ -98,14 +98,23 @@ completed roughly 1,700 SPU jobs and reached repeated pad polling and frame
 submission. The live D3D12 renderer subsequently displayed Haze's splash/logo
 and ESRB notice. After adding the deprecated SAIL lifecycle ABI, native tests
 can skip the Ubisoft, Free Radical and attract movies with Cross and render
-the Press Start title screen. No campaign or co-op session has been validated;
+the Press Start title screen. The first-run installer now writes 72 files
+(about 4 GB) to its local game-data USRDIR, and a subsequent boot passes the
+installed-data check without reinstalling. Captures show the interactive main
+and Campaign menus, including Single Player Campaign, Join Co-op and Host Co-op.
+No campaign gameplay or co-op session has been validated;
 a diagnostic timeout is not a successful gameplay test.
 
 The SDK fork on its `haze` branch includes the executable-segment fix, Windows
 DXGI GUID linkage, corrected game-data callback structure layout and first-run
 directory status, and a fix that makes the unresolved-import error policy take
 effect. Fixing the callback removed the corrupt-game-data dialog in a native
-boot test; this does not establish a working installation or save system.
+boot test. The installer also required 64-bit Windows stat/seek operations:
+its 4,003,576,161-byte `install.qik` otherwise incorrectly appeared absent.
+The fork creates the callback-approved game-data directories and persists
+their PARAM.SFO metadata. Tests cover canceled checks, missing parameters,
+metadata round trips, and actual stat/seek/open operations on an 8 GB sparse
+fixture. Save-game persistence remains unvalidated.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
