@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 # Keep missing imports visible rather than relying on fabricated success.
 $settings = @{
     PS3_VFS_ROOT = (Join-Path $root 'game\disc')
+    PS3_SAVEDATA_ROOT = $(if ($env:PS3_SAVEDATA_ROOT) { $env:PS3_SAVEDATA_ROOT } else { Join-Path $root 'local\state\savedata' })
     PS3_HLE_TRACE = [string]$TraceCalls
     PS3_HLE_UNRESOLVED = 'fail'
     HAZE_BOOT_REPORT = '1'

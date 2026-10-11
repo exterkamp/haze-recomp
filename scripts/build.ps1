@@ -118,6 +118,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Fragment predication test compilation failed.' }
     & $predicateTest
     if ($LASTEXITCODE -ne 0) { throw 'Fragment predication shader execution failed.' }
+    $clearTest = Join-Path $root 'local/test_color_clear.exe'
+    & $clang /nologo /W0 /O1 "/Fe$clearTest" "/Fo$root/local/test_color_clear.obj" "$sdk/libs/video/tests/test_color_clear.c" /link d3d12.lib dxgi.lib d3dcompiler.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Color clear test compilation failed.' }
+    & $clearTest
+    if ($LASTEXITCODE -ne 0) { throw 'D3D12 channel/scissor clear execution failed.' }
+    $saveTest = Join-Path $root 'local/test_savedata_persistence.exe'
+    & $clang /nologo /W0 /O1 /Gy /Gw "/I$sdk/include" "/Fe$saveTest" "/Fo$root/local/test_savedata_persistence.obj" "$sdk/libs/system/tests/test_savedata_persistence.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'Save persistence test compilation failed.' }
+    & $saveTest
+    if ($LASTEXITCODE -ne 0) { throw 'Save persistence and missing-load result test failed.' }
     $sailTest = Join-Path $root 'local/test_sail_lifecycle.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$sailTest" "/Fo$root/local/test_sail_lifecycle.obj" "$sdk/libs/codec/tests/test_sail_lifecycle.c"
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }

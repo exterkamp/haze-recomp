@@ -11,8 +11,8 @@ application version **01.00**. Other regions and updates are not validated.
 
 | Feature | Status |
 | --- | --- |
-| Standalone native Windows executable | Renders startup, title, main and campaign menus; campaign gameplay remains unvalidated |
-| Campaign gameplay, rendering, audio, saves | Not validated |
+| Standalone native Windows executable | Renders menus and the opening campaign scene, including squad, weapons, carrier and sky |
+| Campaign gameplay, audio, saves | Campaign control and completion unvalidated; native profile/checkpoint writes observed, restart loading under test |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Planned; requires game input integration |
 | PC key prompts | Planned; requires UI/asset work |
@@ -233,7 +233,27 @@ executes the generated shaders through D3D11 WARP: the original implementation
 fails, while the corrected version passes with 16-bit and 32-bit registers,
 both with normal and IEEE-strict compilation. The build's test mode runs this
 check and the existing 36 fragment-decompiler checks. This fixes a verified
-shader defect; the native scene still needs further rendering investigation.
+shader defect; it did not by itself restore the final native scene.
+
+Complete-frame draw captures subsequently showed the squad and environment
+surviving Haze's initial scene resolve, then disappearing at an alpha-only
+clear. The renderer had cleared all four color channels regardless of the
+RSX channel mask, and ignored the clear's scissor rectangle. Clears now preserve
+unselected channels and pixels outside the rectangle, including floating-point
+targets. An asset-free D3D12 WARP regression runs the actual clear implementation
+and checks every channel of RGBA8 and RGBA16F readbacks. The normal native
+renderer now displays the opening carrier scene with the squad, weapons and sky;
+the diagnostic run reports roughly 16 FPS. This establishes scene rendering,
+not playable campaign completion or enhanced frame-rate support.
+
+The runner now keeps saves in `local/state/savedata`, independently of each
+diagnostic run's working directory; `PS3_SAVEDATA_ROOT` overrides that location.
+The port preserves missing-load errors so Haze creates its initial profile
+instead of treating an absent profile as successfully loaded. Native writes
+now include profile/checkpoint data and metadata, and later writes recognize
+the directory as existing. A regression checks missing-load behavior and an
+actual metadata/payload round trip after changing the working directory.
+Loading Haze's checkpoint after a restart remains under investigation.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

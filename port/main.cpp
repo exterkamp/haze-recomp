@@ -63,6 +63,8 @@ void     ppu_sysprx_register(void);           /* boot-critical CRT (sys_initiali
 void     ppu_fs_register(void);               /* cellFs over the real game directory */
 void     lv2_init_syscalls(void);             /* the lv2 syscall table */
 void     cellGame_init_from_paramsfo(const char* path);
+int32_t  cellSaveData_set_root_path(const char* path);
+void     cellSaveData_set_strict_load_errors(int enabled);
 void     ppu_report_guest_lrs(void);
 extern uint32_t g_last_hle_nid;
 extern const char* g_last_hle_name;
@@ -460,6 +462,18 @@ int main(int argc, char** argv)
 
     derive_vfs_root(argv[1]);
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
+    const char* save_root = getenv("PS3_SAVEDATA_ROOT");
+    char default_save_root[1200];
+    if (!save_root || !*save_root) {
+        snprintf(default_save_root, sizeof(default_save_root), "%s/savedata", ppu_vfs_root);
+        save_root = default_save_root;
+    }
+    if (cellSaveData_set_root_path(save_root) != 0) {
+        fprintf(stderr, "ERROR: invalid save-data root\n");
+        return 1;
+    }
+    cellSaveData_set_strict_load_errors(1);
+    printf("[boot] Save-data root: %s\n", save_root);
     char sfo_path[1200];
     snprintf(sfo_path, sizeof sfo_path, "%s/PS3_GAME/PARAM.SFO", ppu_vfs_root);
     cellGame_init_from_paramsfo(sfo_path);
