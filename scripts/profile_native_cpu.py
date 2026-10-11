@@ -5,6 +5,7 @@ Briefly suspends each Haze thread to read its instruction pointer, then resumes
 it before resolving symbols. RIP counts include waiting threads and are NOT
 percentages of CPU utilization. CPU milliseconds come from GetThreadTimes.
 Requires the matching executable/PDB in build/haze. No guest state is written.
+Guest-address counts sample only a recognized fast vm_read32 load instruction.
 """
 import ctypes as c
 from ctypes import wintypes as w
@@ -61,18 +62,36 @@ k.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,c.POINTER(w.DWO
 assert k.QueryFullProcessImageNameW(h,0,pathbuf,c.byref(pathlen)),c.get_last_error()
 assert Path(pathbuf.value).name.lower()=='hazerecomp.exe', 'PID must identify HazeRecomp.exe'
 assert 1<=duration<=120, 'Duration must be between 1 and 120 seconds'
+# Recognize this build's ordinary vm_read32 load/bswap pair. RCX holds the
+# guest address at these instructions. Do not interpret registers at arbitrary
+# helper offsets, where the compiler may have already reused them.
+symbuf=c.create_string_buffer(c.sizeof(SYMBOL_INFO)+2048)
+syminfo=c.cast(symbuf,c.POINTER(SYMBOL_INFO))
+syminfo.contents.SizeOfStruct=c.sizeof(SYMBOL_INFO); syminfo.contents.MaxNameLen=2048
+fast_load=0; memory_reads=collections.Counter()
+k.ReadProcessMemory.argtypes=[w.HANDLE,c.c_void_p,c.c_void_p,c.c_size_t,c.POINTER(c.c_size_t)]
+if d.SymFromName(h,b'vm_read32',syminfo):
+    code=c.create_string_buffer(256); got=c.c_size_t()
+    address=syminfo.contents.Address
+    if k.ReadProcessMemory(h,address,code,len(code),c.byref(got)):
+        offset=code.raw[:got.value].find(bytes.fromhex('8b04080fc8'))
+        if offset>=0: fast_load=address+offset
 start=time.perf_counter(); iteration=0
 while time.perf_counter()-start<duration:
     if iteration%100==0: scan()
     for tid,th in handles.items():
         ct=cpu(th); first.setdefault(tid,ct); last[tid]=ct
         buf=c.create_string_buffer(1250); cp=(c.addressof(buf)+15)&~15
-        c.c_uint32.from_address(cp+0x30).value=0x100001
+        c.c_uint32.from_address(cp+0x30).value=0x100003  # CONTROL | INTEGER
         if k.SuspendThread(th)==0xffffffff: continue
         try:
             good=k.GetThreadContext(th,cp); rip=c.c_uint64.from_address(cp+0xf8).value
+            rcx=c.c_uint64.from_address(cp+0x80).value
         finally: k.ResumeThread(th)
-        if good: raw[(tid,rip)]+=1
+        if good:
+            raw[(tid,rip)]+=1
+            if fast_load and rip in (fast_load,fast_load+3):
+                memory_reads[(tid,rcx&0xffffffff)]+=1
     iteration+=1; time.sleep(.009)
 elapsed=time.perf_counter()-start
 resolved={}
@@ -84,7 +103,8 @@ for tid in sorted(handles,key=lambda t:last[t]-first[t],reverse=True):
     hist=collections.Counter()
     for (t,rip),n in raw.items():
         if t==tid: hist[sym(rip).split('+0x')[0]]+=n
-    rows.append(dict(tid=tid,cpu_ms=(last[tid]-first[tid])/10000,rips=hist.most_common(20),raw_rips=[(sym(rip),n) for (t,rip),n in raw.most_common() if t==tid][:20]))
-print(json.dumps(dict(elapsed_s=elapsed,iterations=iteration,threads=rows),indent=2))
+    rows.append(dict(tid=tid,cpu_ms=(last[tid]-first[tid])/10000,rips=hist.most_common(20),raw_rips=[(sym(rip),n) for (t,rip),n in raw.most_common() if t==tid][:20],
+                     sampled_read32_addresses=[(f'0x{addr:08X}',n) for (t,addr),n in memory_reads.most_common() if t==tid][:20]))
+print(json.dumps(dict(elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),threads=rows),indent=2))
 for th in handles.values(): k.CloseHandle(th)
 k.CloseHandle(h)

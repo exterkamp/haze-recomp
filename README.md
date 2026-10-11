@@ -96,6 +96,16 @@ busy polling. A bounded, full-source-validated vertex payload cache is available
 experimentally with `RSX_VERTEX_CACHE=1`; normal builds leave it off pending
 native A/B validation.
 
+A later 600-frame carrier interval (frames 23528–24128, run
+`20261011-205425-998`, vertex cache off) measured 11.37 FPS, 87.96 ms mean,
+120.30 ms p95 and a 796 ms maximum. Average draw preparation was 36.66 ms,
+including 13.94 ms vertex packing, 4.29 ms pipeline preparation and 4.31 ms
+texture hashing. GPU execution averaged 1.49 ms. No shader compilation occurred
+in that interval, so shader compilation cannot explain those sampled stalls.
+The cache had reached 4,096 entries and recorded 2,207 actual replacements in
+the interval. These measurements identify remaining work; they do not demonstrate
+a steady rate or an end-to-end improvement.
+
 A longer session exposed repeated failures to decode an unsupported D16 depth
 texture after texture-cache saturation. Each binding previously scanned all
 4,096 LRU candidates again, recording over a million failed attempts. Failed
@@ -110,6 +120,12 @@ use static PSO state. Synthetic WARP readbacks check coplanar decals with positi
 negative and zero bias. This repairs an omitted state, but temporal validation of
 the reported deck-paint flicker is still outstanding, and other visible artifacts
 remain.
+
+For a live polygon-offset comparison, set `RSX_BIAS_FILE` to a local text file
+containing `1` (normal) or `0` (disabled). It is checked every 60 presents and
+state changes are logged. The carrier comparison captured both settings, but
+idle camera movement prevents treating those few stills as temporal proof.
+Restore `1` after diagnostic comparisons.
 
 For reproducible diagnostic captures:
 
@@ -131,6 +147,12 @@ utilization percentages. Per-thread CPU counters are reported separately. Window
 ETW profiling was unavailable under the machine's performance-profiling policy,
 so the native sampler briefly reads thread instruction pointers and resumes each
 thread before resolving symbols from the matching PDB.
+The sampler also recognizes the executable's ordinary `vm_read32` load/byte-swap
+instructions and records guest addresses only at those instructions. Address
+samples are sparse; they do not establish the proportion of all memory reads.
+Use `--start-frame` and `--end-frame` with the CSV summarizer to retain exact
+comparison intervals. `PS3_POLLTOP` reports requested sleep durations rather
+than measured wall-clock sleep time.
 
 Diagnostic `run.ps1` sessions are **muted by default** while retaining mixing,
 device-clock pacing and game audio events. Add `-CaptureAudio` to save the original
