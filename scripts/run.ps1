@@ -3,7 +3,8 @@ param(
     [ValidateRange(0,10000)][int]$TraceCalls = 0,
     [ValidateSet(0,2,4,8,16)][int]$CaptureFrames = 0,
     [ValidateRange(0,1000000)][int]$FrameSkip = 0,
-    [ValidateRange(1,1000000)][int]$FrameEvery = 1
+    [ValidateRange(1,1000000)][int]$FrameEvery = 1,
+    [ValidateSet('Live','Legacy')][string]$Renderer = 'Live'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -20,12 +21,17 @@ $settings = @{
     PS3_HLE_TRACE = [string]$TraceCalls
     PS3_HLE_UNRESOLVED = 'fail'
     HAZE_BOOT_REPORT = '1'
+    RSX_LIVE_DRAW = $(if ($Renderer -eq 'Live') { '1' } else { '0' })
     PS3_MILESTONE_OUT = (Join-Path $runDir 'boot-milestones.log')
     CELLMARK_DUMP = $(if ($CaptureFrames -gt 0) { [string]$CaptureFrames } else { $null })
     CELLMARK_DUMP_MINDRAWS = '1'
     CELLMARK_DUMP_DIR = (Join-Path $runDir 'frames')
     CELLMARK_DUMP_SKIP = [string]$FrameSkip
     CELLMARK_DUMP_EVERY = [string]$FrameEvery
+    LD_FRAME_DUMP = $(if ($CaptureFrames -gt 0 -and $Renderer -eq 'Live') { Join-Path $runDir 'frames' } else { $null })
+    LD_FRAME_DUMP_FROM = [string]$FrameSkip
+    LD_FRAME_DUMP_EVERY = [string]$FrameEvery
+    LD_FRAME_DUMP_COUNT = [string]$CaptureFrames
 }
 $old = @{}
 foreach ($key in $settings.Keys) {
@@ -54,6 +60,7 @@ try {
         output_directory = $runDir
         capture_skip = $FrameSkip
         capture_every = $FrameEvery
+        renderer = $Renderer
     }
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'local\boot-result.json') -Encoding UTF8
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDir 'boot-result.json') -Encoding UTF8

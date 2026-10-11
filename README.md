@@ -11,7 +11,7 @@ application version **01.00**. Other regions and updates are not validated.
 
 | Feature | Status |
 | --- | --- |
-| Standalone native Windows executable | Builds and executes translated Haze code; boot remains incomplete |
+| Standalone native Windows executable | Boots translated Haze code and renders splash screens; menu/gameplay remain incomplete |
 | Campaign gameplay, rendering, audio, saves | Not validated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Planned; requires game input integration |
@@ -66,8 +66,8 @@ python -m venv .venv
 # Synthetic SDK regression checks (no game execution):
 .\scripts\build.ps1 -RuntimeOnly -Test
 
-# Bounded native boot diagnostic; logs and BMP captures remain local:
-.\scripts\run.ps1 -Seconds 60 -CaptureFrames 4
+# Bounded native boot diagnostic; capture later frames after initialization:
+.\scripts\run.ps1 -Seconds 90 -CaptureFrames 4 -FrameSkip 3000 -FrameEvery 300
 ```
 
 The scripts emit binary inventory, import coverage, loader information, and
@@ -95,9 +95,10 @@ The Windows executable is `build/haze/HazeRecomp.exe`. Native boot probes
 create PPU worker threads, execute lifted SPU jobs, read the game archives,
 configure GCM display buffers, and submit D3D12 draw calls. A 120-second probe
 completed roughly 1,700 SPU jobs and reached repeated pad polling and frame
-submission. Captures taken later in a 150-second probe remain black. No menu,
-campaign, or co-op session has been validated; a diagnostic timeout is not a
-successful gameplay test.
+submission. The live D3D12 renderer subsequently displayed Haze's splash/logo
+and ESRB notice. A 180-second probe remained black afterward, including after
+Start and Cross input. No menu, campaign, or co-op session has been validated;
+a diagnostic timeout is not a successful gameplay test.
 
 The SDK fork on its `haze` branch includes the executable-segment fix, Windows
 DXGI GUID linkage, corrected game-data callback structure layout and first-run
@@ -114,9 +115,13 @@ default incorrectly halted a polling worker. Its optional diagnostic state is
 now per SPU context. Synthetic tests cover these contracts, including queue
 wrap/full/empty cases, task reuse and dispatch failure, and watchdog isolation.
 
-The immediate investigation is graphics correctness. Haze reaches eight
-fragment programs and several offscreen rendering passes, but all inspected
-captures are black. Missing imports observed during boot include
+The live native D3D12 renderer now displays the Haze splash/logo screen and
+ESRB online notice. The legacy renderer displays the sky when its pass is
+isolated, but the complete postprocessing chain goes black. The port defaults
+to the live renderer; `RSX_LIVE_DRAW=0` or the diagnostic runner's
+`-Renderer Legacy` selects the older path. A sample-projection heuristic no
+longer overwrites Haze's valid negative matrix coefficient. Missing imports
+observed during boot include
 `cellSpursGetSpuThreadId`, `cellPadInfoSensorMode`, and
 `cellSailPlayerInitialize`. Media playback, SPU overlays, and unsupported
 instructions also remain open.
@@ -127,11 +132,12 @@ path and replacing service dependencies where necessary. Adding a generic
 socket transport by itself does not connect Haze's campaign state machines.
 
 `scripts/run.ps1` returns errors for unregistered firmware imports and writes
-logs, milestone counts, shader dumps, and optional BMP captures to a unique
+logs, milestone counts, shader dumps, and optional frame captures to a unique
 `local/runs/<UTC timestamp>` directory. `local/boot-result.json` points to the
 latest run. `-FrameSkip` and `-FrameEvery` select later frames. The runner
 terminates its process after the chosen timeout; `gameplay_validated` remains
-false. Boot stack reports are best-effort diagnostics. Queue operations no
+false. Live-renderer captures use PPM; legacy captures use BMP. Boot stack
+reports are best-effort diagnostics. Queue operations no
 longer require the upstream experimental environment flag.
 
 ## Development order

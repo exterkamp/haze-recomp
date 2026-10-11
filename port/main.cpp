@@ -100,6 +100,8 @@ void     cellGcmTickFlip(void);
 int      cellGcm_take_flip_pending(void);
 void     cellGcm_rsx_process_fifo(void);      /* drain get -> put */
 unsigned cellGcm_flip_request_count(void);
+uint32_t cellGcmGetCurrentDisplayBufferId(void);
+void cellGcm_fifo_kick_wait(unsigned ms);
 }
 
 void ps3_sampler_start(void); /* SDK profiler has C++ linkage. */
@@ -160,6 +162,46 @@ extern "C" int  rsx_null_backend_pump_messages(void);
  * The ticks are driven off real elapsed time rather than off how long present()
  * took. A hidden or occluded window makes present block hard, and pacing the
  * ticks behind it paces the whole game behind it. */
+#ifdef _WIN32
+extern "C" {
+int rsx_live_draw_enabled(void);
+int rsx_live_draw_init(void*, uint32_t, uint32_t,
+    const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
+void rsx_live_draw_present(uint32_t);
+int rsx_null_backend_init(uint32_t, uint32_t, const char*);
+int rsx_null_backend_pump_messages(void);
+void* rsx_null_backend_get_hwnd(void);
+void rsx_null_backend_suppress_present(int);
+uint32_t cellGcmResolveLocated(int, uint32_t);
+uint32_t cellGcmResolveIO(uint32_t);
+}
+static bool s_rsx_live = false;
+static const uint8_t* live_guest_ptr(void*, uint32_t location, uint32_t offset, uint32_t size)
+{
+    if (!vm_base) return nullptr;
+    uint32_t ea = location == 0 ? cellGcmResolveLocated(1, offset) : cellGcmResolveIO(offset);
+    if (!ea && location != 0) ea = cellGcmResolveLocated(0, offset);
+    if (!ea || ea == UINT32_MAX || (uint64_t)ea + size > 0x100000000ull) return nullptr;
+    return vm_base + ea;
+}
+#endif
+
+static void present_frame(void)
+{
+#ifdef _WIN32
+    if (s_rsx_live) { rsx_live_draw_present(cellGcmGetCurrentDisplayBufferId()); return; }
+#endif
+    rsx_backend_present();
+}
+
+static int pump_messages(void)
+{
+#ifdef _WIN32
+    if (s_rsx_live) return rsx_null_backend_pump_messages();
+#endif
+    return rsx_backend_pump();
+}
+
 static volatile LONG g_frames_presented = 0;
 
 /* Frames handed to the backend at a guest FLIP boundary -- one per frame the
@@ -173,7 +215,7 @@ extern "C" unsigned ppu_boot_frames_presented(void)
 
 static void present_guest_frame(void)
 {
-    rsx_backend_present();
+    present_frame();
     /* This thread increments and guest threads read, so interlocked rather
      * than a volatile ++, which on arm64 is neither atomic nor a fence. */
     InterlockedIncrement(&g_frames_presented);
@@ -182,9 +224,24 @@ static void present_guest_frame(void)
 static DWORD WINAPI frame_clock(LPVOID)
 {
     const char* title = getenv("PS3_TITLE");
-    if (!title || !*title) title = "ps3recomp";
+    if (!title || !*title) title = "Haze Recomp";
 
-    int rsx_ok = (rsx_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0);
+    int rsx_ok = 0;
+#ifdef _WIN32
+    if (rsx_live_draw_enabled()) {
+        rsx_ok = rsx_null_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0;
+        if (rsx_ok && rsx_live_draw_init(rsx_null_backend_get_hwnd(), WINDOW_WIDTH,
+                                       WINDOW_HEIGHT, live_guest_ptr, nullptr) == 0) {
+            s_rsx_live = true;
+            rsx_null_backend_suppress_present(1);
+            fprintf(stderr, "[rsx] native live D3D12 renderer selected\n");
+        } else {
+            fprintf(stderr, "[rsx] native live renderer failed; stopping graphics\n");
+            rsx_ok = 0;
+        }
+    } else
+#endif
+    { rsx_ok = rsx_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0; }
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME,
             rsx_ok ? "OK -- window open" : "FAILED");
 
@@ -192,7 +249,7 @@ static DWORD WINAPI frame_clock(LPVOID)
     ULONGLONG next_tick = GetTickCount64();
 
     for (;;) {
-        Sleep(4);
+        cellGcm_fifo_kick_wait(4);
         ULONGLONG now = GetTickCount64();
 
         int fired = 0;
@@ -228,7 +285,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             }
             cellGcm_rsx_process_fifo();
 
-            if (rsx_backend_pump() != 0) {
+            if (pump_messages() != 0) {
                 rsx_ok = 0;              /* window closed */
                 continue;
             }
@@ -240,7 +297,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 present_guest_frame();
                 last_flip = fc;
             } else if (fc == 0) {
-                rsx_backend_present();
+                present_frame();
             }
         }
     }
@@ -366,6 +423,9 @@ int main(int argc, char** argv)
      * inflates every shorter wait the title makes and throttles the whole
      * thing. POSIX timers are already fine-grained. */
     timeBeginPeriod(1);
+    /* Haze's full frame pipeline renders its splash screens through this
+     * native D3D12 path. RSX_LIVE_DRAW=0 retains the legacy renderer for probes. */
+    if (!getenv("RSX_LIVE_DRAW")) _putenv_s("RSX_LIVE_DRAW", "1");
     static char stdout_buffer[64 * 1024], stderr_buffer[64 * 1024];
     setvbuf(stdout, stdout_buffer, _IOFBF, sizeof stdout_buffer);
     setvbuf(stderr, stderr_buffer, _IOFBF, sizeof stderr_buffer);
