@@ -216,6 +216,8 @@ that all of the in-game gap is stack growth or predict an FPS gain. Stack or
 worker reuse now has a measured rationale, pending an in-game A/B test.
 The diagnostic explicitly prevents inlining so the large stack allocation
 remains inside its timed call. Run it with `scripts/benchmark_spu_abi.ps1`.
+The normal build also retains a `__chkstk` prologue for a `0x41A88`-byte ABI
+frame, so the large entry allocation is not introduced by the phase counters.
 
 The frequent-snapshot sampler also recorded 826 distinct thread IDs but 908
 failed opens (`ERROR_INVALID_PARAMETER`) in 10.05 s: many threads disappear
@@ -260,3 +262,13 @@ Next profiling priorities are the worker-status dependency and the remaining
 shader analysis/vertex decoding costs, including complete CPU accounting for
 short-lived native jobs. These results support continuing the existing fork;
 they do not justify restarting the framework.
+
+## Final normal-build verification
+
+After the diagnostic runs, the executable was rebuilt with `-SpuFma -Test`
+and profiling disabled. The full regression suite passed. Muted run
+`20261011-223828-264` reached the carrier checkpoint; capture 8368 was visually
+verified. Its ordinary five-second FPS reports included 17.5, 18.3 and 19.0,
+consistent with the remaining performance gap. This was a smoke check, not
+another controlled optimization comparison. No FIFO invalid CALL/recovery
+messages appeared, and the owned game process closed cleanly with exit code 0.
