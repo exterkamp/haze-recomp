@@ -426,6 +426,8 @@ int main(int argc, char** argv)
     /* Haze's full frame pipeline renders its splash screens through this
      * native D3D12 path. RSX_LIVE_DRAW=0 retains the legacy renderer for probes. */
     if (!getenv("RSX_LIVE_DRAW")) _putenv_s("RSX_LIVE_DRAW", "1");
+    /* High-volume SDK logging contends on FILE locks across guest threads. */
+    if (!getenv("PS3_VERBOSE")) _putenv_s("PS3_VERBOSE", "0");
     static char stdout_buffer[64 * 1024], stderr_buffer[64 * 1024];
     setvbuf(stdout, stdout_buffer, _IOFBF, sizeof stdout_buffer);
     setvbuf(stderr, stderr_buffer, _IOFBF, sizeof stderr_buffer);

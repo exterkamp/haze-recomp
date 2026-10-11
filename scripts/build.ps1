@@ -64,6 +64,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch test compilation failed.' }
     & $dispatchTest
     if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch contract test failed.' }
-    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, and taskset dispatch tests passed.'
+    $sailTest = Join-Path $root 'local/test_sail_lifecycle.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$sailTest" "/Fo$root/local/test_sail_lifecycle.obj" "$sdk/libs/codec/tests/test_sail_lifecycle.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }
+    & $sailTest
+    if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle ABI test failed.' }
+    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, and SAIL lifecycle tests passed.'
 }
 

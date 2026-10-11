@@ -11,7 +11,7 @@ application version **01.00**. Other regions and updates are not validated.
 
 | Feature | Status |
 | --- | --- |
-| Standalone native Windows executable | Boots translated Haze code and renders splash screens; menu/gameplay remain incomplete |
+| Standalone native Windows executable | Renders startup screens and the interactive Press Start title screen; campaign remains unvalidated |
 | Campaign gameplay, rendering, audio, saves | Not validated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Planned; requires game input integration |
@@ -96,8 +96,9 @@ create PPU worker threads, execute lifted SPU jobs, read the game archives,
 configure GCM display buffers, and submit D3D12 draw calls. A 120-second probe
 completed roughly 1,700 SPU jobs and reached repeated pad polling and frame
 submission. The live D3D12 renderer subsequently displayed Haze's splash/logo
-and ESRB notice. A 180-second probe remained black afterward, including after
-Start and Cross input. No menu, campaign, or co-op session has been validated;
+and ESRB notice. After adding the deprecated SAIL lifecycle ABI, native tests
+can skip the Ubisoft, Free Radical and attract movies with Cross and render
+the Press Start title screen. No campaign or co-op session has been validated;
 a diagnostic timeout is not a successful gameplay test.
 
 The SDK fork on its `haze` branch includes the executable-segment fix, Windows
@@ -122,9 +123,13 @@ to the live renderer; `RSX_LIVE_DRAW=0` or the diagnostic runner's
 `-Renderer Legacy` selects the older path. A sample-projection heuristic no
 longer overwrites Haze's valid negative matrix coefficient. Missing imports
 observed during boot include
-`cellSpursGetSpuThreadId`, `cellPadInfoSensorMode`, and
-`cellSailPlayerInitialize`. Media playback, SPU overlays, and unsupported
-instructions also remain open.
+`cellSpursGetSpuThreadId` and `cellPadInfoSensorMode`. The deprecated
+`cellSailPlayerInitialize` now has a separate ABI handler, including its ninth
+stack argument. Player callbacks and adapter lifecycles let Haze use its own
+movie skip path. Frame queries return explicitly empty frames; media decoding
+is not implemented. Tests cover callback packing, object boundaries, slot
+reuse, and empty-frame output. SPU overlays and unsupported instructions also
+remain open.
 
 Haze's executable contains Demonware lobby references and Ubisoft auth/STUN
 hostnames. Peer-to-peer co-op will require tracing that game-specific session
@@ -136,7 +141,10 @@ logs, milestone counts, shader dumps, and optional frame captures to a unique
 `local/runs/<UTC timestamp>` directory. `local/boot-result.json` points to the
 latest run. `-FrameSkip` and `-FrameEvery` select later frames. The runner
 terminates its process after the chosen timeout; `gameplay_validated` remains
-false. Live-renderer captures use PPM; legacy captures use BMP. Boot stack
+false. The executable and runner default to `PS3_VERBOSE=0` because verbose
+SDK logs cause thread contention and severely slow native execution; set it
+to `1` for detailed diagnostics. Live-renderer captures use PPM; legacy
+captures use BMP. Boot stack
 reports are best-effort diagnostics. Queue operations no
 longer require the upstream experimental environment flag.
 
