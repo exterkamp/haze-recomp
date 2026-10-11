@@ -218,10 +218,28 @@ extern "C" unsigned ppu_boot_frames_presented(void)
 
 static void present_guest_frame(void)
 {
+    static const bool trace = getenv("HAZE_FRAME_TRACE") != nullptr;
+    if (trace) {
+        static unsigned previous_flip = 0, duplicates = 0, presents = 0;
+        const unsigned flip = cellGcm_flip_request_count();
+        if (flip == previous_flip) ++duplicates;
+        previous_flip = flip;
+        if ((++presents & 127) == 0)
+            fprintf(stderr, "[frame-pump] presents=%u flips=%u duplicate=%u\n",
+                    presents, flip, duplicates);
+    }
     present_frame();
     /* This thread increments and guest threads read, so interlocked rather
      * than a volatile ++, which on arm64 is neither atomic nor a fence. */
     InterlockedIncrement(&g_frames_presented);
+}
+
+#include "haze_frame_pump.h"
+
+static void drain_and_present(void)
+{
+    haze_drain_frames(cellGcm_rsx_process_fifo, cellGcm_take_flip_pending,
+                      present_guest_frame);
 }
 
 static DWORD WINAPI frame_clock(LPVOID)
@@ -249,7 +267,6 @@ static DWORD WINAPI frame_clock(LPVOID)
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME,
             rsx_ok ? "OK -- window open" : "FAILED");
 
-    unsigned  last_flip = 0;
     ULONGLONG next_tick = GetTickCount64();
 
     for (;;) {
@@ -260,19 +277,10 @@ static DWORD WINAPI frame_clock(LPVOID)
         while ((long long)(now - next_tick) >= 0 && fired < 240) {
             cellGcmTickVBlank();
             cellGcmTickFlip();
-            /* Present a pending flip BEFORE draining any further. The flip
-             * fires at a get==put frame boundary on the guest thread, so the
-             * batch held right now is exactly the completed frame; presenting
-             * after the drain races the guest's next-frame writes and shows a
-             * mixed one. */
-            if (rsx_ok && cellGcm_take_flip_pending()) {
-                present_guest_frame();
-                last_flip = cellGcm_flip_request_count();
-            }
             /* Drain the FIFO every tick. This is what writes the RSX sync-fence
              * labels the game's per-frame logic blocks on, so it has to keep
              * advancing at 60 Hz even while present() throttles. */
-            if (rsx_ok) cellGcm_rsx_process_fifo();
+            if (rsx_ok) drain_and_present();
             next_tick += 16;             /* ~60 Hz */
             fired++;
         }
@@ -283,11 +291,7 @@ static DWORD WINAPI frame_clock(LPVOID)
          * those at 16 ms apiece paces the guest into single-figure frame rates.
          * The real RSX writes them in microseconds. */
         if (rsx_ok) {
-            if (cellGcm_take_flip_pending()) {
-                present_guest_frame();
-                last_flip = cellGcm_flip_request_count();
-            }
-            cellGcm_rsx_process_fifo();
+            drain_and_present();
 
             if (pump_messages() != 0) {
                 // Closing the native game window ends the host, including its
@@ -297,11 +301,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             /* Present on a guest flip. A present on a fixed clock can catch the
              * drain mid-frame and flash a partial one. Before the first flip
              * present freely, so the window is not blank during boot. */
-            unsigned fc = cellGcm_flip_request_count();
-            if (fc != last_flip) {
-                present_guest_frame();
-                last_flip = fc;
-            } else if (fc == 0) {
+            if (cellGcm_flip_request_count() == 0) {
                 present_frame();
             }
         }

@@ -25,6 +25,16 @@ network imports include the older `sceNp` API and ticket requests; upstream
 traffic may still need session discovery/signaling, NAT traversal, or a VPN.
 The game's actual session protocol must be investigated before choosing one.
 
+The native frame pump now consumes each flip notification when presenting it.
+The previous count-based fallback left the notification armed: a diagnostic
+sample had 1,536 presents for 992 guest flips, including empty second batches.
+The corrected carrier run reports zero duplicate presents. The FPS display now
+uses a recent 1–2 second window instead of retaining menu rates for 15 seconds.
+This fixes misleading telemetry and duplicate presentation; low simulation
+rates and remaining rendering artifacts still need work. Set
+`HAZE_FRAME_TRACE=1` for flip/present counts. `scripts/build.ps1 -ProfileRenderer`
+enables optional renderer timing counters; normal builds omit that overhead.
+
 ## Local development
 
 Requirements: Windows x64, Visual Studio C++ tools and Windows SDK, Clang,

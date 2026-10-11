@@ -77,6 +77,13 @@ message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
 add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
                  EXCLUDE_FROM_ALL)
 
+option(HAZE_RSX_PROFILE "Collect native renderer CPU/GPU timing counters" OFF)
+if(HAZE_RSX_PROFILE)
+    set_property(SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c"
+        DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
+        COMPILE_DEFINITIONS YZ_PERF_PROFILE)
+endif()
+
 # ---------------------------------------------------------------------------
 # The HLE NID table
 # ---------------------------------------------------------------------------

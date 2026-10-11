@@ -1,6 +1,7 @@
 param(
     [switch]$RuntimeOnly,
     [switch]$Test,
+    [switch]$ProfileRenderer,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
     [int]$Jobs = 8
 )
@@ -36,11 +37,16 @@ if ($RuntimeOnly) {
     $build = Join-Path $root 'build\haze'
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu"
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    $frameTest = Join-Path $root 'local/test_frame_pump.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/Fe$frameTest" "/Fo$root/local/test_frame_pump.obj" "$root/tests/test_frame_pump.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Frame-pump test compilation failed.' }
+    & $frameTest
+    if ($LASTEXITCODE -ne 0) { throw 'Frame-boundary presentation test failed.' }
     & $python "$root/tests/test_firmware_relocation.py"
     if ($LASTEXITCODE -ne 0) { throw 'Firmware ELF relocation tests failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
