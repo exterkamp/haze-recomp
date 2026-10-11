@@ -12,7 +12,7 @@ application version **01.00**. Other regions and updates are not validated.
 | Feature | Status |
 | --- | --- |
 | Standalone native Windows executable | Renders menus and the opening campaign scene, including squad, weapons, carrier and sky |
-| Campaign gameplay, audio, saves | Opening scene responds to movement/camera input; profile and checkpoint reload after restart; native mixer now produces nonzero samples; mission completion and sound quality unvalidated |
+| Campaign gameplay, audio, saves | Fresh opening cinematic, first checkpoint/save and first squad-gathering objective verified; movement/camera and pause/resume work; later combat, mission completion and sound quality unvalidated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
 | PC key prompts | Planned; requires UI/asset work |
@@ -136,6 +136,20 @@ not respond. Decoded movie playback remains unimplemented.
 - The upstream runtime compiled locally with Clang 20.1.8.
 
 ## Verified local progress and current blockers
+
+The latest native probes verified unattended startup through the undecoded
+branding videos to the Press Start screen, then loaded the campaign through
+its normal menus. A continued checkpoint allowed walking across the carrier,
+camera rotation, NPC animation and pause/resume. A separate New Campaign probe
+used an isolated copy of the saves, played the opening cinematic without
+injected input, reached and saved its first checkpoint, and completed
+**Gather with the rest of your squad** after walking into the group. The green
+objective-complete notification was captured. Both campaign probes closed
+cleanly with exit code 0. Combat and subsequent mission progression remain
+unvalidated. Keyboard/window-message and raw-mouse mapping regressions pass;
+these campaign probes used diagnostic pad input, so physical mouse/keyboard
+feel still needs an interactive check. No game or firmware assets were added
+to Git.
 
 The Windows executable is `build/haze/HazeRecomp.exe`. Native boot probes
 create PPU worker threads, execute lifted SPU jobs, read the game archives,
