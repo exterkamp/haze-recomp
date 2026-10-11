@@ -175,9 +175,16 @@ compiled regression cases check 2,496 shift operations and 6,018 saturated sums,
 including register aliases and sticky saturation state. A local fixture using
 the game's cache routines fails on lookup 16 before the shift fix and passes
 200 lookups afterward. The latest native campaign run advances through the
-opening credits without the observed iterator stall, but runs below one frame
-per second. Worker execution and synchronization are being profiled. Campaign
-3D rendering, control and co-op remain unvalidated.
+opening credits without the observed iterator stall. Profiling found the physics
+coordinator blocked in synchronous log writes: the SDK disabled the runner's
+stdout buffering and emitted each task dispatch even in quiet mode. Quiet runs
+now retain buffering and suppress those success logs. A native campaign probe
+improved from below 1 FPS to roughly 16–27 FPS during its opening sequence.
+These are local diagnostic rates, not a validated gameplay benchmark. Optional
+`SPU_JOB_TIMING=1` reports setup and execution wall times. The runtime regression
+suite passes. The opening title and credits render, but subsequent captures are
+black despite scene draw submissions; rendering is the next blocker. Campaign
+control and co-op remain unvalidated.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
