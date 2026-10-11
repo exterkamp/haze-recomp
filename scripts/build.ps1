@@ -59,6 +59,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'DMA repeat-watchdog test compilation failed.' }
     & $dmaTest
     if ($LASTEXITCODE -ne 0) { throw 'DMA repeat-watchdog contract test failed.' }
+    $mfcTest = Join-Path $root 'local/test_mfc_context_state.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$mfcTest" "/Fo$root/local/test_mfc_context_state.obj" "$sdk/runtime/spu/tests/test_mfc_context_state.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Private MFC state test compilation failed.' }
+    & $mfcTest
+    if ($LASTEXITCODE -ne 0) { throw 'Private MFC context isolation test failed.' }
     $dispatchTest = Join-Path $root 'local/test_taskset_dispatch.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/I$sdk/runtime/platform" "/Fe$dispatchTest" "/Fo$root/local/test_taskset_dispatch.obj" "$sdk/runtime/spu/tests/test_taskset_dispatch.c"
     if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch test compilation failed.' }
@@ -99,6 +104,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU overlay binding test compilation failed.' }
     & $bindingTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU overlay content binding test failed.' }
-    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, SAIL lifecycle, dialog callbacks, large-file, memory-container, overlay staging, and SPU ELF loader tests passed.'
+    $lookupTest = Join-Path $root 'local/test_code_lookup.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$lookupTest" "/Fo$root/local/test_code_lookup.obj" "$sdk/runtime/spu/tests/test_code_lookup.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU resident lookup test compilation failed.' }
+    & $lookupTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU resident lookup test failed.' }
+    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog and isolation, taskset dispatch, SAIL lifecycle, dialog callbacks, large-file, memory-container, overlay staging/binding, and SPU ELF loader tests passed.'
 }
 

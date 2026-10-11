@@ -133,9 +133,19 @@ SPU function detection, including one-entry tables the heuristic missed.
 The physics overlay is compiled separately and bound to its relocated staging
 buffer by its complete content fingerprint. Synthetic checks cover overlay
 selection, relocation, content discrimination and allocation reuse. Native
-campaign startup advances past the first blocking queue wait, but physics
-workers still assert and mission rendering, control and physics remain
-unvalidated.
+campaign startup advances past the first blocking queue wait. Mission
+rendering, control and physics remain unvalidated.
+
+Each SPU context now owns its DMA command queue and tag-completion state.
+The former eight-slot registry shared an overflow engine during Haze's worker
+dispatch, allowing unrelated tasks to mix DMA state. Job exit releases the
+private engine. A concurrent regression checks 32 contexts and 3,200 reuse
+cycles. A separate launch race ran one task's compiled code with another
+task's arguments after task-ID reuse. CreateTask now schedules current ready
+state, and asynchronous dispatch snapshots arguments before launching its
+host thread. The observed alignment assertions are gone in a native campaign
+probe, but startup still waits for a later physics completion. This has not
+established playable campaign gameplay.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

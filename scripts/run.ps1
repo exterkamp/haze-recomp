@@ -48,6 +48,9 @@ try {
     # Shader dumps from the SDK use relative paths. Keep them inside this
     # ignored run directory, along with the logs and captured game frames.
     $p = Start-Process -FilePath $exe -ArgumentList ('"{0}"' -f $elf) -WorkingDirectory $runDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'boot.stdout.log') -RedirectStandardError (Join-Path $runDir 'boot.stderr.log')
+    # Windows PowerShell loses ExitCode for redirected children unless the
+    # process handle is acquired while the child is still alive.
+    $null = $p.Handle
     $ended = $p.WaitForExit($Seconds * 1000)
     if (-not $ended) {
         Stop-Process -Id $p.Id -ErrorAction SilentlyContinue

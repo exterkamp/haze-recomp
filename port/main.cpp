@@ -387,7 +387,8 @@ static DWORD WINAPI haze_boot_reporter(LPVOID)
         ppu_report_guest_lrs();
         if (getenv("HAZE_QUEUE_REPORT")) {
             /* BLUS30094 boot queues; read-only diagnostics, not portable symbols. */
-            const uint32_t queues[] = {0x42400180u, 0x42400280u};
+            const uint32_t queues[] = {0x40400180u, 0x40400280u,
+                                      0x014E3000u, 0x014E3980u, 0x014E6900u};
             for (uint32_t q : queues) {
                 fprintf(stderr, "[haze-queue] ea=%08X head=%08X tail=%08X depth=%u"
                         " size=%u buf=%08X waiters=%08X\n", q,
