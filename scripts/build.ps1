@@ -108,6 +108,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling test compilation failed.' }
     & $fifoTest
     if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling consumer acknowledgment test failed.' }
+    $fpTest = Join-Path $root 'local/test_fp_decompiler.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$fpTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_decompiler.c" "$sdk/libs/video/rsx_fp_decompiler.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler test compilation failed.' }
+    & $fpTest
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler regression failed.' }
+    $predicateTest = Join-Path $root 'local/test_fp_predication.exe'
+    & $clang /nologo /EHsc /W0 /O1 "/I$sdk/include" "/Fe$predicateTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_predication.cpp" "$sdk/libs/video/rsx_fp_decompiler.c" /link d3d11.lib d3dcompiler.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment predication test compilation failed.' }
+    & $predicateTest
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment predication shader execution failed.' }
     $sailTest = Join-Path $root 'local/test_sail_lifecycle.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$sailTest" "/Fo$root/local/test_sail_lifecycle.obj" "$sdk/libs/codec/tests/test_sail_lifecycle.c"
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }

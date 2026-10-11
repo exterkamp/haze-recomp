@@ -226,6 +226,15 @@ The full regression suite passes. A subsequent native opening-sequence probe
 advances without observed FIFO recoveries or PSO failures, but its captured
 scene remains black. Campaign gameplay and co-op are still unvalidated.
 
+Fragment predication now selects individual lanes instead of interpolating
+between old and new register values. Interpolation allowed an inactive NaN or
+infinity to corrupt the selected result and turn it black. An asset-free test
+executes the generated shaders through D3D11 WARP: the original implementation
+fails, while the corrected version passes with 16-bit and 32-bit registers,
+both with normal and IEEE-strict compilation. The build's test mode runs this
+check and the existing 36 fragment-decompiler checks. This fixes a verified
+shader defect; the native scene still needs further rendering investigation.
+
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
 waiters. A taskset scheduler scans for children created by persistent SPU
