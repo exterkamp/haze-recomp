@@ -154,15 +154,20 @@ the build limits that ownership to the range before LS `0x17100`, where Haze
 streams writable work data. Its fingerprint still covers the complete segment.
 This prevents data loads from evicting its compiled instructions. Regression
 checks cover tail writes, continued code loads and actual code overwrites.
-The current native trace reaches a later physics dispatch with an empty object
-and a null handler; first-mission loading still stalls. This is not a playable
-campaign milestone.
-
 The SPU instruction tracer now reports the actual destination of four-operand
 instructions, including shuffle and select operations. A regression checks all
 six encodings. A corrected campaign trace follows the empty object to a DMA
 list whose source is `0x80`; the physics allocator returns that invalid address
-before the list is built. The allocation path remains under investigation.
+before the list is built. This was caused by the SDK writing 12 bytes into
+Haze's eight-byte lightweight condition variable, overwriting the adjacent
+allocator callback. The corrected handler stores two 32-bit fields, matching
+the [retail ABI structure](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/Cell/lv2/sys_lwcond.h).
+A regression runs the actual handler and checks neighboring memory, callback
+preservation, queue IDs, and mutex release/reacquisition during wait. Native
+campaign probes now retain the correct allocator callback and advance without
+the observed invalid DMA or null SPU physics handler. Mission loading still
+stalls in a PPU object iterator; its creation path is under investigation.
+Campaign rendering and control remain unvalidated.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

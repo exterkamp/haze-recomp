@@ -45,6 +45,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
     & $python "$sdk/tools/test_spu_trace_registers.py"
     if ($LASTEXITCODE -ne 0) { throw 'SPU destination-register trace tests failed.' }
+    $condTest = Join-Path $root 'local/test_sysprx_lwcond.exe'
+    & $clang /nologo /W0 /O1 /Gy /Gw "/I$root/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable test compilation failed.' }
+    & $condTest
+    if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable boundary and wait test failed.' }
     $queueTest = Join-Path $root 'local/test_queue_size.exe'
     New-Item -ItemType Directory -Path (Split-Path $queueTest -Parent) -Force | Out-Null
     & $clang /nologo /W0 "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$queueTest" "/Fo$root/local/test_queue_size.obj" "$sdk/libs/spurs/tests/test_queue_size.c"

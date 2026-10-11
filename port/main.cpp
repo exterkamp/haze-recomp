@@ -396,6 +396,16 @@ static DWORD WINAPI haze_boot_reporter(LPVOID)
                         vm_read32(q + 8), (uint32_t)vm_read64(q + 16), vm_read32(q + 32));
             }
         }
+        if (getenv("HAZE_PHYSICS_REPORT")) {
+            /* BLUS30094 allocator callbacks and their original OPDs. */
+            uint32_t alloc = vm_read32(0x014E150Cu);
+            fprintf(stderr, "[haze-physics] alloc-opd=%08X code=%08X toc=%08X"
+                    " original=%08X,%08X config=%08X,%08X\n", alloc,
+                    alloc ? vm_read32(alloc) : 0,
+                    alloc ? vm_read32(alloc + 4) : 0,
+                    vm_read32(0x00E79E20u), vm_read32(0x00E79E24u),
+                    vm_read32(0x00E8D6D4u), vm_read32(0x00E8D6D8u));
+        }
         /* Windows unbuffered stdio can issue a pipe write for every character.
          * Keep bounded-run logs current without slowing down the guest. */
         fflush(stdout);
