@@ -43,6 +43,11 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    $fingerprintTest = Join-Path $root 'local/test_fingerprint_cache.exe'
+    & $clang /nologo /W0 /O2 "/I$sdk/include" "/Fe$fingerprintTest" "/Fo$root/local/test_fingerprint_cache.obj" "$sdk/runtime/spu/tests/test_fingerprint_cache.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU fingerprint cache test compilation failed.' }
+    & $fingerprintTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU fingerprint cache identity/concurrency test failed.' }
     foreach ($primitive in @('test_spu_helpers', 'test_spu_shufb')) {
         $primitiveTest = Join-Path $root "local/$primitive.exe"
         & $clang /nologo /W0 /O1 /clang:-msse4.1 "/I$sdk/include" "/Fe$primitiveTest" "/Fo$root/local/$primitive.obj" "$sdk/runtime/spu/tests/$primitive.c"

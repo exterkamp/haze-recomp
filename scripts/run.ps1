@@ -4,7 +4,9 @@ param(
     [ValidateSet(0,2,4,8,16)][int]$CaptureFrames = 0,
     [ValidateRange(0,1000000)][int]$FrameSkip = 0,
     [ValidateRange(1,1000000)][int]$FrameEvery = 1,
-    [ValidateSet('Live','Legacy')][string]$Renderer = 'Live'
+    [ValidateSet('Live','Legacy')][string]$Renderer = 'Live',
+    [switch]$Audio,
+    [switch]$CaptureAudio
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -28,6 +30,10 @@ $settings = @{
     PS3_HLE_TRACE = [string]$TraceCalls
     PS3_HLE_UNRESOLVED = 'fail'
     HAZE_BOOT_REPORT = '1'
+    # Automated diagnostic runs are silent; retain the real audio pipeline and
+    # device timing for representative performance measurements.
+    AUDIO_MUTE = $(if ($Audio) { '0' } else { '1' })
+    AUDIO_WAV = $(if ($CaptureAudio) { Join-Path $runDir 'audio.f32le' } else { $null })
     PS3_VERBOSE = $(if ($null -ne $env:PS3_VERBOSE) { $env:PS3_VERBOSE } else { '0' })
     RSX_LIVE_DRAW = $(if ($Renderer -eq 'Live') { '1' } else { '0' })
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
@@ -74,6 +80,8 @@ try {
         capture_skip = $FrameSkip
         capture_every = $FrameEvery
         renderer = $Renderer
+        audio_muted = -not $Audio
+        audio_capture = [bool]$CaptureAudio
     }
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'local\boot-result.json') -Encoding UTF8
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDir 'boot-result.json') -Encoding UTF8

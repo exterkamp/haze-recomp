@@ -68,6 +68,76 @@ FIFO idle wait was reduced from 4 ms to 1 ms for label dependencies; these
 changes have not established an acceptable steady gameplay rate or eliminated
 all visible artifacts. CPU simulation/rendering performance needs further work.
 
+## Native performance investigation
+
+The minimum target is 30 actual gameplay frames per second with consistent
+33.3 ms intervals. A firsthand [PlayStation LifeStyle review](https://www.playstationlifestyle.net/2009/01/03/ps3-review-haze/)
+reports 30 FPS with rare drops in large encounters, while
+[GameSpot's review](https://www.gamespot.com/reviews/haze-review/1900-6191308/)
+describes few frame-rate jitters. These are qualitative retail observations;
+neither supplies frame-time data for the opening carrier or co-op. A verified
+hardware capture of the matching scene would make a stronger reference.
+
+Native profiling on October 11 identified CPU texture hashing, vertex conversion,
+inactive memory diagnostics and SPU image fingerprinting as costs. GPU timestamps
+measured about 1.4–1.7 ms of execution per carrier frame. Full-content hashing now
+uses independent lanes; vertex conversion batches common formats; inactive PPU
+memory probes take a shorter path; SPU fingerprints reuse an exact byte-validated
+cache. PUT/label writes also wake the FIFO consumer. Bounds, reservation writes
+and complete content validation remain active.
+
+Exploratory 600-frame carrier samples ranged from a 9.9 FPS baseline (p95 162 ms)
+to 16.1 FPS (p95 81 ms) after the first changes. A subsequent build measured
+11.7 FPS in another interval, despite similar GPU cost. Scene activity and timing
+vary across these sessions, so these numbers do not establish a controlled
+end-to-end speedup. **30 FPS and consistent pacing are not achieved.** The live
+FIFO timeout comparison did not justify replacing the normal 1 ms wait with
+busy polling. A bounded, full-source-validated vertex payload cache is available
+experimentally with `RSX_VERTEX_CACHE=1`; normal builds leave it off pending
+native A/B validation.
+
+A longer session exposed repeated failures to decode an unsupported D16 depth
+texture after texture-cache saturation. Each binding previously scanned all
+4,096 LRU candidates again, recording over a million failed attempts. Failed
+descriptors are now retained even when the cache is full, with at most one retry
+per later frame so temporarily unavailable data can recover. Regression tests
+exercise saturation and repeated bindings. This bounds the overhead; D16 guest
+texture decoding itself still needs implementation.
+
+The renderer now implements the polygon offset state Haze actually submits for
+overlapping surfaces. Supported GPUs use dynamic D3D12 depth bias; older devices
+use static PSO state. Synthetic WARP readbacks check coplanar decals with positive,
+negative and zero bias. This repairs an omitted state, but temporal validation of
+the reported deck-paint flicker is still outstanding, and other visible artifacts
+remain.
+
+For reproducible diagnostic captures:
+
+```powershell
+.\scripts\build.ps1 -SpuFma -ProfileRenderer -Test
+$env:RSX_PROFILE_LIGHT = '1'  # Omit the legacy shader-variant tracking overhead.
+$env:RSX_PROFILE_CSV = 'renderer.csv'
+$env:RSX_PRESENT_CSV = 'presents.csv'
+$env:HAZE_PUMP_PROFILE = '1'
+.\scripts\run.ps1 -Seconds 600
+# Load the carrier; verify the scene before selecting a frame interval.
+.venv\Scripts\python.exe scripts/summarize_profile.py local/runs/<run>/renderer.csv --last 600
+.venv\Scripts\python.exe scripts/profile_native_cpu.py <HazePID> 20
+```
+
+CPU timing scopes overlap: draw preparation includes vertex conversion and
+texture work. Instruction samples include waiting threads; they are not CPU
+utilization percentages. Per-thread CPU counters are reported separately. Windows
+ETW profiling was unavailable under the machine's performance-profiling policy,
+so the native sampler briefly reads thread instruction pointers and resumes each
+thread before resolving symbols from the matching PDB.
+
+Diagnostic `run.ps1` sessions are **muted by default** while retaining mixing,
+device-clock pacing and game audio events. Add `-CaptureAudio` to save the original
+mix as `audio.f32le` (48 kHz stereo float32), or explicitly `-Audio` to hear a test.
+The ordinary gameplay launcher retains sound. All captures stay under ignored
+`local/runs`. Rebuild without `-ProfileRenderer` for ordinary play.
+
 ## Local development
 
 Requirements: Windows x64, Visual Studio C++ tools and Windows SDK, Clang,

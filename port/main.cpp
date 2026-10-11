@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "haze_input.h"
+#include "haze_pump_profile.h"
 
 #ifdef _WIN32
 /* timeBeginPeriod: <windows.h> arrives with WIN32_LEAN_AND_MEAN set, which
@@ -108,6 +109,7 @@ void     cellGcm_rsx_process_fifo(void);      /* drain get -> put */
 unsigned cellGcm_flip_request_count(void);
 uint32_t cellGcmGetCurrentDisplayBufferId(void);
 void cellGcm_fifo_kick_wait(unsigned ms);
+int cellGcm_fifo_has_queued_work(void);
 }
 
 void ps3_sampler_start(void); /* SDK profiler has C++ linkage. */
@@ -174,6 +176,7 @@ int rsx_live_draw_enabled(void);
 int rsx_live_draw_init(void*, uint32_t, uint32_t,
     const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
 void rsx_live_draw_present(uint32_t);
+void rsx_live_draw_dump_present_samples(void);
 int rsx_null_backend_init(uint32_t, uint32_t, const char*);
 int rsx_null_backend_pump_messages(void);
 void* rsx_null_backend_get_hwnd(void);
@@ -222,6 +225,7 @@ extern "C" unsigned ppu_boot_frames_presented(void)
 
 static void present_guest_frame(void)
 {
+    const auto profile_begin = g_pump_profile.now();
     static const bool trace = getenv("HAZE_FRAME_TRACE") != nullptr;
     if (trace) {
         static unsigned previous_flip = 0, duplicates = 0, presents = 0;
@@ -233,6 +237,8 @@ static void present_guest_frame(void)
                     presents, flip, duplicates, g_fifo_drains);
     }
     present_frame();
+    g_pump_profile.present += g_pump_profile.now()-profile_begin;
+    ++g_pump_profile.presents;
     /* This thread increments and guest threads read, so interlocked rather
      * than a volatile ++, which on arm64 is neither atomic nor a fence. */
     InterlockedIncrement(&g_frames_presented);
@@ -240,10 +246,17 @@ static void present_guest_frame(void)
 
 #include "haze_frame_pump.h"
 
+static void profile_fifo_drain(void)
+{
+    const auto begin=g_pump_profile.now();
+    cellGcm_rsx_process_fifo();
+    g_pump_profile.fifo+=g_pump_profile.now()-begin;
+    ++g_pump_profile.drains;
+}
 static void drain_and_present(void)
 {
     ++g_fifo_drains;
-    haze_drain_frames(cellGcm_rsx_process_fifo, cellGcm_take_flip_pending,
+    haze_drain_frames(profile_fifo_drain, cellGcm_take_flip_pending,
                       present_guest_frame);
 }
 
@@ -278,13 +291,21 @@ static DWORD WINAPI frame_clock(LPVOID)
         /* Haze also waits on RSX labels, which do not signal the REF kick.
          * Keep those render-pass dependencies responsive instead of adding
          * a four-millisecond host delay to every producer/consumer round trip. */
-        cellGcm_fifo_kick_wait(1);
+        const auto wait_begin=g_pump_profile.now();
+        if (g_pump_profile.enabled) {
+            ++g_pump_profile.waits;
+            g_pump_profile.queued_waits+=cellGcm_fifo_has_queued_work()!=0;
+        }
+        cellGcm_fifo_kick_wait(g_pump_profile.wait_ms);
+        g_pump_profile.wait+=g_pump_profile.now()-wait_begin;
         ULONGLONG now = GetTickCount64();
 
         int fired = 0;
         while ((long long)(now - next_tick) >= 0 && fired < 240) {
+            const auto tick_begin=g_pump_profile.now();
             cellGcmTickVBlank();
             cellGcmTickFlip();
+            g_pump_profile.tick+=g_pump_profile.now()-tick_begin;
             /* Drain the FIFO every tick. This is what writes the RSX sync-fence
              * labels the game's per-frame logic blocks on, so it has to keep
              * advancing at 60 Hz even while present() throttles. */
@@ -293,6 +314,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             fired++;
         }
         if (fired >= 240) next_tick = now;   /* fell too far behind -- resync */
+        g_pump_profile.report();
 
         /* Drain at the outer cadence too, not only on the 16 ms tick: titles
          * fence every render pass on a label the drain writes, and one wave of
@@ -302,6 +324,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             drain_and_present();
 
             if (pump_messages() != 0) {
+                if (s_rsx_live) rsx_live_draw_dump_present_samples();
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.
                 exit(0);
