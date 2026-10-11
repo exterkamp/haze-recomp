@@ -136,9 +136,19 @@ def lift(jobs: int) -> None:
     })
 
 
+def lift_spu() -> None:
+    require_elf()
+    if not (GENERATED / "spu-images").is_dir():
+        run("extract_spu_images.py", ELF, "--output", GENERATED / "spu-images")
+    run("build_spu_workloads.py", "--images", GENERATED / "spu-images",
+        "--lifted", GENERATED / "spu", "--out", GENERATED / "spu" / "spu_workloads.c",
+        "--register-fn", "haze_spu_register_all", "--constructor", "--title", "haze",
+        "--lift-overlays")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("inventory", "analyze", "lift"))
+    parser.add_argument("action", choices=("inventory", "analyze", "lift", "lift-spu"))
     parser.add_argument("--jobs", type=int, default=4)
     args = parser.parse_args()
     try:
@@ -146,6 +156,8 @@ def main() -> None:
             inventory()
         elif args.action == "analyze":
             analyze()
+        elif args.action == "lift-spu":
+            lift_spu()
         else:
             lift(args.jobs)
     except (ValueError, FileNotFoundError, subprocess.CalledProcessError) as error:

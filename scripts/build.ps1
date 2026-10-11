@@ -94,6 +94,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU ELF loader test compilation failed.' }
     & $elfTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU ELF overlay isolation test failed.' }
+    $bindingTest = Join-Path $root 'local/test_overlay_binding.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$bindingTest" "/Fo$root/local/test_overlay_binding.obj" "$sdk/runtime/spu/tests/test_overlay_binding.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU overlay binding test compilation failed.' }
+    & $bindingTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU overlay content binding test failed.' }
     Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, SAIL lifecycle, dialog callbacks, large-file, memory-container, overlay staging, and SPU ELF loader tests passed.'
 }
 

@@ -54,11 +54,8 @@ python -m venv .venv
 .venv\Scripts\python.exe scripts/haze.py analyze
 .venv\Scripts\python.exe scripts/haze.py lift --jobs 4
 
-# Initial SPU translation; inspect warnings before accepting the output.
-.venv\Scripts\python.exe external/ps3recomp/tools/build_spu_workloads.py `
-  --images generated/spu-images --lifted generated/spu `
-  --out generated/spu/spu_workloads.c `
-  --register-fn haze_spu_register_all --constructor --title Haze
+# SPU translation, including executable cellOvis overlays.
+.venv\Scripts\python.exe scripts/haze.py lift-spu
 
 .\scripts\build.ps1 -RuntimeOnly
 .\scripts\build.ps1
@@ -129,8 +126,16 @@ for ELF segments whose physical addresses exceed SPU local store. The loader
 preserves resident segments instead of overwriting them with overlays. Tests
 cover staging copies, alignment, bounds, BSS and overlay isolation. SPURS task
 errors now use the retail `0x804109xx` facility; the previous empty-queue code
-made Haze treat a normal retry as fatal. Mission rendering, control and physics
-remain unvalidated.
+made Haze treat a normal retry as fatal. Queue pop now reads Peek and blocking
+as separate third and fourth arguments; a delayed-producer regression verifies
+that blocking pop waits for data. ELF constructor/destructor arrays also seed
+SPU function detection, including one-entry tables the heuristic missed.
+The physics overlay is compiled separately and bound to its relocated staging
+buffer by its complete content fingerprint. Synthetic checks cover overlay
+selection, relocation, content discrimination and allocation reuse. Native
+campaign startup advances past the first blocking queue wait, but physics
+workers still assert and mission rendering, control and physics remain
+unvalidated.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
