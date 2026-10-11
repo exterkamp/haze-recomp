@@ -123,6 +123,15 @@ IDs and exhaustion after repeated startup buffers. Regression checks exercise
 the syscall table, capacity and lifetime errors, 300 allocate/free cycles,
 and reservation isolation. Campaign loading is still under investigation.
 
+New Campaign now reaches the first mission's loading screen. Physics setup
+required the retail one-argument overlay-size API and a separate staging buffer
+for ELF segments whose physical addresses exceed SPU local store. The loader
+preserves resident segments instead of overwriting them with overlays. Tests
+cover staging copies, alignment, bounds, BSS and overlay isolation. SPURS task
+errors now use the retail `0x804109xx` facility; the previous empty-queue code
+made Haze treat a normal retry as fatal. Mission rendering, control and physics
+remain unvalidated.
+
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
 waiters. A taskset scheduler scans for children created by persistent SPU

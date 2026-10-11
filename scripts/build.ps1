@@ -84,6 +84,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Memory-container test compilation failed.' }
     & $memoryTest
     if ($LASTEXITCODE -ne 0) { throw 'Memory-container allocation test failed.' }
-    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, SAIL lifecycle, dialog callbacks, large-file, and memory-container tests passed.'
+    $ovisTest = Join-Path $root 'local/test_ovis_elf.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$ovisTest" "/Fo$root/local/test_ovis_elf.obj" "$sdk/libs/misc/tests/test_ovis_elf.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Overlay ELF query test compilation failed.' }
+    & $ovisTest
+    if ($LASTEXITCODE -ne 0) { throw 'Overlay ELF query ABI test failed.' }
+    $elfTest = Join-Path $root 'local/test_elf_overlay.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$elfTest" "/Fo$root/local/test_elf_overlay.obj" "$sdk/runtime/spu/tests/test_elf_overlay.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU ELF loader test compilation failed.' }
+    & $elfTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU ELF overlay isolation test failed.' }
+    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, taskset dispatch, SAIL lifecycle, dialog callbacks, large-file, memory-container, overlay staging, and SPU ELF loader tests passed.'
 }
 
