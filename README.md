@@ -94,6 +94,24 @@ an initial mapping through the game's pad input, not direct mouse aiming;
 the game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
 configuration file. Closing the game window now ends its native process.
 
+The PC defaults were checked against the running game's **Customize Controls**
+page with its Default layout:
+
+| Action | PC default |
+| --- | --- |
+| Move / look | WASD / mouse |
+| Fire / weapon zoom | Left / right mouse |
+| Reload / use | R / E |
+| Jump / crouch | Space / Ctrl |
+| Switch weapon | X or mouse wheel |
+| Throw grenade / Nectar or play dead | G / Q |
+| Melee | F |
+| Menu confirm / back / start or pause | Space / X / Enter or Escape |
+
+Haze defaults to toggle zoom and crouch. Its **Settings > Control Setup** menu
+can change those to held input. Selecting a different controller layout there
+also changes the actions associated with the PC button bindings.
+
 The Ubisoft, Free Radical and menu attract videos currently have no decoder.
 The port automatically presses the game's skip button while those exact streams
 are active, then cancels it when the player stops/closes. This fixes the black

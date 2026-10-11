@@ -45,6 +45,10 @@ int main() {
     InterlockedExchange(&captured,1);
     InterlockedExchange(&mouse_x,8); InterlockedExchange(&mouse_y,-8);
     p=sample(); assert((p.buttons&CELL_PAD_CTRL_R1) && p.rx>128 && p.ry<128);
+    keys[VK_RBUTTON]=true; keys[VK_CONTROL]=true; keys['R']=true;
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_R3) && (p.buttons&CELL_PAD_CTRL_L3) &&
+                       (p.buttons&CELL_PAD_CTRL_TRIANGLE));
+    keys[VK_RBUTTON]=false; keys[VK_CONTROL]=false; keys['R']=false;
     p=sample(); assert(p.rx==128 && p.ry==128); // No residual camera drift.
     InterlockedExchange(&wheel,1);
     assert(sample().buttons&CELL_PAD_CTRL_CIRCLE);
@@ -109,5 +113,8 @@ int main() {
     isolated.playback(456,uri,false,900); // An unrelated player cannot cancel it.
     assert(isolated.sample(1100,pressed) && pressed);
     assert(!isolated.sample(10100,pressed) && !pressed); // Bounded failure path.
+    isolated.playback(123,uri,true,20000);
+    assert(!isolated.playback(123,"story.pam",true,20100));
+    assert(!isolated.sample(20500,pressed) && !pressed);
     puts("Haze keyboard taps, focus release, mouse capture gating and movie skip isolation passed.");
 }

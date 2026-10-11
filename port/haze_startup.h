@@ -26,6 +26,7 @@ public:
             if (owner == player) active = false;
             return false;
         }
+        if (owner == player) active = false;
         if (!known_video(uri)) return false;
         owner = player; started = now; active = true;
         return true;
