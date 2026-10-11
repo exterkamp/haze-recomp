@@ -60,7 +60,8 @@ python -m venv .venv
 # Translate the audio plug-ins at Haze's observed local-store allocations.
 .venv\Scripts\python.exe scripts/lift_audio_plugins.py
 # Requires locally installed PS3 firmware; no firmware is downloaded or bundled.
-.venv\Scripts\python.exe scripts/lift_firmware.py --dev-flash 'C:\path\to\dev_flash'
+$env:PS3_DEV_FLASH = 'C:\path\to\dev_flash'
+.venv\Scripts\python.exe scripts/lift_firmware.py
 
 .\scripts\build.ps1 -RuntimeOnly
 .\scripts\build.ps1
@@ -297,6 +298,14 @@ staging buffers. Native menu probes now produce nonzero mixer samples without
 the earlier unlifted-code termination. Sound quality and all campaign audio
 paths still need validation. Additional allocation locations may need native
 translations as more missions are exercised.
+
+A subsequent clean native probe resumes the saved carrier scene, displays the
+first squad objective, and responds to camera/forward input while producing
+nonzero audio throughout. Observed frame rates vary with the view: roughly
+14–34 FPS, with temporary drops into single figures during this test. A prior
+run with heavy local-store dumping exhausted the physics task IDs and exited;
+the clean probe has not repeated that failure. Stability, combat and mission
+completion still need testing.
 
 `scripts/lift_firmware.py` currently validates the USA build's decoder allocation
 at base `0x33100`. It uses `PS3_DEV_FLASH`, an explicit `--dev-flash`, or the local
