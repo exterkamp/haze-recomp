@@ -81,7 +81,7 @@ behavioral compatibility test.
 - 44 embedded SPU ELF images; several produce unsupported `.word` warnings.
 - SPU image at ELF offset `0x00d15f80` has multiple executable segments and
   overlays. The fork now selects the segment containing entry `0x200f0`,
-  fixing the missing entry symbol. Seven synthetic regression cases pass.
+  fixing the missing entry symbol. Synthetic segment and overlay checks pass.
   Overlay execution and unsupported instruction/data classification still
   need further work.
 - The upstream runtime compiled locally with Clang 20.1.8.
@@ -146,6 +146,17 @@ state, and asynchronous dispatch snapshots arguments before launching its
 host thread. The observed alignment assertions are gone in a native campaign
 probe, but startup still waits for a later physics completion. This has not
 established playable campaign gameplay.
+
+The overlay compiler now discovers entries called from other executable
+segments. Interpreter fallback, indirect calls and call returns use the same
+resident-code ownership rules. For BLUS30094's small-island physics overlay,
+the build limits that ownership to the range before LS `0x17100`, where Haze
+streams writable work data. Its fingerprint still covers the complete segment.
+This prevents data loads from evicting its compiled instructions. Regression
+checks cover tail writes, continued code loads and actual code overwrites.
+The current native trace reaches a later physics dispatch with an empty object
+and a null handler; first-mission loading still stalls. This is not a playable
+campaign milestone.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

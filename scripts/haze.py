@@ -143,7 +143,11 @@ def lift_spu() -> None:
     run("build_spu_workloads.py", "--images", GENERATED / "spu-images",
         "--lifted", GENERATED / "spu", "--out", GENERATED / "spu" / "spu_workloads.c",
         "--register-fn", "haze_spu_register_all", "--constructor", "--title", "haze",
-        "--lift-overlays")
+        "--lift-overlays",
+        # BLUS30094 Havok's small-island overlay streams mutable work data
+        # starting at LS 0x17100. Keep its complete content fingerprint, but
+        # limit compiled-code ownership to the preceding range.
+        "--overlay-code-end", "spu_0022_at_00D15F80:3=0x17100")
 
 
 def main() -> None:
