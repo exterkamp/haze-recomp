@@ -54,6 +54,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Game-data callback test compilation failed.' }
     & $gameDataTest
     if ($LASTEXITCODE -ne 0) { throw 'Game-data callback ABI test failed.' }
-    Write-Output 'SPU segment selection, SPURS queue query, and game-data callback tests passed.'
+    $dmaTest = Join-Path $root 'local/test_dma_repeat.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/I$sdk/runtime/platform" "/Fe$dmaTest" "/Fo$root/local/test_dma_repeat.obj" "$sdk/runtime/spu/tests/test_dma_repeat.c"
+    if ($LASTEXITCODE -ne 0) { throw 'DMA repeat-watchdog test compilation failed.' }
+    & $dmaTest
+    if ($LASTEXITCODE -ne 0) { throw 'DMA repeat-watchdog contract test failed.' }
+    $dispatchTest = Join-Path $root 'local/test_taskset_dispatch.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/I$sdk/runtime/platform" "/Fe$dispatchTest" "/Fo$root/local/test_taskset_dispatch.obj" "$sdk/runtime/spu/tests/test_taskset_dispatch.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch test compilation failed.' }
+    & $dispatchTest
+    if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch contract test failed.' }
+    Write-Output 'SPU segment selection, SPURS queues, game-data callbacks, DMA watchdog, and taskset dispatch tests passed.'
 }
 

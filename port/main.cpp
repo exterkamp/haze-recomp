@@ -102,6 +102,8 @@ void     cellGcm_rsx_process_fifo(void);      /* drain get -> put */
 unsigned cellGcm_flip_request_count(void);
 }
 
+void ps3_sampler_start(void); /* SDK profiler has C++ linkage. */
+
 /* ---------------------------------------------------------------------------
  * RSX present backend
  * -----------------------------------------------------------------------*/
@@ -326,6 +328,20 @@ static DWORD WINAPI haze_boot_reporter(LPVOID)
         fprintf(stderr, "[haze-boot] last-hle=0x%08X (%s)\n",
                 g_last_hle_nid, g_last_hle_name ? g_last_hle_name : "");
         ppu_report_guest_lrs();
+        if (getenv("HAZE_QUEUE_REPORT")) {
+            /* BLUS30094 boot queues; read-only diagnostics, not portable symbols. */
+            const uint32_t queues[] = {0x42400180u, 0x42400280u};
+            for (uint32_t q : queues) {
+                fprintf(stderr, "[haze-queue] ea=%08X head=%08X tail=%08X depth=%u"
+                        " size=%u buf=%08X waiters=%08X\n", q,
+                        vm_read32(q), vm_read32(q + 4), vm_read32(q + 12),
+                        vm_read32(q + 8), (uint32_t)vm_read64(q + 16), vm_read32(q + 32));
+            }
+        }
+        /* Windows unbuffered stdio can issue a pipe write for every character.
+         * Keep bounded-run logs current without slowing down the guest. */
+        fflush(stdout);
+        fflush(stderr);
     }
 }
 #endif
@@ -350,8 +366,9 @@ int main(int argc, char** argv)
      * inflates every shorter wait the title makes and throttles the whole
      * thing. POSIX timers are already fine-grained. */
     timeBeginPeriod(1);
-    setvbuf(stdout, NULL, _IONBF, 0);   /* unbuffered: do not lose prints on a kill */
-    setvbuf(stderr, NULL, _IONBF, 0);
+    static char stdout_buffer[64 * 1024], stderr_buffer[64 * 1024];
+    setvbuf(stdout, stdout_buffer, _IOFBF, sizeof stdout_buffer);
+    setvbuf(stderr, stderr_buffer, _IOFBF, sizeof stderr_buffer);
     SetUnhandledExceptionFilter(haze_crash_filter);
 #endif
 
@@ -380,6 +397,7 @@ int main(int argc, char** argv)
     ppu_sysprx_register();   /* boot-critical CRT */
     ppu_fs_register();       /* cellFs over the game directory */
     lv2_init_syscalls();     /* the lv2 syscall table */
+    if (getenv("PS3_SAMPLE")) ps3_sampler_start();
 
     /* Install the guest-callback hook, then start the frame clock. It no-ops
      * until the title registers its vblank and flip handlers during init. */

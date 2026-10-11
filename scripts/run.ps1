@@ -1,7 +1,9 @@
 param(
-    [ValidateRange(1,60)][int]$Seconds = 20,
+    [ValidateRange(1,600)][int]$Seconds = 60,
     [ValidateRange(0,10000)][int]$TraceCalls = 0,
-    [ValidateSet(0,2,4,8,16)][int]$CaptureFrames = 0
+    [ValidateSet(0,2,4,8,16)][int]$CaptureFrames = 0,
+    [ValidateRange(0,1000000)][int]$FrameSkip = 0,
+    [ValidateRange(1,1000000)][int]$FrameEvery = 1
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -9,6 +11,8 @@ $exe = Join-Path $root 'build\haze\HazeRecomp.exe'
 $elf = Join-Path $root 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable first.' }
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The decrypted Haze ELF is missing.' }
+$runDir = Join-Path $root ('local\runs\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
+New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 # This is a bounded diagnostic runner, not a claim of working gameplay.
 # Keep missing imports visible rather than relying on fabricated success.
 $settings = @{
@@ -16,10 +20,12 @@ $settings = @{
     PS3_HLE_TRACE = [string]$TraceCalls
     PS3_HLE_UNRESOLVED = 'fail'
     HAZE_BOOT_REPORT = '1'
-    PS3_MILESTONE_OUT = (Join-Path $root 'local\boot-milestones.log')
+    PS3_MILESTONE_OUT = (Join-Path $runDir 'boot-milestones.log')
     CELLMARK_DUMP = $(if ($CaptureFrames -gt 0) { [string]$CaptureFrames } else { $null })
     CELLMARK_DUMP_MINDRAWS = '1'
-    CELLMARK_DUMP_DIR = (Join-Path $root 'local\frames')
+    CELLMARK_DUMP_DIR = (Join-Path $runDir 'frames')
+    CELLMARK_DUMP_SKIP = [string]$FrameSkip
+    CELLMARK_DUMP_EVERY = [string]$FrameEvery
 }
 $old = @{}
 foreach ($key in $settings.Keys) {
@@ -31,7 +37,9 @@ if ($CaptureFrames -gt 0) {
     New-Item -ItemType Directory -Path $settings.CELLMARK_DUMP_DIR -Force | Out-Null
 }
 try {
-    $p = Start-Process -FilePath $exe -ArgumentList ('"{0}"' -f $elf) -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $root 'local\boot.stdout.log') -RedirectStandardError (Join-Path $root 'local\boot.stderr.log')
+    # Shader dumps from the SDK use relative paths. Keep them inside this
+    # ignored run directory, along with the logs and captured game frames.
+    $p = Start-Process -FilePath $exe -ArgumentList ('"{0}"' -f $elf) -WorkingDirectory $runDir -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'boot.stdout.log') -RedirectStandardError (Join-Path $runDir 'boot.stderr.log')
     $ended = $p.WaitForExit($Seconds * 1000)
     if (-not $ended) {
         Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
@@ -43,8 +51,12 @@ try {
         timed_out = -not $ended
         exit_code = $(if ($ended) { $p.Refresh(); $p.ExitCode } else { $null })
         gameplay_validated = $false
+        output_directory = $runDir
+        capture_skip = $FrameSkip
+        capture_every = $FrameEvery
     }
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'local\boot-result.json') -Encoding UTF8
+    $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDir 'boot-result.json') -Encoding UTF8
     $result | ConvertTo-Json
 } finally {
     foreach ($key in $settings.Keys) { [Environment]::SetEnvironmentVariable($key, $old[$key], 'Process') }

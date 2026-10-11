@@ -91,33 +91,35 @@ behavioral compatibility test.
 
 ## Verified local progress and current blockers
 
-The Windows executable is `build/haze/HazeRecomp.exe`. A 60-second native
-boot test creates PPU worker threads, starts lifted SPU tasks, reads the game
-archives, configures GCM display buffers, and submits D3D12 draw calls. The
-first captured frame is black. No menu, campaign, or co-op session has been
-validated; a diagnostic timeout is not a successful gameplay test.
+The Windows executable is `build/haze/HazeRecomp.exe`. Native boot probes
+create PPU worker threads, execute lifted SPU jobs, read the game archives,
+configure GCM display buffers, and submit D3D12 draw calls. A 120-second probe
+completed roughly 1,700 SPU jobs and reached repeated pad polling and frame
+submission. Captures taken later in a 150-second probe remain black. No menu,
+campaign, or co-op session has been validated; a diagnostic timeout is not a
+successful gameplay test.
 
 The SDK fork on its `haze` branch includes the executable-segment fix, Windows
-DXGI GUID linkage, a read-only `cellSpursQueueSize` implementation, corrected
-game-data callback structure layout and first-run directory status, and a fix
-that makes the existing unresolved-import error policy take effect. The
-synthetic segment, queue, and callback checks pass. Fixing the callback removed
-the corrupt-game-data dialog in the subsequent local boot test; this does not
-establish a working installation or save system.
+DXGI GUID linkage, corrected game-data callback structure layout and first-run
+directory status, and a fix that makes the unresolved-import error policy take
+effect. Fixing the callback removed the corrupt-game-data dialog in a native
+boot test; this does not establish a working installation or save system.
 
-An immediate obstacle is SPURS queue interoperability: upstream's default
-`cellSpursQueuePushBody` reports success without enqueueing, while its opt-in
-implementation is explicitly experimental. The translated SPU worker spins
-on the input queue and the PPU polls the completion queue. Queue push/pop,
-atomic synchronization, waiter signaling, and asset completion need validation
-together. Missing imports observed during boot include `cellSpursGetSpuThreadId`
-and `cellPadInfoSensorMode`. SPU overlays and graphics correctness also remain
-open.
+SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
+payloads, update ring indices under the shared atomic lock, and signal SPU
+waiters. A taskset scheduler scans for children created by persistent SPU
+tasks, allowing Haze's controller to run its worker jobs. The DMA repeat
+watchdog is disabled by default: repeated transfers are legal, and the former
+default incorrectly halted a polling worker. Its optional diagnostic state is
+now per SPU context. Synthetic tests cover these contracts, including queue
+wrap/full/empty cases, task reuse and dispatch failure, and watchdog isolation.
 
-A separate 60-second probe with upstream's experimental queue push enabled
-submitted two elements and observed the SPU advance its input index. It still
-produced only a black captured frame and did not reach a menu. That probe
-does not validate the queue protocol or establish the sole cause of the stall.
+The immediate investigation is graphics correctness. Haze reaches eight
+fragment programs and several offscreen rendering passes, but all inspected
+captures are black. Missing imports observed during boot include
+`cellSpursGetSpuThreadId`, `cellPadInfoSensorMode`, and
+`cellSailPlayerInitialize`. Media playback, SPU overlays, and unsupported
+instructions also remain open.
 
 Haze's executable contains Demonware lobby references and Ubisoft auth/STUN
 hostnames. Peer-to-peer co-op will require tracing that game-specific session
@@ -125,10 +127,12 @@ path and replacing service dependencies where necessary. Adding a generic
 socket transport by itself does not connect Haze's campaign state machines.
 
 `scripts/run.ps1` returns errors for unregistered firmware imports and writes
-`local/boot-result.json`, stdout/stderr logs, and milestone counts. Optional
-frame captures go to `local/frames`. It terminates the process after the chosen
-timeout; `gameplay_validated` remains false. Boot stack reports are best-effort
-diagnostics. The runner does not enable the experimental queue implementation.
+logs, milestone counts, shader dumps, and optional BMP captures to a unique
+`local/runs/<UTC timestamp>` directory. `local/boot-result.json` points to the
+latest run. `-FrameSkip` and `-FrameEvery` select later frames. The runner
+terminates its process after the chosen timeout; `gameplay_validated` remains
+false. Boot stack reports are best-effort diagnostics. Queue operations no
+longer require the upstream experimental environment flag.
 
 ## Development order
 
