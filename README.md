@@ -165,9 +165,19 @@ the [retail ABI structure](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/
 A regression runs the actual handler and checks neighboring memory, callback
 preservation, queue IDs, and mutex release/reacquisition during wait. Native
 campaign probes now retain the correct allocator callback and advance without
-the observed invalid DMA or null SPU physics handler. Mission loading still
-stalls in a PPU object iterator; its creation path is under investigation.
-Campaign rendering and control remain unvalidated.
+the observed invalid DMA or null SPU physics handler.
+
+The subsequent PPU object-iterator stall came from a corrupted component cache.
+The lifter omitted `vsl` and `vsum4ubs`, which Haze uses to invalidate cache ages
+and update its replacement order. Duplicate cache entries eventually produced
+invalid component pointers. Both instructions now have native implementations;
+compiled regression cases check 2,496 shift operations and 6,018 saturated sums,
+including register aliases and sticky saturation state. A local fixture using
+the game's cache routines fails on lookup 16 before the shift fix and passes
+200 lookups afterward. The latest native campaign run advances through the
+opening credits without the observed iterator stall, but runs below one frame
+per second. Worker execution and synchronization are being profiled. Campaign
+3D rendering, control and co-op remain unvalidated.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

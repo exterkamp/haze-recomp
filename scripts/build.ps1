@@ -45,6 +45,14 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
     & $python "$sdk/tools/test_spu_trace_registers.py"
     if ($LASTEXITCODE -ne 0) { throw 'SPU destination-register trace tests failed.' }
+    $oldCC = $env:CC
+    try {
+        $env:CC = Join-Path (Split-Path $clang -Parent) 'clang.exe'
+        foreach ($vectorTest in @('test_ppu_vsum4ubs.py', 'test_ppu_vsl.py')) {
+            & $python "$sdk/tools/$vectorTest"
+            if ($LASTEXITCODE -ne 0) { throw "PPU vector regression failed: $vectorTest" }
+        }
+    } finally { $env:CC = $oldCC }
     $condTest = Join-Path $root 'local/test_sysprx_lwcond.exe'
     & $clang /nologo /W0 /O1 /Gy /Gw "/I$root/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable test compilation failed.' }
