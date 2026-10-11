@@ -33,6 +33,7 @@ $settings = @{
     LD_FRAME_DUMP_FROM = [string]$FrameSkip
     LD_FRAME_DUMP_EVERY = [string]$FrameEvery
     LD_FRAME_DUMP_COUNT = [string]$CaptureFrames
+    LD_FRAME_DUMP_TRIGGER = $(if ($CaptureFrames -gt 0 -and $Renderer -eq 'Live') { Join-Path $runDir 'capture.request' } else { $null })
 }
 $old = @{}
 foreach ($key in $settings.Keys) {

@@ -116,6 +116,13 @@ their PARAM.SFO metadata. Tests cover canceled checks, missing parameters,
 metadata round trips, and actual stat/seek/open operations on an 8 GB sparse
 fixture. Save-game persistence remains unvalidated.
 
+Retail memory-container calls now route through syscalls 341/342, with 350
+allocating from a real tracked container. The allocator reuses freed ranges
+and protects mmapper reservations from overlap. This fixes invalid container
+IDs and exhaustion after repeated startup buffers. Regression checks exercise
+the syscall table, capacity and lifetime errors, 300 allocate/free cycles,
+and reservation isolation. Campaign loading is still under investigation.
+
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
 waiters. A taskset scheduler scans for children created by persistent SPU
