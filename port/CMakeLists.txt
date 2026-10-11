@@ -79,6 +79,11 @@ add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
 
 option(HAZE_RSX_PROFILE "Collect native renderer CPU/GPU timing counters" OFF)
 if(HAZE_RSX_PROFILE)
+    set_property(SOURCE "${PS3RECOMP_DIR}/runtime/ppu/ppu_loader.cpp"
+        "${PS3RECOMP_DIR}/runtime/ppu/ppu_hle.cpp"
+        "${PS3RECOMP_DIR}/runtime/spu/spu_workload.c"
+        DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
+        COMPILE_DEFINITIONS YZ_PERF_PROFILE)
     set_property(SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c"
         DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)

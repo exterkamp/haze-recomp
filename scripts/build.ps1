@@ -43,6 +43,16 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    $depthTest = Join-Path $root 'local/test_depth_history.exe'
+    & $clang /nologo /W0 /O2 /Gy /Gw "/I$sdk/include" "/Fe$depthTest" "/Fo$root/local/test_depth_history.obj" "$sdk/runtime/spu/tests/test_depth_history.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'SPU private-history test compilation failed.' }
+    & $depthTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU history isolation/depth-limit test failed.' }
+    $sleepTest = Join-Path $root 'local/test_usleep_timer.exe'
+    & $clang /nologo /W0 /O2 "/Fe$sleepTest" "/Fo$root/local/test_usleep_timer.obj" "$sdk/runtime/syscalls/tests/test_usleep_timer.c"
+    if ($LASTEXITCODE -ne 0) { throw 'High-resolution timer test compilation failed.' }
+    & $sleepTest
+    if ($LASTEXITCODE -ne 0) { throw 'High-resolution timer duration/handle test failed.' }
     $fingerprintTest = Join-Path $root 'local/test_fingerprint_cache.exe'
     & $clang /nologo /W0 /O2 "/I$sdk/include" "/Fe$fingerprintTest" "/Fo$root/local/test_fingerprint_cache.obj" "$sdk/runtime/spu/tests/test_fingerprint_cache.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU fingerprint cache test compilation failed.' }

@@ -117,15 +117,25 @@ texture decoding itself still needs implementation.
 The renderer now implements the polygon offset state Haze actually submits for
 overlapping surfaces. Supported GPUs use dynamic D3D12 depth bias; older devices
 use static PSO state. Synthetic WARP readbacks check coplanar decals with positive,
-negative and zero bias. This repairs an omitted state, but temporal validation of
-the reported deck-paint flicker is still outstanding, and other visible artifacts
-remain.
+negative and zero bias. A subsequent 40-frame temporal comparison kept all
+sampled nearby yellow paint visible with bias enabled and lost it with bias
+disabled. This validates that deck region; other visible artifacts remain.
 
 For a live polygon-offset comparison, set `RSX_BIAS_FILE` to a local text file
 containing `1` (normal) or `0` (disabled). It is checked every 60 presents and
-state changes are logged. The carrier comparison captured both settings, but
-idle camera movement prevents treating those few stills as temporal proof.
+state changes are logged. The temporal comparison aligns camera motion using
+unpainted deck and evaluates the same interior paint mask in both clips.
 Restore `1` after diagnostic comparisons.
+
+The [controlled carrier experiments](docs/performance-2026-10-11.md) record exact
+frame ranges, CPU stages and rejected defaults. Bulk reference construction
+reduced its sampled cost from about 3.3 to 1.5 ms; direct dense remapping saved
+several tenths more. Both now run normally. The FIFO consumer also preserves
+synchronized callback ownership before callback entry, repairing a reproduced
+wrap race. Warmed gameplay comparisons still measured roughly 17–19 FPS with
+uneven pacing. Alternative texture hashing and timer waiting remain diagnostic
+options; private SPU diagnostic history fixes a race without a demonstrated FPS
+gain. **The 30 FPS target remains open.**
 
 For reproducible diagnostic captures:
 
