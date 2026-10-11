@@ -18,6 +18,7 @@ New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 # Keep missing imports visible rather than relying on fabricated success.
 $settings = @{
     PS3_VFS_ROOT = (Join-Path $root 'game\disc')
+    PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $root 'local\tools\rpcs3\dev_flash' })
     PS3_NET_ONLINE = '1'
     YDKJ_NO_CRI_CTX = '1' # Disable the SDK's unrelated image-22 game-specific patch.
     PS3_SAVEDATA_ROOT = $(if ($env:PS3_SAVEDATA_ROOT) { $env:PS3_SAVEDATA_ROOT } else { Join-Path $root 'local\state\savedata' })

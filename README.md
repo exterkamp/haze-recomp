@@ -12,7 +12,7 @@ application version **01.00**. Other regions and updates are not validated.
 | Feature | Status |
 | --- | --- |
 | Standalone native Windows executable | Renders menus and the opening campaign scene, including squad, weapons, carrier and sky |
-| Campaign gameplay, audio, saves | Opening scene responds to movement/camera input; profile and checkpoint reload after restart; campaign completion and audible output unvalidated |
+| Campaign gameplay, audio, saves | Opening scene responds to movement/camera input; profile and checkpoint reload after restart; native mixer now produces nonzero samples; mission completion and sound quality unvalidated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
 | Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
 | PC key prompts | Planned; requires UI/asset work |
@@ -56,6 +56,11 @@ python -m venv .venv
 
 # SPU translation, including executable cellOvis overlays.
 .venv\Scripts\python.exe scripts/haze.py lift-spu
+
+# Translate the audio plug-ins at Haze's observed local-store allocations.
+.venv\Scripts\python.exe scripts/lift_audio_plugins.py
+# Requires locally installed PS3 firmware; no firmware is downloaded or bundled.
+.venv\Scripts\python.exe scripts/lift_firmware.py --dev-flash 'C:\path\to\dev_flash'
 
 .\scripts\build.ps1 -RuntimeOnly
 .\scripts\build.ps1
@@ -113,8 +118,9 @@ the Press Start title screen. The first-run installer now writes 72 files
 (about 4 GB) to its local game-data USRDIR, and a subsequent boot passes the
 installed-data check without reinstalling. Captures show the interactive main
 and Campaign menus, including Single Player Campaign, Join Co-op and Host Co-op.
-No campaign gameplay or co-op session has been validated;
-a diagnostic timeout is not a successful gameplay test.
+Subsequent fixes reach the controllable opening carrier scene, as described
+below. Mission completion and co-op remain unvalidated; a diagnostic timeout
+is not a successful gameplay test.
 
 The SDK fork on its `haze` branch includes the executable-segment fix, Windows
 DXGI GUID linkage, corrected game-data callback structure layout and first-run
@@ -125,7 +131,7 @@ its 4,003,576,161-byte `install.qik` otherwise incorrectly appeared absent.
 The fork creates the callback-approved game-data directories and persists
 their PARAM.SFO metadata. Tests cover canceled checks, missing parameters,
 metadata round trips, and actual stat/seek/open operations on an 8 GB sparse
-fixture. Save-game persistence remains unvalidated.
+fixture. Profile/checkpoint persistence is now verified below.
 
 Retail memory-container calls now route through syscalls 341/342, with 350
 allocating from a real tracked container. The allocator reuses freed ranges
@@ -282,7 +288,20 @@ Audio device queries had four-byte sound modes at offset 6, while Haze reads
 eight-byte modes starting at offset 8. Correcting the device/mode ABI, device
 availability value and output-state offsets lets Haze initialize cellAudio and
 start its mixing ports. Byte-layout, endian and boundary regressions pass.
-The observed mixer output is still zero; audible campaign sound remains open.
+The audio worker also loads position-independent programs at runtime: an
+ATRAC firmware decoder and embedded game DSP plug-ins. Local generators now
+translate the observed allocations, preserving indirect entries discovered
+at the original link addresses. The runtime matches complete segment content
+inside padded DMA blocks, including multiple resident programs and reused
+staging buffers. Native menu probes now produce nonzero mixer samples without
+the earlier unlifted-code termination. Sound quality and all campaign audio
+paths still need validation. Additional allocation locations may need native
+translations as more missions are exercised.
+
+`scripts/lift_firmware.py` currently validates the USA build's decoder allocation
+at base `0x33100`. It uses `PS3_DEV_FLASH`, an explicit `--dev-flash`, or the local
+development firmware directory. The launchers also honor `PS3_DEV_FLASH`.
+Firmware, extracted plug-ins and their generated translations stay ignored.
 
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU

@@ -11,6 +11,7 @@ $session = Join-Path $root ('local\sessions\' + [DateTime]::UtcNow.ToString('yyy
 New-Item -ItemType Directory -Path $session -Force | Out-Null
 $settings = @{
     PS3_VFS_ROOT = (Join-Path $root 'game\disc')
+    PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $root 'local\tools\rpcs3\dev_flash' })
     PS3_NET_ONLINE = '1'
     YDKJ_NO_CRI_CTX = '1'
     PS3_SAVEDATA_ROOT = $(if ($env:PS3_SAVEDATA_ROOT) { $env:PS3_SAVEDATA_ROOT } else { Join-Path $root 'local\state\savedata' })
