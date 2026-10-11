@@ -186,6 +186,29 @@ suite passes. The opening title and credits render, but subsequent captures are
 black despite scene draw submissions; rendering is the next blocker. Campaign
 control and co-op remain unvalidated.
 
+Campaign probes also exposed a task-slot publication race: completion could
+clear an enabled bit while another creator restored it from a stale read,
+eventually exhausting all 128 slots. Descriptor publication and slot selection
+now share the completion lock. A regression exercises 40,000 concurrent
+create/exit cycles. The renderer's fixed 256-packet draw storage also discarded
+large batches; growing storage passes 5,000-packet ordering and reuse checks,
+and a native probe submitted over 14 million packets with no capacity drops.
+
+Raw shader captures identified another rendering fault: many GPU fragment
+programs contained patched constants but zero instruction bytes. Haze copies
+these programs through NV0039, which the SDK previously ignored. The fork now
+executes unit-stride memory-to-memory transfers between mapped main memory and
+local GPU memory, and keeps 2D-engine methods out of the 3D register stream.
+Tests cover byte preservation, signed pitches, overlap, trigger sequencing,
+and invalid ranges. The register contract is documented in
+[envytools](https://github.com/envytools/envytools/blob/master/rnndb/graph/nv_m2mf.xml).
+The subsequent native capture's first 252 programs have no empty initial
+instructions or malformed decoded programs, with no observed PSO failures.
+The scene still renders black; vertex output, render state, and the
+postprocessing chain remain under investigation. This is not playable yet.
+Non-unit transfer increments and notification DMA remain unsupported and
+produce diagnostics rather than fabricated completion.
+
 SPURS queue metadata now matches the lifted SPU consumer. PPU push/pop copy
 payloads, update ring indices under the shared atomic lock, and signal SPU
 waiters. A taskset scheduler scans for children created by persistent SPU

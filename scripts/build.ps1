@@ -84,6 +84,25 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch test compilation failed.' }
     & $dispatchTest
     if ($LASTEXITCODE -ne 0) { throw 'Taskset dispatch contract test failed.' }
+    $publicationTest = Join-Path $root 'local/test_taskset_publication.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$publicationTest" "/Fo$root/local/test_taskset_publication.obj" "$sdk/runtime/spu/tests/test_taskset_publication.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Concurrent task publication test compilation failed.' }
+    $oldVerbose = $env:PS3_VERBOSE
+    try {
+        $env:PS3_VERBOSE = '0'
+        & $publicationTest
+        if ($LASTEXITCODE -ne 0) { throw 'Concurrent task publication and recycling test failed.' }
+    } finally { $env:PS3_VERBOSE = $oldVerbose }
+    $drawBatchTest = Join-Path $root 'local/test_draw_batches.exe'
+    & $clang /nologo /W0 /O1 "/Fe$drawBatchTest" "/Fo$root/local/test_draw_batches.obj" "$sdk/libs/video/tests/test_draw_batches.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Draw-packet storage test compilation failed.' }
+    & $drawBatchTest
+    if ($LASTEXITCODE -ne 0) { throw 'Draw-packet growth and order test failed.' }
+    $m2mfTest = Join-Path $root 'local/test_m2mf.exe'
+    & $clang /nologo /W0 /O1 "/Fe$m2mfTest" "/Fo$root/local/test_m2mf.obj" "$sdk/libs/video/tests/test_m2mf.c"
+    if ($LASTEXITCODE -ne 0) { throw 'GPU buffer-copy test compilation failed.' }
+    & $m2mfTest
+    if ($LASTEXITCODE -ne 0) { throw 'GPU buffer-copy contract test failed.' }
     $sailTest = Join-Path $root 'local/test_sail_lifecycle.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$sailTest" "/Fo$root/local/test_sail_lifecycle.obj" "$sdk/libs/codec/tests/test_sail_lifecycle.c"
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }
