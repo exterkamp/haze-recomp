@@ -25,6 +25,42 @@ from benchmark_cpu_work import process_clock
 from summarize_presents import percentile
 
 
+def verify_process_observation(path, windows, max_gap_s):
+    """Check sampled Haze isolation, including observations bracketing each block.
+
+    This cannot exclude a process whose entire lifetime falls between samples.
+    Do not describe it as evidence of zero system-wide CPU/GPU contention.
+    """
+    observations = [json.loads(line) for line in
+                    path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+    frequency = windows['qpc_frequency']
+    if not observations or any(row['qpc_frequency'] != frequency for row in observations):
+        raise ValueError('Process observer QPC frequency differs or log is empty')
+    if any(b['qpc'] <= a['qpc'] for a, b in zip(observations, observations[1:])):
+        raise ValueError('Process observations are not strictly chronological')
+    result = []
+    for block in windows['blocks']:
+        before = [i for i, row in enumerate(observations) if row['qpc'] <= block['start_qpc']]
+        after = [i for i, row in enumerate(observations) if row['qpc'] >= block['end_qpc']]
+        if not before or not after:
+            raise ValueError('Process observations do not bracket the entire block')
+        selected = observations[before[-1]:after[0]+1]
+        gaps = [(b['qpc'] - a['qpc']) / frequency for a, b in zip(selected, selected[1:])]
+        if not gaps or max(gaps) > max_gap_s:
+            raise ValueError('Process observation coverage has an excessive gap')
+        for row in selected:
+            processes = row['processes']
+            if len(processes) != 1:
+                raise ValueError('Another Haze process or missing owned process observed')
+            process = processes[0]
+            if (process['ProcessId'] != windows['pid'] or not process['ExecutablePath'] or
+                    Path(process['ExecutablePath']).resolve() != Path(windows['exe']).resolve()):
+                raise ValueError('Observed Haze does not match the owned benchmark executable')
+        result.append(dict(samples=len(selected), max_gap_s=max(gaps)))
+    return dict(source=str(path), blocks=result,
+                note='Only the owned Haze was observed; process lifetimes between samples and other applications are not excluded.')
+
+
 def record(args):
     from ctypes import wintypes as w
     kernel = c.WinDLL('kernel32', use_last_error=True)
@@ -159,6 +195,9 @@ def report(args):
             frames_over_33_333_ms=sum(value > 1000 / 30 for value in intervals),
             frames_over_50_ms=sum(value > 50 for value in intervals)))
     result = dict(source=str(args.csv), windows=str(args.windows), blocks=summaries, note=__doc__)
+    if getattr(args, 'process_log', None):
+        result['process_observation'] = verify_process_observation(
+            args.process_log, windows, getattr(args, 'max_process_gap', 4))
     args.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
 
@@ -185,6 +224,10 @@ if __name__ == '__main__':
     reader.add_argument('--queue-mode-log', '--mode-event-log', dest='queue_mode_log', type=Path)
     reader.add_argument('--queue-wait-tid', '--mode-tid', dest='queue_wait_tid', type=int, action='append', default=[])
     reader.add_argument('--output', type=Path, required=True)
+    reader.add_argument('--process-log', type=Path,
+                        help='JSONL from observe_haze_processes.ps1; reject observed Haze contention or incomplete coverage')
+    reader.add_argument('--max-process-gap', type=float, default=4,
+                        help='Maximum allowed seconds between observations, default 4')
     args = parser.parse_args()
     if args.action == 'record':
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 2047 for f in args.flags):
@@ -194,6 +237,8 @@ if __name__ == '__main__':
             parser.error('Use shadow/depth flags 0/1 or window-position flags 0/1/2')
         record(args)
     else:
+        if not 0 < args.max_process_gap <= 10:
+            parser.error('Process observation gap must be positive and at most 10 seconds')
         if args.min_frames < 60:
             parser.error('Use at least 60 complete intervals per block')
         report(args)

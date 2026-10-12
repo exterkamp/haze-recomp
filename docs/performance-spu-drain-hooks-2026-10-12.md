@@ -120,3 +120,63 @@ The fresh run closed normally with exit 0 at 09:25:11 UTC; the long-title
 run also closed normally at 09:16:27 UTC. The bounded runner deliberately
 leaves its broad `gameplay_validated` claim false. The carrier capture above
 is a visual smoke check, not campaign completion or a correctness guarantee.
+
+## Ordinary-build frame-time comparison
+
+Two independent muted gameplay runs used the same copied checkpoint, stationary
+carrier view and 1440p/follow-shadow/AA-off/VSync-auto/30-cap configuration.
+Native PPU queue waits and native SPU idle waits were enabled in both builds,
+confirmed by their worker mode events. Each run recorded two 60-second blocks
+after five-second warmups, with screenshots only before and after measurement.
+There was no instruction sampling, renderer profiling, job logging, building
+or injected input during the blocks. Native present IDs are consecutive.
+
+| Build / block | Frames | FPS | Mean ms | p95 ms | p99 ms | Max ms | Mean CPU cores |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Outlined 1 | 1230 | 20.52 | 48.74 | 71.14 | 89.44 | 265.50 | 3.92 |
+| Outlined 2 | 1440 | 24.01 | 41.65 | 55.88 | 63.94 | 74.28 | 4.43 |
+| Historical 1 | 901 | 15.03 | 66.53 | 104.57 | 143.98 | 234.43 | 3.22 |
+| Historical 2 | 953 | 15.90 | 62.91 | 96.27 | 126.31 | 226.43 | 3.36 |
+
+Outlined run `20261012-092700-059` used the SHA256 above. Captures 7171 and
+10754 checked the scene; host idle-worker TID 21444 supplied settled mode
+evidence. It exited normally at 09:34:16 UTC. Historical run
+`20261012-093437-395` used SHA256
+`FE915652B8302B4A2BE81EC8E3F31A1E66D025DAF176BB4EDD68C02F40737E95`.
+Captures 7641 and 10373 checked the scene; its worker was TID 47716. It exited
+normally at 09:42:38 UTC.
+
+Artifacts are `local/drain-outline-{windows,isolated-report}.json`,
+`local/drain-baseline-{windows,isolated-report}.json`, the corresponding
+`*-presents.csv` and `*-processes.jsonl` files, and both run directories.
+The reports now accept `--process-log` and reject another observed Haze,
+missing owned process, wrong executable, missing bracketing observations or
+observation gaps longer than four seconds. These runs each have 30 observations
+per block, maximum gaps 2.12–2.30 seconds, with only their owned game observed.
+This sampling cannot rule out a process entirely between observations or
+contention from other applications.
+
+The new build performed better in this ordered comparison, but two independent
+sessions with live NPCs do not isolate a repeatable percentage gain. The older
+build has also reached about 22.5 FPS in earlier native-idle windows. The new
+build's own windows differ substantially, and its first window contains a
+265 ms stall. Do not interpret lower process CPU in the historical run as
+greater efficiency: it also completed fewer frames. Consistent 30 FPS and
+correct unlocked simulation timing remain unverified.
+
+A reverse-order repeat, `20261012-094407-373`, exited with `0xC0000005` at
+09:45:10 UTC before any gameplay measurement. Its final log shows title/attract
+playback teardown and mixer startup. Host TID 58596 attempted a write to
+address `0x24`, with fault RIP `0x00007FFF2F58FA7D`, outside the executable.
+The last HLE marker was `sys_ppu_thread_get_id`; that marker alone does not
+identify the crashing call. The current crash context records the executable
+base rather than the faulting module's base, so its reported `rip_offset`
+cannot symbolize this fault. This failed repeat contributes no FPS evidence.
+Its relation to the refactor or pre-existing startup races is unproven;
+preserve the run and investigate the real fault stack before attributing it.
+
+Validation of the added observation gate: `tests/test_present_modes.py` passes
+three tests, including accepted BOM-prefixed JSONL and rejection of missing
+coverage, large gaps, duplicate timestamps, additional or absent Haze instances,
+wrong PID, unavailable executable path and mismatched QPC frequency. Existing
+mode-event, missing-present and stall-retention checks still pass.

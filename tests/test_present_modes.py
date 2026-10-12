@@ -1,5 +1,6 @@
 """Reject invalid benchmark windows while retaining every stall in valid ones."""
 import contextlib
+import copy
 import csv
 import io
 import json
@@ -11,10 +12,38 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from benchmark_present_modes import report
+from benchmark_present_modes import report, verify_process_observation
 
 
 class PresentWindows(unittest.TestCase):
+    def test_process_isolation_coverage_and_contention(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
+            log = Path(folder) / 'processes.jsonl'
+            exe = str(ROOT / 'local/HazeRecomp.exe')
+            windows = dict(pid=123, exe=exe, qpc_frequency=1000,
+                           blocks=[dict(start_qpc=1000, end_qpc=7000)])
+            good = [dict(qpc=qpc, qpc_frequency=1000,
+                         processes=[dict(ProcessId=123, ExecutablePath=exe)])
+                    for qpc in range(0, 8001, 2000)]
+            def run(rows):
+                # PowerShell Add-Content UTF8 can emit a BOM.
+                log.write_text('\n'.join(json.dumps(row) for row in rows), encoding='utf-8-sig')
+                return verify_process_observation(log, windows, 4)
+            self.assertEqual(run(good)['blocks'], [dict(samples=5, max_gap_s=2)])
+            invalid = [[], good[1:], good[:-1], [good[0], good[-1]],
+                       [good[0], good[0], *good[1:]]]
+            for change in ('extra', 'missing', 'pid', 'path', 'frequency'):
+                rows = copy.deepcopy(good)
+                if change == 'extra':
+                    rows[2]['processes'].append(dict(ProcessId=456, ExecutablePath=exe))
+                elif change == 'missing': rows[2]['processes'] = []
+                elif change == 'pid': rows[2]['processes'][0]['ProcessId'] = 456
+                elif change == 'path': rows[2]['processes'][0]['ExecutablePath'] = None
+                else: rows[2]['qpc_frequency'] = 2000
+                invalid.append(rows)
+            for rows in invalid:
+                with self.subTest(rows=rows), self.assertRaises(ValueError): run(rows)
+
     def test_native_queue_mode_evidence(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
             root = Path(folder)
