@@ -160,7 +160,13 @@ then saved another 1.15–1.28 ms/frame of decoding, with specialized blocks at
 that ceiling during gameplay and avoiding unnecessary stalls remain open.
 The [depth-clipping investigation](docs/rendering-depth-clip-2026-10-11.md)
 reproduces a close-barrel layering error and adds guest-controlled depth clipping;
-other shadow/model glitches still need validation. The
+later close-up captures also verify opaque soldiers. The
+[fragment-window investigation](docs/rendering-window-position-2026-10-11.md)
+reproduces camera-dependent rectangular lighting on the carrier wall and
+ground. Honoring Haze's bottom-origin fragment coordinates removes those
+boundaries in repeated same-process comparisons and is now enabled by default.
+The full regression suite passes, including 3,072 GPU coordinate readbacks.
+Broader level coverage and an isolated performance comparison remain open. The
 [shadow comparison investigation](docs/rendering-shadow-compare-2026-10-11.md)
 tracks Haze's observed projected depth lookups and a GPU-tested comparison
 experiment, currently disabled pending carrier checks. The

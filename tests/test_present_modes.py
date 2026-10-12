@@ -20,13 +20,13 @@ class PresentWindows(unittest.TestCase):
             root = Path(folder)
             args = SimpleNamespace(csv=root/'p.csv', windows=root/'w.json',
                                    output=root/'r.json', min_frames=60)
-            for column, modes in [('cpu_work', (259,771)), ('shadow_compare',(0,1)), ('depth_export',(0,1))]:
+            for column, modes in [('cpu_work', (259,771)), ('shadow_compare',(0,1)), ('depth_export',(0,1)), ('window_position',(0,2))]:
                 with self.subTest(column=column):
                     rows, ticks = [], 0
                     for i in range(202):
                         ticks += 120 if i == 50 else 40
                         row = dict(present_id=i+1, guest_frame=i, qpc=ticks,
-                                   cpu_work=259, shadow_compare=1, depth_export=1)
+                                   cpu_work=259, shadow_compare=1, depth_export=1, window_position=1)
                         row[column] = modes[i>100]
                         rows.append(row)
                     windows = dict(complete=True, qpc_frequency=1000, mode_column=column,

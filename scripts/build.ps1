@@ -208,6 +208,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Fragment depth-export test compilation failed.' }
     & $depthExportTest
     if ($LASTEXITCODE -ne 0) { throw 'Fragment depth-export GPU test failed.' }
+    $windowTest = Join-Path $root 'local/test_fp_window.exe'
+    & $clang /nologo /EHsc /W0 /O1 "/I$sdk/include" "/Fe$windowTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_window.cpp" "$sdk/libs/video/rsx_fp_decompiler.c" /link d3d11.lib d3dcompiler.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment window-position test compilation failed.' }
+    & $windowTest
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment window-position GPU test failed.' }
     $clearTest = Join-Path $root 'local/test_color_clear.exe'
     & $clang /nologo /W0 /O1 "/Fe$clearTest" "/Fo$root/local/test_color_clear.obj" "$sdk/libs/video/tests/test_color_clear.c" /link d3d12.lib dxgi.lib d3dcompiler.lib
     if ($LASTEXITCODE -ne 0) { throw 'Color clear test compilation failed.' }
