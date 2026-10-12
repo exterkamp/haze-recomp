@@ -14,7 +14,7 @@ application version **01.00**. Other regions and updates are not validated.
 | Standalone native Windows executable | Renders menus and the opening campaign scene, including squad, weapons, carrier and sky |
 | Campaign gameplay, audio, saves | Fresh opening cinematic, first checkpoint/save and first squad-gathering objective verified; movement/camera and pause/resume work; later combat, mission completion and sound quality unvalidated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
-| Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
+| Full keyboard and mouse controls | Configurable WASD and all pad buttons; raw mouse directly rotates the player camera in degrees per device count |
 | PC key prompts | Planned; requires UI/asset work |
 | Higher frame rates | Duplicate presentations fixed; native simulation and frame pacing optimization in progress |
 | Ultrawide | Research after baseline rendering works; projection and HUD must both be addressed |
@@ -278,13 +278,35 @@ behavioral compatibility test.
 PC input is configured in `config/input.ini`. WASD moves; arrows navigate;
 Space confirms/skips; Enter starts; Escape pauses and releases the mouse.
 Click inside the game or press F1 to capture the raw mouse; F1 also releases it.
-The initial capture click does not fire. Short keyboard taps are buffered for
+The initial capture click does not fire. Short keyboard and mouse-button taps are buffered for
 120 ms so they survive slow frames. All sixteen controller buttons have configurable
 keyboard/mouse bindings. Mouse buttons affect the game only while captured,
-and focus loss releases capture and neutralizes keyboard/mouse input. This is
-an initial mapping through the game's pad input, not direct mouse aiming;
-the game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
+and focus loss releases capture and neutralizes keyboard/mouse input.
+Raw device counts rotate the player yaw/pitch
+before the game builds its aim and camera matrices. The right stick stays
+neutral, so mouse movement has no stick deadzone, acceleration, smoothing or
+turn-speed cap. Sensitivity is degrees per count (default `0.10`), and `InvertY`
+reverses vertical motion. Camera pitch still respects the game's limits.
+The game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
 configuration file. Closing the game window now ends its native process.
+
+From an isolated worktree, share the existing SDK, lifts and game assets while
+keeping build products and run logs in the worktree:
+
+```powershell
+.\scripts\build.ps1 -SharedRoot E:\Code\haze-recomp
+.\scripts\test-input.ps1 -SharedRoot E:\Code\haze-recomp
+.\scripts\run.ps1 -SharedRoot E:\Code\haze-recomp -Seconds 600
+```
+
+`HAZE_MOUSE_TRACE=1` logs raw counts and the resulting angles after the game's
+camera update for diagnostics. The native hook checks the supported ELF's
+instruction and virtual-function signatures before accessing player angles.
+Input regressions cover raw relative events, neutral right-stick packets,
+all sixteen buttons, tap buffering, focus/capture release, distance invariance,
+large flicks, pitch limits and inversion. The isolated executable built and
+booted into the campaign; a Windows raw-input probe measured the configured
+angle changes, and interactive testing confirmed native mouse feel.
 
 The PC defaults were checked against the running game's **Customize Controls**
 page with its Default layout:

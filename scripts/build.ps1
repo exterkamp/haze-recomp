@@ -1,4 +1,5 @@
 param(
+    [string]$SharedRoot,
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
@@ -13,6 +14,7 @@ if ($CompareSpuByteOps -and (-not $ProfileRenderer -or $RuntimeOnly)) {
     throw 'CompareSpuByteOps requires a full ProfileRenderer build.'
 }
 $root = Split-Path $PSScriptRoot -Parent
+$assets = if ($SharedRoot) { (Resolve-Path -LiteralPath $SharedRoot).Path } else { $root }
 Set-Location -LiteralPath $root
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -30,13 +32,13 @@ foreach ($line in $environment) {
 $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 $clang = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
-$python = Join-Path $root '.venv\Scripts\python.exe'
-$sdk = Join-Path $root 'external\ps3recomp'
+$python = Join-Path $assets '.venv\Scripts\python.exe'
+$sdk = Join-Path $assets 'external\ps3recomp'
 if ($RuntimeOnly) {
     $source = $sdk
     $build = Join-Path $root 'build\runtime'
 } else {
-    if (-not (Test-Path -LiteralPath 'generated/ppu/ppu_recomp.h')) {
+    if (-not (Test-Path -LiteralPath "$assets/generated/ppu/ppu_recomp.h")) {
         throw 'No Haze lift exists. Run .venv\Scripts\python.exe scripts/haze.py lift first.'
     }
     $source = Join-Path $root 'port'
@@ -44,11 +46,12 @@ if ($RuntimeOnly) {
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
 $exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory) } else { $build }
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     $bytesTest = Join-Path $root 'local/test_spu_bytes.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$bytesTest" "/Fo$root/local/test_spu_bytes.obj" "$sdk/runtime/spu/tests/test_spu_bytes.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU SIMD byte-operation test compilation failed.' }
@@ -112,10 +115,15 @@ if ($Test) {
     & $padTest
     if ($LASTEXITCODE -ne 0) { throw 'Host pad input packet test failed.' }
     $hazeInputTest = Join-Path $root 'local/test_haze_input.exe'
-    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse test compilation failed.' }
     & $hazeInputTest
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse mapping test failed.' }
+    $hazeCameraTest = Join-Path $root 'local/test_haze_camera.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/Fe$hazeCameraTest" "/Fo$root/local/test_haze_camera.obj" "$root/tests/test_haze_camera.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native camera test compilation failed.' }
+    & $hazeCameraTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native camera gating/rotation test failed.' }
     & $python "$sdk/tools/test_spu_text_selection.py"
     if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
     & $python "$sdk/tools/test_spu_trace_registers.py"
@@ -129,7 +137,7 @@ if ($Test) {
         }
     } finally { $env:CC = $oldCC }
     $condTest = Join-Path $root 'local/test_sysprx_lwcond.exe'
-    & $clang /nologo /W0 /O1 /Gy /Gw "/I$root/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
+    & $clang /nologo /W0 /O1 /Gy /Gw "/I$assets/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable test compilation failed.' }
     & $condTest
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable boundary and wait test failed.' }

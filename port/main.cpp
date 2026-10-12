@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "haze_input.h"
+#include "haze_camera.h"
 #include "haze_pump_profile.h"
 
 #ifdef _WIN32
@@ -546,6 +547,7 @@ int main(int argc, char** argv)
      * until the title registers its vblank and flip handlers during init. */
     g_ps3_guest_caller = harness_guest_caller;
     haze_input_initialize();
+    haze_camera_initialize();
     CreateThread(NULL, 4u * 1024 * 1024, frame_clock, NULL, 0, NULL);
 #ifdef _WIN32
     if (getenv("HAZE_BOOT_REPORT")) {

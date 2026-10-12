@@ -1,10 +1,11 @@
 #include "haze_input.h"
+#include "haze_mouse.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include "cellPad.h"
-#include "../external/ps3recomp/libs/codec/cellSail.h"
+#include "cellSail.h"
 #include "haze_startup.h"
 #include <algorithm>
 #include <cmath>
@@ -17,17 +18,17 @@
 namespace {
 std::atomic<HWND> window;
 WNDPROC original_proc;
-volatile LONG captured, mouse_x, mouse_y, wheel;
+volatile LONG captured, wheel;
+HazeMouseMotion mouse_motion;
 POINT old_cursor;
 bool enabled = true;
-double sensitivity = 0.20;
-int deadzone = 24;
+double sensitivity = 0.10;
 bool invert_y;
 HazeStartupSkip startup_skip;
 std::atomic<bool> message_keys[256];
 std::atomic<ULONGLONG> key_until[256];
 std::atomic<bool> capture_click;
-struct Binding { const char* name; const char* fallback; u16 button; int vk; };
+struct Binding { const char* name; const char* fallback; u16 button; int vk=0; };
 Binding bindings[] = {
     {"Cross", "Space", CELL_PAD_CTRL_CROSS},
     {"Circle", "X", CELL_PAD_CTRL_CIRCLE},
@@ -81,7 +82,7 @@ void capture(bool on) {
     if (on == (InterlockedCompareExchange(&captured,0,0) != 0)) return;
     if (on && GetForegroundWindow() != window) return;
     InterlockedExchange(&captured,on ? 1 : 0);
-    InterlockedExchange(&mouse_x,0); InterlockedExchange(&mouse_y,0);
+    mouse_motion.clear();
     InterlockedExchange(&wheel,0);
     if (on) {
         GetCursorPos(&old_cursor);
@@ -112,6 +113,8 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         record_key((int)wp,true,GetTickCount64());
         if (wp == VK_F1) { if (!(lp & (1ll<<30))) capture(!captured); return 0; }
         if (wp == VK_ESCAPE) { capture(false); return 0; } // Pause, rather than SDK's quit.
+        for (const auto& b : bindings)
+            if (b.button==CELL_PAD_CTRL_START && b.vk==(int)wp) capture(false);
         break;
     case WM_KEYUP: case WM_SYSKEYUP:
         record_key((int)wp,false,GetTickCount64()); break;
@@ -121,9 +124,18 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             capture(true);
             return 0; // The click that captures must not fire the weapon.
         }
+        record_key(VK_LBUTTON,true,GetTickCount64());
         break;
     case WM_LBUTTONUP:
+        record_key(VK_LBUTTON,false,GetTickCount64());
         capture_click=false; break;
+    case WM_RBUTTONDOWN: case WM_RBUTTONUP:
+        record_key(VK_RBUTTON,msg==WM_RBUTTONDOWN,GetTickCount64()); break;
+    case WM_MBUTTONDOWN: case WM_MBUTTONUP:
+        record_key(VK_MBUTTON,msg==WM_MBUTTONDOWN,GetTickCount64()); break;
+    case WM_XBUTTONDOWN: case WM_XBUTTONUP:
+        record_key(HIWORD(wp)==XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2,
+                   msg==WM_XBUTTONDOWN,GetTickCount64()); break;
     case WM_KILLFOCUS: case WM_CLOSE: case WM_DESTROY:
         clear_keys(); capture(false); break;
     case WM_CAPTURECHANGED:
@@ -141,8 +153,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         RAWINPUT input{}; UINT size = sizeof(input);
         if (captured && GetRawInputData((HRAWINPUT)lp,RID_INPUT,&input,&size,sizeof(RAWINPUTHEADER)) == sizeof(input)
             && input.header.dwType == RIM_TYPEMOUSE && !(input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
-            InterlockedExchangeAdd(&mouse_x,input.data.mouse.lLastX);
-            InterlockedExchangeAdd(&mouse_y,input.data.mouse.lLastY);
+            mouse_motion.add(input.data.mouse.lLastX,input.data.mouse.lLastY);
         }
         // DefWindowProc must see foreground raw input for system cleanup.
         return DefWindowProc(hwnd,msg,wp,lp);
@@ -150,23 +161,16 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     return CallWindowProc(original_proc,hwnd,msg,wp,lp);
 }
-u8 mouse_axis(double delta, double ms) {
-    if (!delta) return 128;
-    double amount = std::min(127.0,deadzone + std::abs((double)delta)*1000.0*sensitivity/ms);
-    return (u8)std::clamp(128 + (delta < 0 ? -(int)amount : (int)amount),0,255);
-}
 int poll(u32 port, CellPadHostInput* input, void*) {
     if (port) return 0;
-    static std::atomic<ULONGLONG> previous;
     ULONGLONG now = GetTickCount64();
-    double elapsed = (double)std::clamp<ULONGLONG>(now-previous.exchange(now),1,50);
     bool skip_pressed;
     bool skipping=startup_skip.sample(now,skip_pressed);
     if (skip_pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
     if (!enabled) return skipping ? 1 : 0;
     HWND foreground=GetForegroundWindow();
     if (!foreground || foreground != window.load()) {
-        InterlockedExchange(&mouse_x,0); InterlockedExchange(&mouse_y,0);
+        mouse_motion.clear();
         InterlockedExchange(&wheel,0);
         clear_keys();
         return 1; // All controls neutral immediately on focus loss.
@@ -181,10 +185,6 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     input->lx = (u8)(128 + 127*((int)down(movement[3],now)-(int)down(movement[2],now)));
     input->ly = (u8)(128 + 127*((int)down(movement[1],now)-(int)down(movement[0],now)));
     if (captured) {
-        input->rx=mouse_axis(InterlockedExchange(&mouse_x,0),elapsed);
-        LONG dy=InterlockedExchange(&mouse_y,0);
-        // Negate in a wider type: LONG_MIN is valid raw input, not signed UB.
-        input->ry=mouse_axis(invert_y ? -(double)dy : (double)dy,elapsed);
         if (InterlockedExchange(&wheel,0)) input->buttons |= CELL_PAD_CTRL_CIRCLE;
     }
     input->l2=(input->buttons & CELL_PAD_CTRL_L2) ? 255 : 0;
@@ -218,10 +218,9 @@ void haze_input_initialize() {
         movement[i]=key_code(value);
     }
     char value[32];
-    GetPrivateProfileStringA("Mouse","Sensitivity","0.20",value,sizeof(value),path);
+    GetPrivateProfileStringA("Mouse","Sensitivity","0.10",value,sizeof(value),path);
     double requested=strtod(value,nullptr);
     if (std::isfinite(requested) && requested > 0 && requested <= 10) sensitivity=requested;
-    deadzone=(int)std::min(126u,GetPrivateProfileIntA("Mouse","StickDeadzone",24,path));
     invert_y=GetPrivateProfileIntA("Mouse","InvertY",0,path)!=0;
     fprintf(stderr,"[input] WASD keyboard profile enabled; click/F1 captures raw mouse; Escape pauses\n");
 }
@@ -236,7 +235,13 @@ void haze_input_attach(void* hwnd) {
     if (!original_proc) fprintf(stderr,"[input] Window input hook failed: %lu\n",GetLastError());
     update_title();
 }
+bool haze_input_take_mouse(double& x, double& y, double& speed, bool& invert) {
+    mouse_motion.take(x,y);
+    speed=sensitivity; invert=invert_y;
+    return enabled && captured && GetForegroundWindow()==window.load();
+}
 #else
 void haze_input_initialize() {}
 void haze_input_attach(void*) {}
+bool haze_input_take_mouse(double&,double&,double&,bool&) { return false; }
 #endif
