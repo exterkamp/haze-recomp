@@ -5,9 +5,9 @@ addEventListener('error', event => {
   if (event.error?.stack) postMessage({type:'haze-worker-error', text:event.error.stack});
 });
 Module['preRun'] ??= [];
+// Pthread workers initialize without running the owner's preRun hooks.
+globalThis.hazeGetGL = () => typeof GLctx === 'undefined' ? null : GLctx;
 Module['preRun'].push(() => {
-  // Inspector access for the playtest driver, including nested pthreads.
-  globalThis.hazeGetGL = () => typeof GLctx === 'undefined' ? null : GLctx;
   // This hook allocates the canvas handoff record before initRuntime. Set
   // Binaryen's guard bounds before the first instrumented malloc call.
   if (typeof setStackLimits === 'function') setStackLimits();

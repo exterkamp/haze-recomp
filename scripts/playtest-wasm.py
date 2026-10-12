@@ -133,9 +133,9 @@ async def run(args):
                             record('[test runtime evaluate] ' + json.dumps(await owner.evaluate(action['runtime_evaluate'])))
                 if action.get('gpu_evaluate'):
                     record('[test workers] ' + str(len(page.workers)))
-                    # The game's render pthread occupies pool slot 31. Avoid
-                    # interrupting blocking guest pthreads with JS evaluations.
-                    selected = [page.workers[index] for index in action.get('gpu_workers', [31])
+                    # The renderer belongs to the initial 32-worker pool. Later
+                    # workers execute SPU jobs and do not own a graphics context.
+                    selected = [page.workers[index] for index in action.get('gpu_workers', range(33))
                                 if index < len(page.workers)]
                     for result in await evaluate_gpu_workers(selected, action['gpu_evaluate']):
                         if result is not None:

@@ -70,6 +70,20 @@ int main()
     printf("[webgl-smoke] read error=0x%X framebuffer=0x%X\n",glGetError(),glCheckFramebufferStatus(GL_READ_FRAMEBUFFER));
     printf("[webgl-smoke] pixel %u,%u,%u,%u\n",result[0],result[1],result[2],result[3]);
     assert(memcmp(result,pixel,4)==0);
+    // Haze clears alpha before copying a completed scene. RGB must survive,
+    // and a scissored clear must leave pixels outside its rectangle intact.
+    const float zero[]={0,0,0,0};
+    assert(backend->clear_color_rect);
+    backend->clear_color_rect(nullptr,target,zero,8,8,8,8,8);
+    backend->readback(nullptr,target,10,10,1,1,result,4);
+    const unsigned char alpha_cleared[]={51,102,153,0};
+    assert(memcmp(result,alpha_cleared,4)==0);
+    backend->readback(nullptr,target,16,16,1,1,result,4);
+    assert(memcmp(result,pixel,4)==0);
+    backend->clear_color_rect(nullptr,target,zero,1,10,10,1,1);
+    backend->readback(nullptr,target,10,10,1,1,result,4);
+    const unsigned char red_cleared[]={0,102,153,0};
+    assert(glGetError()==GL_NO_ERROR && memcmp(result,red_cleared,4)==0);
     // Font atlases route a single stored channel into alpha through the RSX
     // crossbar. WebGL has no texture-view swizzles, so test the shader route.
     const auto atlas=backend->texture_create(nullptr,RSX_BE_FMT_R8,1,1,1,1,0,0x81);

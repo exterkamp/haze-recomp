@@ -70,6 +70,7 @@ std::array<GLuint,4> draw_colors{};
 GLuint draw_depth=0;
 u32 draw_color_count=~0u;
 std::array<u32,16> sampled_textures{};
+std::array<float,4> captured_vp18{};
 void capture_draw() {
     static GLuint framebuffer=0, texture=0;
     if(!framebuffer) {
@@ -91,7 +92,7 @@ void capture_draw() {
         fprintf(file,"P3\n# program=%u target=%u depth=%u/%u cull=%u blend=%u textures=",
             active_pipeline,draw_colors[0],state.depth_test,state.depth_func,state.cull_enable,state.blend_enable);
         for(auto handle:sampled_textures)fprintf(file,"%u,",handle);
-        fprintf(file,"\n64 36\n255\n");
+        fprintf(file," vp18=%g,%g,%g,%g\n64 36\n255\n",captured_vp18[0],captured_vp18[1],captured_vp18[2],captured_vp18[3]);
         for(unsigned i=0;i<64*36;i++)fprintf(file,"%u %u %u\n",pixels[i*4],pixels[i*4+1],pixels[i*4+2]);
         fclose(file);
     }
@@ -416,7 +417,10 @@ void constants(GLuint buffer,GLuint binding,const void* data,u32 bytes) {
     glBindBuffer(GL_UNIFORM_BUFFER,buffer);glBufferData(GL_UNIFORM_BUFFER,bytes,data,GL_STREAM_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER,binding,buffer);
 }
-void vs_constants(void*,const void* data,u32 bytes){constants(vs_ubo,0,data,bytes);}
+void vs_constants(void*,const void* data,u32 bytes){
+    if(capture_draws && bytes>=19*16)memcpy(captured_vp18.data(),(const char*)data+18*16,16);
+    constants(vs_ubo,0,data,bytes);
+}
 void ps_constants(void*,const void* data,u32 bytes){constants(ps_ubo,1,data,bytes);}
 GLuint sampler_object(const Texture& texture,const rsx_be_sampler_desc& s) {
     GLenum min=s.min_linear?GL_LINEAR:GL_NEAREST;
@@ -476,14 +480,19 @@ void draw(void*,rsx_topology topology,const void* vertices,u32 count,u32 stride,
         glBindFramebuffer(GL_FRAMEBUFFER,draw_fbo);
     }
 }
-void clear_color(void*,u32 surface,const float rgba[4]) {
+void clear_color_rect(void*,u32 surface,const float rgba[4],u32 channels,u32 x,u32 y,u32 w,u32 h) {
     glBindFramebuffer(GL_FRAMEBUFFER,temp_fbo);attach(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,0);
     attach(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,surface);const GLenum buffer=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&buffer);
     // WebGL's clearBufferfv overload rejects the whole multi-GiB Wasm heap
     // view. Scalar clear values avoid that browser offset/length limitation.
-    glDisable(GL_SCISSOR_TEST);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    glEnable(GL_SCISSOR_TEST);glScissor(x,y,w,h);
+    glColorMask((channels&1)!=0,(channels&2)!=0,(channels&4)!=0,(channels&8)!=0);
     glClearColor(rgba[0],rgba[1],rgba[2],rgba[3]);glClear(GL_COLOR_BUFFER_BIT);
     check_gl("color clear");
+}
+void clear_color(void* user,u32 surface,const float rgba[4]) {
+    const auto& target=textures.at(surface);
+    clear_color_rect(user,surface,rgba,15,0,0,target.w,target.h);
 }
 void clear_depth(void*,u32 depth,u32 flags,float value,u8 stencil) {
     glBindFramebuffer(GL_FRAMEBUFFER,temp_fbo);attach(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,0);
@@ -527,7 +536,7 @@ void readback(void*,u32 surface,u32 x,u32 y,u32 w,u32 h,void* out,u32 pitch) {
 rsx_draw_backend backend={nullptr,init,shutdown,submit,texture_create,texture_upload,release,
     color_create,release,view,depth_create,release,snapshot,pipeline_create,pipeline_release,
     bind_targets,bind_pipeline,vs_constants,ps_constants,bind_textures,bind_vertex_textures,
-    viewport,scissor,stencil_ref,draw,clear_color,clear_depth,present,readback};
+    viewport,scissor,stencil_ref,draw,clear_color,clear_depth,present,readback,clear_color_rect};
 }
 extern "C" int haze_webgl_backend_init(u32 w,u32 h,const char*) {
     rsx_draw_engine_set_backend(&backend);rsx_draw_engine_set_default(1);

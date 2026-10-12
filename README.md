@@ -602,6 +602,9 @@ Browser SPU jobs use bounded stacks and heap contexts to avoid exhausting linear
 memory. The backend reuses compiled shaders across pipelines and optimizes their
 register arrays while preserving guest constant-buffer layouts. Texture units
 use independent cached sampler objects, including when they share an image.
+Color clears preserve guest channel masks and scissor rectangles, including
+alpha-only clears between post-processing passes. Texel-addressed textures
+scale coordinates by their image dimensions.
 
 From that worktree, reuse the generated PPU/SPU sources and local assets in the
 main checkout:
