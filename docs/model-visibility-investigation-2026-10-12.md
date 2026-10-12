@@ -2,10 +2,15 @@
 
 The user reports entire soldiers and airships disappearing and reappearing,
 especially up close, including while neither the player nor camera moves.
+The user subsequently identified the trigger as walking up to the soldiers
+and starting the first conversation.
 The requested investigation is on a new branch in the existing worktree:
 `investigate/model-visibility`, based on `9c48009`. Its independent SDK branch
 is `investigate/haze-model-visibility`, based on `9058dc4`. This preserves the
 previous shadow clear correction. No model visibility fix is established yet.
+The first-conversation recording now contains an externally observed
+visible / missing / visible soldier sequence, also reproduced in native
+readbacks. Matching draw-state evidence remains outstanding.
 
 ## Initial native evidence
 
@@ -315,6 +320,149 @@ failure in the inspected evidence; no causal fix follows from this comparison.
 Short four-poll menu button presses were unreliable uncapped; verified menu
 navigation used 40-poll presses before the gameplay recordings began.
 
+## First-conversation sequence
+
+Run `20261012-151150-184` targets the newly identified first-conversation
+trigger using the preserved executable, automatic 1440p rendering,
+follow-resolution 5120x5120 shadows, and the 30 FPS ceiling. It exits normally
+with code 0 and preserves 11,357 successful presents, all with the baseline
+live modes. Draw logging remains gated off throughout. Native capture is
+unused during the two external recordings. A separate main-checkout game
+runs concurrently, so these recordings are not performance comparisons.
+
+The first recording contains 5,401 samples over 179.99 seconds and follows
+the approach, pauses near the squad, the actual first conversation, automatic
+camera turns and aircraft flyover, then the "Board your squad's dropship"
+objective. Every external timestamp has preceding and following successful
+present records; the largest sample gap is 0.112 seconds. A 60-sample overview
+of the whole recording was inspected, together with the eight largest
+regional changes in the closest pre-conversation hold and the eight largest
+changes in the final post-conversation segment. Those inspected comparisons
+do not confirm an individual model disappearing and reappearing.
+
+Reviewing the conversation segment itself does reproduce the reported
+appearance in the external recording. Full-size context around samples
+3240 through 3243 shows the close helmeted soldier present at sample 3241
+and entirely absent at 3242, while the deck, foliage, sky and parked aircraft
+remain visible. Context around 3260 through 3263 shows him absent at 3261
+and present again at 3262. The absent samples span approximately 0.65 seconds;
+the two observed transition samples are approximately 0.70 seconds apart.
+This occurs during automatic conversation camera movement, before the later
+short player-input command. It is not explained by the NPC walking out of
+the viewport. The parked aircraft is also absent at samples 3769 and 3770
+and present again at 3771 and 3772; the camera changes angle slightly across
+that pair, so its exact view is not fixed.
+
+| Model transition | External samples | Recording offsets | Presentation brackets |
+| --- | --- | --- | --- |
+| Close soldier disappears | 3241 to 3242 | 108.017 to 108.052 seconds | 5766/5767 to 5767/5768 |
+| Close soldier returns | 3261 to 3262 | 108.704 to 108.747 seconds | 5781/5782 to 5782/5783 |
+| Parked aircraft returns | 3770 to 3771 | 125.671 to 125.693 seconds | 6170/6171 to 6171/6172 |
+
+These brackets locate the external samples among successful presents;
+they do not prove which individual present supplied the sampled pixels.
+Contact and adjacent-pair review of the conversation identifies the target,
+but there is no native readback or per-draw trace of these specific missing
+states yet. Local full-size paired contexts are
+`visibility-conversation-soldier-out-context.png`,
+`visibility-conversation-soldier-return-context.png` and
+`visibility-conversation-aircraft-return-context.png`. Timestamp correlation
+is saved as `visibility-conversation-model-correlation.json`.
+
+The script begins shortly after the fourth approach step's neutral-input
+acknowledgment, around recording offset 95.97 seconds. A subsequent short
+forward command occurs during the script around offset 128.58 seconds.
+Thus neither the entire recording nor the entire conversation is an
+input-neutral comparison. Automatic script camera movement also prevents
+treating neutral player input as a stationary viewpoint.
+
+Two whole-scene black intervals are observable during the conversation:
+
+| External samples | Recording offsets | Successful-present brackets |
+| --- | --- | --- |
+| 2879 through 2898 | 95.970 through 96.587 seconds | 5529 through 5540 |
+| 4167 through 4238 | 138.884 through 141.273 seconds | 6436 through 6481 |
+
+For these samples, every decoded channel in the top 540 of 720 rows is at
+most 2; the lower HUD is excluded. The second interval leaves the squad-join
+messages visible before the 3D scene returns. These are external observations,
+not native readbacks of the black state. The listed timestamps are the first
+and last qualifying samples, not exact transition boundaries.
+
+Unlike the earlier black run `20261012-083842-069`, the conversation's black
+intervals do not coincide with a collapse in submitted scene work. Around
+the second interval, the cumulative renderer summaries imply approximately
+1,317 executed groups per frame between summaries 6432 and 6464, and 1,341
+between 6464 and 6496. Seen and executed group totals match, with zero movie
+and queue-full counts in the inspected summaries. These aggregate counters
+do not identify visible models or establish why the image is black. A scripted
+fade and a rendering defect have not been distinguished, and neither interval
+is yet linked to the user's individual-model report. Local correlation is
+saved as `visibility-conversation-black-correlation.json`.
+
+Native readback `requested_008224.ppm`, taken after the first recording,
+shows three opaque nearby squad members, the vehicle and parked aircraft.
+The subsequent input-neutral recording contains 1,350 samples over 44.96
+seconds, with a largest gap of 0.088 seconds. Its contact sheet and eight
+largest regional changes retain the nearby soldiers. The aircraft takes off
+and leaves through the upper edge during the opening portion; its later
+absence is not evidence of a rendering disappearance. All sample timestamps
+have presentation brackets. The native frame's two adjacent presentation
+records retain the baseline modes. Validation is saved as
+`visibility-conversation-validation.json`. No renderer behavior was changed.
+
+A follow-up attempt, `20261012-153154-964`, repeats the saved pad-poll route
+but overshoots the target and does not reach the conversation in either
+recording. Its black-triggered native/trace requests never activate. It exits
+normally with code 0. This is an unsuccessful navigation attempt, not evidence
+that instrumenting the reproduced scene fixes or preserves its model visibility.
+
+## Native first-conversation reproduction
+
+Run `20261012-154146-932` reaches the conversation using smaller approach
+steps verified with actual screenshots. It retains the same preserved
+executable, 1440p/follow-shadow graphics settings and baseline modes, exits
+normally with code 0 and saves 11,841 successful presents. Menu navigation
+sent before the title was ready had to be repeated; the actual gameplay view
+was verified before the approach.
+
+There are 189 consecutive native readbacks, `requested_008767.ppm` through
+`requested_008955.ppm`. The initial black-triggered requests account for nine
+frames; a subsequent requested burst accounts for 180. Every captured counter
+has both its same-number and next-number successful-present record, with no
+live mode switch. The normal native readback precedes presentation, so native
+frame N contains draw-frame N and is associated with successful present N+1.
+
+Inspection of the native contact sheet and full consecutive context around
+the close soldier confirms the disappearance:
+
+| Native frame(s) | Observed close soldier |
+| --- | --- |
+| 8837 | Visible |
+| 8838 through 8840 | Missing; background remains visible |
+| 8841 | Visible again |
+| 8842 through 8847 | Missing; background remains visible |
+| 8848 | Visible again |
+
+This reproduces the model-specific appearance in the renderer's native image,
+rather than only an external window capture. It does not identify whether the
+model was omitted, transformed incorrectly, clipped or rejected by pixel/depth
+state. The native images also show the initial whole-scene black interval,
+with black top-three-quarter regions in frames 8767 through 8770; this remains
+a separate observation from the missing soldier.
+
+The draw gate covers only frames 8767 through 8790, with 28,160 draw rows
+over 24 counters, and ends before the soldier's missing frames. A shared gate
+was closed by the black-capture helper before the later native burst ended.
+There is therefore **no matching per-draw trace of the missing soldier in this
+run**. Readback and logging substantially perturb timing; the recorded native
+burst takes approximately 40.66 seconds, so its counter offsets cannot be
+converted to the original recording's elapsed time. Local artifacts are
+`visibility-conversation-target-native-close-context.png`,
+`visibility-conversation-target-native.review.json`,
+`visibility-conversation-target-trace-coverage.json` and
+`visibility-conversation-target-validation.json`.
+
 ## Scoped source findings
 
 The SDK source below is from the investigation's preserved `9058dc4` base.
@@ -393,9 +541,11 @@ readbacks disabled, then compared with a narrowly gated trace of that failure.
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
-main checkout's changing performance candidates. The next useful comparison
-needs the affected build and scene phase, followed by a confirmed visible /
-missing / visible sequence and its matching pipeline, vertex and query state.
-The investigation still requires a disappearing/reappearing model
-pair, matched draw/geometry state, and a causal comparison before any fix or
-completion claim.
+main checkout's changing performance candidates. The scene phase is now known:
+approaching the soldiers and starting the first conversation. The next useful
+comparison can now target the externally recorded soldier sequence during
+the first conversation. Native images now reproduce it; the remaining evidence
+is matching pipeline, vertex and query state, followed by a causal comparison
+before any fix or completion
+claim. The separate whole-scene black intervals are not a substitute for that
+model-specific comparison.
