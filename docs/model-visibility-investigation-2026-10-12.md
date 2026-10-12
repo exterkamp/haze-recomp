@@ -282,6 +282,39 @@ Fixed pad-poll routes again produced different movement distances, reinforcing
 the need to verify each actual view and avoid treating polling counts as a
 reproducible camera trajectory. No renderer behavior was changed.
 
+## Uncapped presentation comparison
+
+Run `20261012-145656-069` tests the preserved executable with `frame_limit=0`.
+All other graphics settings match the 1440p/native-shadow baseline, including
+`vsync=auto`; startup confirms `max_fps=0` and `present_sync=1`. This isolates
+removal of the configured FPS ceiling, rather than also changing VSync or the
+executable. Native capture and draw logging remain unused during both external
+recordings. The run exits normally with code 0. Its successful-present CSV
+retains the final 16,384 records, counters 18446 through 34829; earlier menu
+records have rolled out of the bounded ring. Every retained row has CPU flags
+1283, depth clear 1, window position 1, shadow comparison 0 and depth export 0.
+
+The approach recording contains 2,701 samples over 89.99 seconds, with a largest
+capture gap of 0.145 seconds. It includes deliberate movement and camera turns,
+and is not a stationary comparison. A following input-neutral hold near the
+squad and parked airship contains 1,801 samples over 60.00 seconds, with a
+largest gap of 0.090 seconds. Both contact sheets and each recording's eight
+largest adjacent regional changes were inspected. The squad and parked
+aircraft remain opaque in those inspected images. Native readback
+`requested_034802.ppm`, taken after both recordings, also retains them.
+Every external sample timestamp has preceding and following retained
+successful-present records, and neither video contains a decoded sample with
+all channels at or below 2. The local correlation is
+`visibility-uncapped-validation.json`.
+
+The hold spans 1,413 successful-present intervals in 60.00 seconds, despite
+the removed cap. This run therefore does not test sustained gameplay above
+30 FPS or rule out a higher-frame-rate failure. The external recorder also
+adds overhead. Removing the cap did not produce a confirmed model visibility
+failure in the inspected evidence; no causal fix follows from this comparison.
+Short four-poll menu button presses were unreliable uncapped; verified menu
+navigation used 40-poll presses before the gameplay recordings began.
+
 ## Scoped source findings
 
 The SDK source below is from the investigation's preserved `9058dc4` base.
