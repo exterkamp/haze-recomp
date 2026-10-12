@@ -6,17 +6,25 @@ const mapping = {Tab:0, ControlLeft:1, Mouse2:2, Enter:3, Escape:3,
 const padBits = [14,13,15,12,10,11,8,9,0,3,1,2,4,6,7,5];
 let mouseX = 0, mouseY = 0, previous = '';
 const canvas = document.querySelector('#screen');
+function captureMouse() {
+  canvas.focus();
+  try {
+    canvas.requestPointerLock()?.catch(error => console.warn('Mouse capture unavailable: ' + error.message));
+  } catch (error) {
+    console.warn('Mouse capture unavailable: ' + error.message);
+  }
+}
 function key(event, held) {
   if (held) keys.add(event.code); else keys.delete(event.code);
   if (event.code in mapping || /^(Key[WASD]|F1)$/.test(event.code)) event.preventDefault();
   if (held && event.code === 'F1') {
-    if (document.pointerLockElement) document.exitPointerLock(); else canvas.requestPointerLock();
+    if (document.pointerLockElement) document.exitPointerLock(); else captureMouse();
   }
 }
 window.addEventListener('keydown', event => key(event, true));
 window.addEventListener('keyup', event => key(event, false));
 window.addEventListener('blur', () => keys.clear());
-canvas.addEventListener('click', () => { canvas.focus(); canvas.requestPointerLock(); });
+canvas.addEventListener('click', captureMouse);
 canvas.addEventListener('contextmenu', event => event.preventDefault());
 window.addEventListener('mousedown', event => {
   if (document.pointerLockElement === canvas) keys.add('Mouse' + event.button);

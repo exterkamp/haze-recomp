@@ -140,7 +140,12 @@ async def run(args):
                     for result in await evaluate_gpu_workers(selected, action['gpu_evaluate']):
                         if result is not None:
                             record('[test GPU evaluate] ' + json.dumps(result))
+                if action.get('click_canvas'):
+                    await page.bring_to_front()
+                    await page.locator('#screen').click()
                 keys = action.get('keys', [])
+                if keys:
+                    await page.bring_to_front()
                 for key in keys:
                     await page.keyboard.down(key)
                 await asyncio.sleep(min(3, max(0.05, action.get('hold_ms', 150) / 1000)))

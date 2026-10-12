@@ -60,7 +60,10 @@ std::unordered_map<std::string, GLuint> vertex_shaders, fragment_shaders;
 std::map<std::array<u32,7>,GLuint> sampler_objects;
 GLuint draw_fbo, read_fbo, temp_fbo, vao, vbo, ibo, vs_ubo, ps_ubo, active_pipeline;
 GLuint depth_read_fbo, depth_write_fbo, bound_depth, original_depth;
+bool depth_dirty=false, depth_alias_valid=false;
+void flush_depth();
 std::unordered_map<uint64_t, GLuint> depth_attachments;
+std::unordered_map<GLuint,GLuint> color_snapshots;
 u32 width, height, draws, frames;
 bool validate_gl;
 bool capture_draws=false;
@@ -208,7 +211,7 @@ void shutdown(void*) {
     for(const auto& entry:sampler_objects)glDeleteSamplers(1,&entry.second);
     sampler_objects.clear();
 }
-void submit(void*,u32) { glFinish(); }
+void submit(void*,u32) { flush_depth();glFinish(); }
 void set_remap(Texture& t,u32 remap,u32 format) {
     u8 lanes[4];rsx_texture_component_remap(remap,format&0x9Fu,lanes);
     // B8 presents its single byte in every source lane, including alpha.
@@ -243,6 +246,12 @@ void texture_upload(void*,u32 handle,u32 face,u32 mip,u32 w,u32 h,const void* so
     }
 }
 void release(void*,u32 handle) {
+    if(handle==original_depth || handle==bound_depth) {
+        flush_depth();original_depth=bound_depth=0;depth_alias_valid=false;
+    }
+    if(auto found=color_snapshots.find(handle);found!=color_snapshots.end()) {
+        const auto copy=found->second;color_snapshots.erase(found);release(nullptr,copy);
+    }
     for(auto it=textures.begin();it!=textures.end();) {
         if(it->second.object==handle)it=textures.erase(it);else ++it;
     }
@@ -286,7 +295,28 @@ void copy_depth(GLuint source,GLuint destination) {
     glBlitFramebuffer(0,0,w,h,0,0,w,h,GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT,GL_NEAREST);
     toggle(GL_SCISSOR_TEST,scissor);
 }
+void flush_depth() {
+    if(!depth_dirty)return;
+    copy_depth(bound_depth,original_depth);depth_dirty=false;
+}
+u32 color_snapshot(void*,u32 surface) {
+    auto [entry,fresh]=color_snapshots.emplace(surface,0);
+    const auto source=textures.at(surface);
+    if(fresh)entry->second=allocate(source);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,read_fbo);
+    attach(GL_READ_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,0);
+    attach(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,surface);glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,temp_fbo);
+    attach(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,0);
+    attach(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,entry->second);
+    const GLenum buffer=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&buffer);
+    const bool scissor=glIsEnabled(GL_SCISSOR_TEST);glDisable(GL_SCISSOR_TEST);
+    glBlitFramebuffer(0,0,source.w,source.h,0,0,source.w,source.h,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+    toggle(GL_SCISSOR_TEST,scissor);check_gl("color snapshot");
+    return entry->second;
+}
 u32 snapshot(void* user,u32 depth,u32 w,u32 h) {
+    flush_depth();
     const u32 copy=depth_create(user,w,h);
     glBindFramebuffer(GL_READ_FRAMEBUFFER,read_fbo);attach(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,0);
     attach(GL_READ_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,depth);
@@ -294,7 +324,9 @@ u32 snapshot(void* user,u32 depth,u32 w,u32 h) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER,temp_fbo);attach(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,0);
     attach(GL_DRAW_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,copy);
     const GLenum none=GL_NONE;glDrawBuffers(1,&none);
+    const bool scissor=glIsEnabled(GL_SCISSOR_TEST);glDisable(GL_SCISSOR_TEST);
     glBlitFramebuffer(0,0,w,h,0,0,w,h,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
+    toggle(GL_SCISSOR_TEST,scissor);
     return copy;
 }
 GLuint compile_shader(GLenum stage,const char* hlsl) {
@@ -364,7 +396,7 @@ u32 pipeline_create(void*,const char* vs,const char* ps,const rsx_be_render_stat
 }
 void pipeline_release(void*,u32 program) {glDeleteProgram(program);pipelines.erase(program);}
 void bind_targets(void*,const u32* surfaces,u32 count,u32 depth) {
-    original_depth=bound_depth=depth;
+    GLuint next_depth=depth;
     if(depth && count) {
         const auto color=textures.at(surfaces[0]);const auto z=textures.at(depth);
         // WebGL requires identical attachment dimensions. RSX and the native
@@ -375,8 +407,16 @@ void bind_targets(void*,const u32* surfaces,u32 count,u32 depth) {
             auto found=depth_attachments.find(key);
             if(found==depth_attachments.end())
                 found=depth_attachments.emplace(key,depth_create(nullptr,color.w,color.h)).first;
-            bound_depth=found->second;copy_depth(depth,bound_depth);
+            next_depth=found->second;
         }
+    }
+    // Keep the resized depth image live across consecutive draws. Publish
+    // its writes when another depth image or size becomes active, or when
+    // a clear, snapshot, fence, or presentation needs the canonical image.
+    if(original_depth!=depth || bound_depth!=next_depth || !depth_alias_valid) {
+        flush_depth();
+        if(next_depth && next_depth!=depth)copy_depth(depth,next_depth);
+        original_depth=depth;bound_depth=next_depth;depth_alias_valid=true;
     }
     glBindFramebuffer(GL_FRAMEBUFFER,draw_fbo);
     std::array<GLenum,4> buffers;
@@ -475,10 +515,9 @@ void draw(void*,rsx_topology topology,const void* vertices,u32 count,u32 stride,
     ++draws;
     check_gl("draw");
     if(capture_draws && draws<=2048 && draw_color_count)capture_draw();
-    if(bound_depth!=original_depth && pipelines.at(active_pipeline).state.depth_write) {
-        copy_depth(bound_depth,original_depth);
-        glBindFramebuffer(GL_FRAMEBUFFER,draw_fbo);
-    }
+    const auto& state=pipelines.at(active_pipeline).state;
+    if(bound_depth!=original_depth && ((state.depth_test && state.depth_write) ||
+        (state.stencil_enable && state.s_write_mask)))depth_dirty=true;
 }
 void clear_color_rect(void*,u32 surface,const float rgba[4],u32 channels,u32 x,u32 y,u32 w,u32 h) {
     glBindFramebuffer(GL_FRAMEBUFFER,temp_fbo);attach(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,0);
@@ -495,6 +534,8 @@ void clear_color(void* user,u32 surface,const float rgba[4]) {
     clear_color_rect(user,surface,rgba,15,0,0,target.w,target.h);
 }
 void clear_depth(void*,u32 depth,u32 flags,float value,u8 stencil) {
+    flush_depth();
+    if(depth==original_depth)depth_alias_valid=false;
     glBindFramebuffer(GL_FRAMEBUFFER,temp_fbo);attach(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,0);
     attach(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,depth);const GLenum none=GL_NONE;glDrawBuffers(1,&none);
     glDisable(GL_SCISSOR_TEST);glDepthMask(GL_TRUE);glStencilMask(0xff);
@@ -504,6 +545,7 @@ void clear_depth(void*,u32 depth,u32 flags,float value,u8 stencil) {
     check_gl("depth clear");
 }
 void present(void*,u32 surface) {
+    flush_depth();
     capture_draws=(debug_flags.fetch_and(~4u,std::memory_order_relaxed)&4)!=0;
     if(capture_draws)++capture_frame;
     const auto& t=textures.at(surface);
@@ -536,7 +578,7 @@ void readback(void*,u32 surface,u32 x,u32 y,u32 w,u32 h,void* out,u32 pitch) {
 rsx_draw_backend backend={nullptr,init,shutdown,submit,texture_create,texture_upload,release,
     color_create,release,view,depth_create,release,snapshot,pipeline_create,pipeline_release,
     bind_targets,bind_pipeline,vs_constants,ps_constants,bind_textures,bind_vertex_textures,
-    viewport,scissor,stencil_ref,draw,clear_color,clear_depth,present,readback,clear_color_rect};
+    viewport,scissor,stencil_ref,draw,clear_color,clear_depth,present,readback,clear_color_rect,color_snapshot};
 }
 extern "C" int haze_webgl_backend_init(u32 w,u32 h,const char*) {
     rsx_draw_engine_set_backend(&backend);rsx_draw_engine_set_default(1);

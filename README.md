@@ -597,7 +597,8 @@ rendering, RSX texture channel remapping, depth attachment compatibility, and
 visible canvas pixels. Browser PCM playback passes a shared-memory AudioWorklet
 test at 48 kHz. Haze reaches its title screen with readable text and game audio;
 keyboard Start advances into its menus. Campaign assets load and the opening
-credits run; visible 3D gameplay and save/reload behavior are still being validated.
+credits run. The campaign's 3D scene and post-processing now render visibly;
+movement, camera controls, progression, and save/reload checks are ongoing.
 Browser SPU jobs use bounded stacks and heap contexts to avoid exhausting linear
 memory. The backend reuses compiled shaders across pipelines and optimizes their
 register arrays while preserving guest constant-buffer layouts. Texture units
@@ -605,6 +606,9 @@ use independent cached sampler objects, including when they share an image.
 Color clears preserve guest channel masks and scissor rectangles, including
 alpha-only clears between post-processing passes. Texel-addressed textures
 scale coordinates by their image dimensions.
+Passes that sample their own render target use a reusable GPU snapshot.
+Resized depth images retain writes across consecutive draws and synchronize
+when a clear, snapshot, fence, target change, or presentation requires it.
 
 From that worktree, reuse the generated PPU/SPU sources and local assets in the
 main checkout:

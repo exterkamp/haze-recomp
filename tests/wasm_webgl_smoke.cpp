@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <GLES3/gl3.h>
+#include <emscripten/emscripten.h>
 
 static const rsx_draw_backend* backend;
 extern "C" void rsx_draw_engine_set_backend(const rsx_draw_backend* value) { backend = value; }
@@ -18,6 +19,14 @@ int main()
     // Exercise GL bindings with the same >8 GiB shared heap as the game.
     assert(haze_wasm_reserve_guest_vm());
     assert(haze_webgl_backend_init(1280,720,"smoke")==0);
+    EM_ASM({
+        Module.hazeDepthCopies=0;
+        const blit=GLctx.blitFramebuffer.bind(GLctx);
+        GLctx.blitFramebuffer=(...args)=>{
+            if(args[8]&GLctx.DEPTH_BUFFER_BIT)++Module.hazeDepthCopies;
+            return blit(...args);
+        };
+    });
     const char* vs=R"(
         struct VSInput { float4 a0:ATTR0; float4 a1:ATTR1; };
         struct VSOutput { float4 pos:SV_POSITION; float4 t0:TEXCOORD0; };
@@ -70,6 +79,9 @@ int main()
     printf("[webgl-smoke] read error=0x%X framebuffer=0x%X\n",glGetError(),glCheckFramebufferStatus(GL_READ_FRAMEBUFFER));
     printf("[webgl-smoke] pixel %u,%u,%u,%u\n",result[0],result[1],result[2],result[3]);
     assert(memcmp(result,pixel,4)==0);
+    assert(backend->color_snapshot);
+    const auto feedback=backend->color_snapshot(nullptr,target);
+    assert(feedback && feedback!=target);
     // Haze clears alpha before copying a completed scene. RGB must survive,
     // and a scissored clear must leave pixels outside its rectangle intact.
     const float zero[]={0,0,0,0};
@@ -84,16 +96,41 @@ int main()
     backend->readback(nullptr,target,10,10,1,1,result,4);
     const unsigned char red_cleared[]={0,102,153,0};
     assert(glGetError()==GL_NO_ERROR && memcmp(result,red_cleared,4)==0);
+    backend->readback(nullptr,feedback,10,10,1,1,result,4);
+    assert(memcmp(result,pixel,4)==0);
+    assert(backend->color_snapshot(nullptr,target)==feedback);
+    backend->readback(nullptr,feedback,10,10,1,1,result,4);
+    assert(glGetError()==GL_NO_ERROR && memcmp(result,red_cleared,4)==0);
     // Font atlases route a single stored channel into alpha through the RSX
     // crossbar. WebGL has no texture-view swizzles, so test the shader route.
     const auto atlas=backend->texture_create(nullptr,RSX_BE_FMT_R8,1,1,1,1,0,0x81);
     backend->texture_upload(nullptr,atlas,0,0,1,1,pixel,1,1);
+    backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,program);
+    textures[0]=atlas;backend->bind_textures(nullptr,textures,samplers,1);
+    backend->set_scissor(nullptr,0,0,32,32);
+    backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
+    backend->readback(nullptr,target,16,16,1,1,result,4);
+    assert(memcmp(result,pixel,4)==0); // Equal depth fails LESS across repeated binds.
+    assert(EM_ASM_INT({return Module.hazeDepthCopies;})==1);
+    // A depth consumer must observe writes still resident in the resized image.
+    const auto depth_copy=backend->depth_snapshot(nullptr,depth,64,64);
+    const auto spare=backend->color_target_create(nullptr,RSX_BE_FMT_R8G8B8A8,64,64,nullptr,0);
+    backend->clear_color(nullptr,spare,black);
+    backend->bind_targets(nullptr,&spare,1,depth_copy);backend->bind_pipeline(nullptr,program);
+    backend->set_viewport(nullptr,0,0,64,64);backend->set_scissor(nullptr,0,0,64,64);
+    backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
+    backend->readback(nullptr,spare,16,16,1,1,result,4);
+    assert(glGetError()==GL_NO_ERROR && memcmp(result,opaque_black,4)==0);
+    backend->readback(nullptr,spare,48,48,1,1,result,4);
+    const unsigned char mapped[]={51,51,51,51};
+    assert(memcmp(result,mapped,4)==0); // The original depth outside the crop stays clear.
     backend->clear_depth_stencil(nullptr,depth,RSX_BE_CLEAR_DEPTH,1,0);
     backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,program);
+    backend->set_viewport(nullptr,0,0,32,32);
     textures[0]=atlas;backend->bind_textures(nullptr,textures,samplers,1);
     backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
     backend->readback(nullptr,target,16,16,1,1,result,4);
-    const unsigned char mapped[]={51,51,51,51};assert(memcmp(result,mapped,4)==0);
+    assert(memcmp(result,mapped,4)==0);
     // Two units may sample the same image with different wrap modes. Texture
     // parameters alone incorrectly make the last unit's state affect both.
     const char* dual_ps=R"(
