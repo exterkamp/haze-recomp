@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Haze Recomp — browser development build</title>
+<style>
+body{margin:2rem auto;max-width:1280px;padding:0 1rem;background:#17191a;color:#eee;font:16px system-ui}
+h1{color:#efcd36}label{display:block;margin:1rem 0}button{padding:.7rem 1.4rem;font:inherit}
+canvas{display:block;width:100%;background:#000;margin-top:1rem;aspect-ratio:16/9}
+pre{max-height:18rem;overflow:auto;font-size:12px;white-space:pre-wrap}small{color:#bbb}
+</style>
+<h1>Haze Recomp</h1>
+<p>Experimental browser port under development. Rendering and gameplay are not yet validated.</p>
+<div id="assets">
+<p>Select your extracted BLUS30094 disc directory (containing PS3_GAME), including a decrypted EBOOT.ELF.
+Files are read locally; they are not uploaded.</p>
+<label>Disc directory <input id="disc" type="file" webkitdirectory multiple></label>
+<label>PS3 firmware directory (dev_flash) <input id="firmware" type="file" webkitdirectory multiple></label>
+<button id="start" disabled>Start development build</button>
+</div>
+<button id="stop" disabled>Stop</button>
+<p id="status" role="status">Checking browser support…</p>
+<small>This Wasm64 build requires a 64-bit browser, shared memory and approximately 8 GB of addressable Wasm memory.</small>
+<canvas id="screen" width="1280" height="720" tabindex="0"></canvas>
+<p>WASD: move · Mouse: look (click to capture) · Space: confirm/jump · Enter: Start · E: square · R: triangle · X: circle · Arrow keys: menus · F1: release mouse. Standard gamepads are supported.</p>
+<pre id="log"></pre>
+<script src="app.js"></script>
+<script src="input.js"></script>
+</html>

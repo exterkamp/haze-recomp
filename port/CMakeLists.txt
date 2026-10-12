@@ -212,6 +212,14 @@ if(SPU_SOURCES)
     endif()
 endif()
 
+# LLVM 24's Wasm SIMD selector crashes when vectorizing this image's packed
+# unsigned-to-float conversion (WebAssemblyISD::CONVERT_LOW_U). Preserve its
+# scalar arithmetic until the compiler issue is resolved; other images retain SIMD.
+if(EMSCRIPTEN AND EXISTS "${SPU_DIR}/spu_0022_at_00D15F80/spu_recomp.c")
+    set_property(SOURCE "${SPU_DIR}/spu_0022_at_00D15F80/spu_recomp.c" APPEND PROPERTY
+        COMPILE_OPTIONS -fno-vectorize -fno-slp-vectorize)
+endif()
+
 # app.rc carries the icon, the version block and the manifest, and needs a
 # resource compiler. Listing it as a source on a host that has none is not a
 # link error, it is a "no rule to make" for a file nothing can consume.
@@ -298,4 +306,55 @@ endif()
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
+if(EMSCRIPTEN)
+    option(HAZE_WASM_SHADER_COMPILER "Build the in-browser HLSL to GLSL compiler" ON)
+    if(HAZE_WASM_SHADER_COMPILER)
+        add_subdirectory(wasm)
+        target_sources(${PROJECT_NAME} PRIVATE wasm/webgl_backend.cpp)
+        set_source_files_properties(wasm/webgl_backend.cpp PROPERTIES COMPILE_OPTIONS -fwasm-exceptions)
+        target_link_libraries(${PROJECT_NAME} PRIVATE HazeWasmShaders)
+        set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_DEFINITIONS HAZE_WASM_WEBGL)
+        target_link_options(${PROJECT_NAME} PRIVATE -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2
+            -sOFFSCREENCANVAS_SUPPORT=1 --pre-js=${CMAKE_CURRENT_SOURCE_DIR}/wasm/canvas.js)
+    endif()
+    add_executable(HazeWasmSmoke ../tests/wasm_smoke.cpp wasm/guest_memory.cpp)
+    target_include_directories(HazeWasmSmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${RECOMP_DIR}"
+        "${PS3RECOMP_DIR}/runtime/platform")
+    target_link_libraries(HazeWasmSmoke PRIVATE ps3recomp_runtime)
+    target_compile_options(HazeWasmSmoke PRIVATE -UNDEBUG)
+    target_link_options(HazeWasmSmoke PRIVATE
+        -Wl,--wrap=_Z13func_00C07818P11ppu_context
+        -sMEMORY64=1 -sMAXIMUM_MEMORY=16GB -sALLOW_MEMORY_GROWTH=1
+        -sINITIAL_MEMORY=128MB -sSTACK_SIZE=4MB -sPROXY_TO_PTHREAD=1
+        -sPTHREAD_POOL_SIZE=4 -sEXIT_RUNTIME=1
+        -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createHaze
+        -sEXPORTED_RUNTIME_METHODS=FS,callMain,WORKERFS,IDBFS,ENV
+        -sINVOKE_RUN=0 -sFORCE_FILESYSTEM=1 -lidbfs.js -lworkerfs.js)
+    set_target_properties(HazeWasmSmoke PROPERTIES SUFFIX ".js")
+    target_compile_options(${PROJECT_NAME} PRIVATE -pthread -msimd128 -sMEMORY64=1)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        -pthread -sMEMORY64=1 -sMAXIMUM_MEMORY=16GB
+        -sINITIAL_MEMORY=128MB -sALLOW_MEMORY_GROWTH=1
+        -sSTACK_SIZE=4MB -sDEFAULT_PTHREAD_STACK_SIZE=4MB
+        -sPTHREAD_POOL_SIZE=32 -sPROXY_TO_PTHREAD=1
+        # The SDK's generic HLE bridge calls C firmware functions through an
+        # eight-u64 signature. Wasm checks indirect-call types strictly.
+        -sEMULATE_FUNCTION_POINTER_CASTS=1 --profiling-funcs
+        -sEXIT_RUNTIME=1 -sFORCE_FILESYSTEM=1
+        -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createHaze
+        -sEXPORTED_RUNTIME_METHODS=FS,callMain,WORKERFS,IDBFS,ENV
+        -sINVOKE_RUN=0 -lidbfs.js -lworkerfs.js)
+    set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".js")
+    if(HAZE_WASM_SHADER_COMPILER)
+        add_executable(HazeWebGLSmoke ../tests/wasm_webgl_smoke.cpp wasm/webgl_backend.cpp)
+        target_include_directories(HazeWebGLSmoke PRIVATE "${PS3RECOMP_DIR}/include" "${PS3RECOMP_DIR}/libs/video")
+        target_compile_options(HazeWebGLSmoke PRIVATE -pthread -sMEMORY64=1 -msimd128 -fwasm-exceptions -UNDEBUG)
+        target_link_libraries(HazeWebGLSmoke PRIVATE HazeWasmShaders)
+        get_target_property(HAZE_WASM_LINK_OPTIONS ${PROJECT_NAME} LINK_OPTIONS)
+        target_link_options(HazeWebGLSmoke PRIVATE ${HAZE_WASM_LINK_OPTIONS})
+        set_target_properties(HazeWebGLSmoke PROPERTIES SUFFIX ".js")
+    endif()
+    target_sources(${PROJECT_NAME} PRIVATE wasm/guest_memory.cpp)
+    target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=_Z13func_00C07818P11ppu_context)
+endif()
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)

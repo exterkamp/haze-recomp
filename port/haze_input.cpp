@@ -236,6 +236,38 @@ void haze_input_attach(void* hwnd) {
     if (!original_proc) fprintf(stderr,"[input] Window input hook failed: %lu\n",GetLastError());
     update_title();
 }
+#elif defined(__EMSCRIPTEN__)
+#include "cellPad.h"
+#include "../external/ps3recomp/libs/codec/cellSail.h"
+#include "haze_startup.h"
+#include "win32_compat.h"
+#include <emscripten/emscripten.h>
+#include <atomic>
+namespace {
+std::atomic<uint32_t> browser_buttons{0}, browser_axes{0x80808080};
+HazeStartupSkip browser_startup;
+int browser_poll(u32 port, CellPadHostInput* input, void*) {
+    if (port) return 0;
+    const uint32_t buttons = browser_buttons.load();
+    const uint32_t axes = browser_axes.load();
+    *input = {(u16)buttons, (u8)axes, (u8)(axes >> 8), (u8)(axes >> 16), (u8)(axes >> 24),
+              (u8)((buttons & CELL_PAD_CTRL_L2) ? 255 : 0), (u8)((buttons & CELL_PAD_CTRL_R2) ? 255 : 0)};
+    bool pressed;
+    if (browser_startup.sample(GetTickCount64(), pressed) && pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
+    return 1;
+}
+void browser_playback(u32 player, const char* uri, int started, void*) {
+    browser_startup.playback(player, uri, started != 0, GetTickCount64());
+}
+}
+extern "C" EMSCRIPTEN_KEEPALIVE void haze_wasm_input(uint32_t buttons, uint32_t axes) {
+    browser_buttons.store(buttons); browser_axes.store(axes);
+}
+void haze_input_initialize() {
+    cellPad_set_host_input_callback(browser_poll, nullptr);
+    cellSail_set_host_playback_callback(browser_playback, nullptr);
+}
+void haze_input_attach(void*) {}
 #else
 void haze_input_initialize() {}
 void haze_input_attach(void*) {}

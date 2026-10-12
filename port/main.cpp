@@ -42,6 +42,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __EMSCRIPTEN__
+#include "haze_wasm_vm.h"
+#include <emscripten/threading.h>
+#endif
 #include "haze_input.h"
 #include "haze_pump_profile.h"
 
@@ -113,6 +117,12 @@ int cellGcm_fifo_has_queued_work(void);
 }
 
 void ps3_sampler_start(void); /* SDK profiler has C++ linkage. */
+#ifdef __EMSCRIPTEN__
+extern "C" void ppu_report_guest_lrs(void);
+extern "C" EMSCRIPTEN_KEEPALIVE void haze_wasm_report(void) {
+    ppu_report_guest_lrs();
+}
+#endif
 
 /* ---------------------------------------------------------------------------
  * RSX present backend
@@ -121,7 +131,15 @@ void ps3_sampler_start(void); /* SDK profiler has C++ linkage. */
  * path anywhere else -- the same selection runtime/host/host_posix.c and the
  * toolkit's boot harness make. All three expose the same three entry points,
  * so the frame clock below is backend-agnostic. */
-#if defined(_WIN32)
+#if defined(__EMSCRIPTEN__) && defined(HAZE_WASM_WEBGL)
+extern "C" int haze_webgl_backend_init(uint32_t,uint32_t,const char*);
+extern "C" void haze_webgl_backend_present(void);
+extern "C" int haze_webgl_backend_pump_messages(void);
+#define rsx_backend_init haze_webgl_backend_init
+#define rsx_backend_present haze_webgl_backend_present
+#define rsx_backend_pump haze_webgl_backend_pump_messages
+#define RSX_BACKEND_NAME "WebGL2"
+#elif defined(_WIN32)
 extern "C" int  rsx_d3d12_backend_init(uint32_t w, uint32_t h, const char* title);
 extern "C" void rsx_d3d12_backend_present(void);
 extern "C" int  rsx_d3d12_backend_pump_messages(void);
@@ -324,7 +342,9 @@ static DWORD WINAPI frame_clock(LPVOID)
             drain_and_present();
 
             if (pump_messages() != 0) {
+#ifdef _WIN32
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
+#endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.
                 exit(0);
@@ -385,7 +405,15 @@ static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
 
 static bool alloc_guest_vm(void)
 {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    // Preserve GUEST_EA's low-32-bit conversion. Advance the program break
+    // past an aligned guest arena so later host allocations cannot overlap it.
+    vm_base = haze_wasm_reserve_guest_vm();
+    if (!vm_base) return false;
+    ppu_vm_size = 0;
+    fprintf(stderr, "[wasm-vm] aligned guest arena at 0x%llX, heap break 0x%llX\n",
+            (unsigned long long)(uintptr_t)vm_base, (unsigned long long)(uintptr_t)sbrk(0));
+#elif defined(_WIN32)
     AddVectoredExceptionHandler(1, vm_commit_veh);
     vm_base = (uint8_t*)VirtualAlloc(NULL, VM_SIZE, MEM_RESERVE, PAGE_READWRITE);
     ppu_vm_size = 0;              /* the whole space is backed; no OOB guard needed */
@@ -540,13 +568,27 @@ int main(int argc, char** argv)
     ppu_sysprx_register();   /* boot-critical CRT */
     ppu_fs_register();       /* cellFs over the game directory */
     lv2_init_syscalls();     /* the lv2 syscall table */
+#ifdef _WIN32
     if (getenv("PS3_SAMPLE")) ps3_sampler_start();
+#endif
 
     /* Install the guest-callback hook, then start the frame clock. It no-ops
      * until the title registers its vblank and flip handlers during init. */
     g_ps3_guest_caller = harness_guest_caller;
     haze_input_initialize();
+#if defined(__EMSCRIPTEN__) && defined(HAZE_WASM_WEBGL)
+    pthread_attr_t frame_attr;
+    pthread_attr_init(&frame_attr);
+    pthread_attr_setstacksize(&frame_attr, 4u * 1024 * 1024);
+    emscripten_pthread_attr_settransferredcanvases(&frame_attr, "#canvas");
+    pthread_t frame_thread;
+    const int frame_result = pthread_create(&frame_thread, &frame_attr,
+        [](void*) -> void* { frame_clock(nullptr); return nullptr; }, nullptr);
+    pthread_attr_destroy(&frame_attr);
+    if (frame_result) { fprintf(stderr, "[wasm] render thread failed: %d\n", frame_result); return 1; }
+#else
     CreateThread(NULL, 4u * 1024 * 1024, frame_clock, NULL, 0, NULL);
+#endif
 #ifdef _WIN32
     if (getenv("HAZE_BOOT_REPORT")) {
         HANDLE reporter = CreateThread(NULL, 0, haze_boot_reporter, NULL, 0, NULL);

@@ -588,6 +588,44 @@ captures use BMP. Boot stack
 reports are best-effort diagnostics. Queue operations no
 longer require the upstream experimental environment flag.
 
+## Experimental browser build
+
+The `feat/wasm-browser` worktree builds a Wasm64 runtime and a WebGL2 backend.
+Browser checks have verified the aligned guest memory arena, pthread events and
+joins, lazy local disc reads, and HLSL-to-GLSL translation with textured GPU
+rendering and pixel readback. Haze itself initializes graphics and reads its pak
+files, but the current boot remains black during loading. Browser gameplay,
+sound, and save/reload behavior are not yet validated.
+
+From that worktree, reuse the generated PPU/SPU sources and local assets in the
+main checkout:
+
+```powershell
+py -3 scripts/bootstrap-wasm.py
+.\scripts\build-wasm.ps1 -Emsdk E:\Code\ra2-web\.deps\emsdk
+py -3 scripts/serve-wasm.py
+```
+
+Open <http://127.0.0.1:8085/> in a current 64-bit Chromium browser. The local
+server automatically connects `game/disc` and `local/tools/rpcs3/dev_flash` from
+the main checkout, and opening the page boots the decrypted `EBOOT.ELF` directly.
+It serves asset byte ranges on demand and binds only to localhost. Override the
+paths with `--game-dir` and `--firmware-dir`; add `?manual=1` to choose folders
+instead. Build and game data stay in ignored directories. Browser save and HDD
+directories use IndexedDB, separately from native saves.
+
+WASD, mouse look, keyboard buttons, and standard gamepads have browser bridges;
+their in-game behavior still needs verification. Click the canvas to capture the
+mouse and press F1 to release it. The page lists the remaining mappings.
+
+Use `?smoke=1` for the runtime check, `?smoke=gl` for the GPU check, or `?trace=1`
+for periodic guest thread reports. `scripts/playtest-wasm.py` records logs,
+screenshots and an explicit gameplay-validation status under `local/wasm-tests`.
+The Wasm build requires shared memory, cross-origin isolation headers from the
+included server, and around 8 GiB of addressable linear memory. Its shader
+dependencies are pinned by the bootstrap script. Unsupported fiber and thread
+suspension APIs return errors; browser network play is not implemented.
+
 ## Development order
 
 1. Resolve build, SPU segment selection, and executable boot failures.

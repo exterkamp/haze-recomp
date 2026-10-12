@@ -1,0 +1,46 @@
+const disc = document.querySelector('#disc');
+const firmware = document.querySelector('#firmware');
+const start = document.querySelector('#start');
+const stop = document.querySelector('#stop');
+const status = document.querySelector('#status');
+const log = document.querySelector('#log');
+let worker;
+function record(text) {
+  console.log(text);
+  log.textContent = (log.textContent + text + '\n').slice(-100000);
+  log.scrollTop = log.scrollHeight;
+}
+const supported = crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined' && typeof Worker !== 'undefined';
+status.textContent = supported ? 'Select the disc and firmware directories.' : 'Shared memory is unavailable. Run scripts/serve-wasm.py and open its localhost URL.';
+disc.onchange = () => { start.disabled = !supported || !disc.files.length || !!worker; };
+function launch(assets) {
+  if ((!assets && !disc.files.length) || worker) return;
+  start.disabled = true;
+  status.textContent = 'Loading WebAssembly…';
+  worker = new Worker('runtime-worker.js');
+  worker.onmessage = ({data}) => {
+    if (data.type === 'status') status.textContent = data.text;
+    else if (data.type === 'log') record(data.text);
+    else if (data.type === 'error') { status.textContent = 'Runtime failed: ' + data.text; record(data.text); }
+  };
+  worker.onerror = event => { status.textContent = 'Runtime failed: ' + event.message; record(event.message); };
+  const canvas = document.querySelector('#screen').transferControlToOffscreen();
+  worker.postMessage({type:'start', disc:[...disc.files], firmware:[...firmware.files], assets, canvas,
+    trace:new URLSearchParams(location.search).has('trace'),
+    smoke:new URLSearchParams(location.search).get('smoke')}, [canvas]);
+  stop.disabled = false;
+}
+start.onclick = () => launch(null);
+stop.onclick = () => {
+  // Reload also terminates all pthread workers owned by the module.
+  location.search = '?manual=1';
+};
+if (supported && !new URLSearchParams(location.search).has('manual')) {
+  fetch('/assets/manifest.json').then(response => response.json()).then(assets => {
+    if (assets.disc?.some(path => path.toUpperCase() === 'PS3_GAME/USRDIR/EBOOT.ELF')) {
+      document.querySelector('#assets').hidden = true;
+      status.textContent = 'Starting with local game assets...';
+      launch(assets);
+    }
+  }).catch(error => record('Local assets unavailable: ' + error.message));
+}
