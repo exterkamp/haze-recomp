@@ -240,3 +240,27 @@ Automatic-resolution native checks:
 These bounded runs ended at their 50/45-second limits, with no D3D12
 error/corruption or resource/presentation failures. They verify startup and
 presentation; they do not measure campaign performance.
+
+## Combined automatic-default feedback build
+
+Main merge `7a7050a` incorporates `10b87ee` and keyboard release fix `fb4980a`,
+with SDK `45faa42`. The complete merged gate passed in
+`local/auto-defaults-merged-build-tests.log`, including automatic display/INI,
+native input, runtime, depth, WPOS, shadow and graphics readback checks.
+The build configuration guard verified profiling and comparison were disabled;
+SPU FMA was enabled.
+
+Fresh executable: `local/releases/haze-wip-2026-10-12-auto-defaults/HazeRecomp.exe`.
+SHA-256: `971EB2469158EB1A5EA70F8D7CAA870ECD447E55CB327559B190F2737C7B523A`.
+The ordinary main build executable and PDB were updated to this exact build.
+The adjacent launchers use configured/default graphics, or override only the
+rendering resolution to 1080p/1440p. Interactive audio is enabled.
+
+Muted native check `local/runs/auto-defaults-merged-no-ini` used this executable
+in an isolated working directory with no INI and no explicit graphics path.
+The process logged automatic primary-monitor resolution 2560x1440, borderless
+mode, native shadows and cap 30. The captured 2560x1440 startup image was
+visually inspected. After 25 seconds the owned window closed normally with
+exit code 0. This verifies omitted-file startup and presentation, not campaign
+performance or resolution of the reported lighting/model/conversation issues.
+See [squad slowdown profiling](squad-slowdown-profile.md) for current evidence.
