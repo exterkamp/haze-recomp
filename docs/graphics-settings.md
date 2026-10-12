@@ -1,8 +1,9 @@
 # Graphics settings
 
-Implemented on `feat/graphics-settings` in `.worktrees/custom-render-resolution`
-and its SDK worktree. This includes the custom-resolution work and the current
-native mouse controls and triangle-index performance fixes from main.
+Merged into main as `821868e` from feature commit `1bc4030`, with SDK merge
+`45faa42`. Both SDK histories are retained, including the current native
+rendering fixes and measured triangle-index improvement. Native mouse controls
+and custom rendering resolution are included in the combined build.
 
 Edit `config/graphics.ini`, then restart the game. The launchers resolve its path
 before starting the executable in a session directory. Use another file with
@@ -170,3 +171,31 @@ Final SDK source: `9cff4eb`. The candidate is
 Its adjacent `Play-Haze.cmd` launches the candidate using this worktree's
 `config/graphics.ini`. The worktree's default `build/haze/HazeRecomp.exe` and
 PDB were updated to the same final build. The main checkout is separate.
+
+## Main integration feedback build
+
+`local/releases/haze-wip-2026-10-11-graphics-settings/HazeRecomp.exe` was built
+from main `821868e` / SDK `45faa42`, with SPU FMA enabled and profiling and
+comparison instrumentation disabled. SHA-256:
+`EA8AEDE3153C145AD43D22A9A3F50A82E2D02116FC4BF0A576C3A98338F63577`.
+The full merged regression gate passed in
+`local/graphics-merged-build-tests.log`, including configuration/display tests,
+camera hooks, index oracles, depth/window-coordinate tests and graphics GPU
+readbacks. The actual Ninja compile rules were also checked for absence of
+profiling definitions.
+
+Muted run `20261012-053229-714` used that exact executable at 2560x1440,
+FXAA, 16x anisotropy, native 2048-square shadows, sharpening 0.15, VSync auto
+and a 30 FPS ceiling. The window client remained 1280x720. Captures
+`requested_004122.ppm` and `requested_005106.ppm` were visually checked on the
+carrier, including movement, tilted camera, opaque nearby barrels/vehicle and
+visible soldiers. This is a bounded visual integration check, not a measured
+performance comparison or proof that all campaign artifacts are resolved.
+The native window closed normally with exit code 0. The complete run log
+contains no D3D12 error/corruption or resource/presentation failure; the existing
+optimized-clear warnings remain.
+
+The feedback folder includes native/configured, 1080p and 1440p launchers.
+The main launcher reads `config/graphics.ini`; the resolution launchers
+override only render resolution. Interactive audio is enabled, while the
+automated validation remains muted. Settings require restarting the game.
