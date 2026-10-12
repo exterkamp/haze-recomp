@@ -797,6 +797,25 @@ speaker traverses that path or that this byte controls all visibility culling.
 The earlier guessed functions `0058AB70` and `005FCA28` do not resolve to this
 property table and must not be used as noocclude references.
 
+Run `20261012-181417-235` attempts a body-material comparison using the same
+diagnostic executable. Navigation does not produce a comparable close-up; the
+240-second external observer records 7,201 samples and never reaches its
+close-helmet trigger. The filter stays off, and this run supplies no body
+suppression or geometry-identification result. It exits normally.
+
+A read-only process-memory check, restricted to this run's exact PID and
+executable path, independently confirms small TOC `0x00E368E0`, its pointer at
+`0x00E2E948` to global block `0x0169F484`, and enable byte `0x0169F608 = 1`.
+At the end, a local helper writes this byte to 0 and immediately restores it
+to 1, verifying both writes by reading back the byte. This only validates
+the diagnostic control mechanism; there is no visual comparison during that
+brief toggle and no claim that it changes model visibility. The process is
+then closed. The local transition record is
+`visibility-conversation-body6-byte-transitions.jsonl`. The VM allocation in
+this executable is not 4 GB aligned, so the helper identifies it using the
+known entry descriptor and validates the pointer chain rather than assuming
+the current SDK header's allocation alignment applies to older game objects.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
