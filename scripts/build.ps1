@@ -94,6 +94,13 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU private-history test compilation failed.' }
     & $depthTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU history isolation/depth-limit test failed.' }
+    $drainHooksTest = Join-Path $root 'local/test_drain_hooks.exe'
+    & $clang /nologo /W0 /O2 /Gy /Gw "/I$sdk/include" "/Fe$drainHooksTest" "/Fo$root/local/test_drain_hooks.obj" "$sdk/runtime/spu/tests/test_drain_hooks.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'SPU drain hook test compilation failed.' }
+    foreach ($mode in @('default', 'no-ls0', 'exit', 'step', 'jobdrain')) {
+        & $drainHooksTest $mode
+        if ($LASTEXITCODE -ne 0) { throw "SPU drain hook test failed: $mode" }
+    }
     $sleepTest = Join-Path $root 'local/test_usleep_timer.exe'
     & $clang /nologo /W0 /O2 "/Fe$sleepTest" "/Fo$root/local/test_usleep_timer.obj" "$sdk/runtime/syscalls/tests/test_usleep_timer.c"
     if ($LASTEXITCODE -ne 0) { throw 'High-resolution timer test compilation failed.' }
