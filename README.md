@@ -597,8 +597,11 @@ rendering, RSX texture channel remapping, depth attachment compatibility, and
 visible canvas pixels. Browser PCM playback passes a shared-memory AudioWorklet
 test at 48 kHz. Haze reaches its title screen with readable text and game audio;
 keyboard Start advances into its menus. Campaign assets load and the opening
-credits run. The campaign's 3D scene and post-processing now render visibly;
-movement, camera controls, progression, and save/reload checks are ongoing.
+credits run. A campaign checkpoint renders its 3D scene and post-processing;
+WASD movement, mouse look, and pause/resume have been verified in Chromium.
+The carrier-deck scene measured approximately 6 FPS on the test machine (RTX
+5080 with Chromium/ANGLE); performance is still experimental. Full campaign
+progression has not been validated.
 Browser SPU jobs use bounded stacks and heap contexts to avoid exhausting linear
 memory. The backend reuses compiled shaders across pipelines and optimizes their
 register arrays while preserving guest constant-buffer layouts. Texture units
@@ -628,10 +631,14 @@ instead. Existing installed data under `game/disc/game/BLUS30094` is read direct
 from those local assets, avoiding a second 4 GB installation. Build and game
 data stay in ignored directories. Browser saves use IndexedDB, separately from
 native saves; when no local installation is present, HDD data also uses IndexedDB.
+The game's profile save was verified by changing a sound setting, accepting its
+save confirmation, and checking that the new profile bytes survived a page reload
+without a manual filesystem sync. This used an isolated test browser profile.
 
-WASD, mouse look, keyboard buttons, and standard gamepads have browser bridges;
-their in-game behavior still needs verification. Click the canvas to capture the
-mouse and press F1 to release it. The page lists the remaining mappings.
+WASD, mouse look, and keyboard menu controls have been exercised in-game.
+Standard gamepads have a browser bridge but have not been tested with hardware.
+Click the canvas to capture the mouse and press F1 to release it. The page lists
+the remaining mappings.
 Click **Enable sound** or interact with the canvas to unlock Web Audio. The
 game's audio clock continues at 48 kHz while browser sound is suspended.
 

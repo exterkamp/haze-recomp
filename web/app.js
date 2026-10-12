@@ -31,6 +31,7 @@ function launch(assets) {
     if (data.type === 'frame') {
       display.transferFromImageBitmap(data.frame);
       window.hazeVideoFrames = (window.hazeVideoFrames || 0) + 1;
+      if (window.hazeVideoFrames === 1) status.textContent = 'Haze is running.';
     }
     else if (data.type === 'audio') window.hazeAudioConnect(data);
     else if (data.type === 'status') status.textContent = data.text;
