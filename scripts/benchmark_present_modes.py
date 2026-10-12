@@ -110,7 +110,7 @@ def report(args):
                 for row in csv.DictReader(stream)]
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
-    if mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position'):
+    if mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
         selected = [(prev, cur) for prev, cur in zip(rows, rows[1:])
@@ -148,7 +148,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)

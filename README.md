@@ -341,6 +341,10 @@ keeping build products and run logs in the worktree:
 .\scripts\run.ps1 -SharedRoot E:\Code\haze-recomp -Seconds 600
 ```
 
+For renderer changes, `build.ps1 -SdkRoot .\external\ps3recomp` selects an
+independent SDK checkout while `-SharedRoot` continues to supply the lifts and
+game assets. The selected SDK must be at a compatible revision.
+
 `HAZE_MOUSE_TRACE=1` logs raw counts and the resulting angles after the game's
 camera update for diagnostics. The native hook checks the supported ELF's
 instruction and virtual-function signatures before accessing player angles.
