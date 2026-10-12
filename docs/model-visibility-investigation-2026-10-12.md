@@ -233,6 +233,55 @@ helpers remain ignored in `local/`; they contain game-derived pixels. The
 correlations are saved in `visibility-external-correlation.json` and
 `visibility-probe-validation.json` alongside the local recording metadata.
 
+## Mechanic absence and continuous transition check
+
+Two additional runs use the preserved executable at 1440p with native shadows,
+CPU flags 1283, depth clear 1, window position 1, shadow comparison 0 and depth
+export 0. External recordings leave draw logging gated off and make no native
+readback requests. Both runs exit normally with code 0.
+
+Run `20261012-090142-558` saves 9,706 successful presents. A window screenshot
+shows the mechanic crouched beside the vehicle's front wheel. The following
+45-second recording starts with the mechanic absent, while the vehicle and
+background align closely with the screenshot. However, the recording begins
+33.02 seconds after that screenshot. There is no captured departure in this
+gap, so the pair cannot establish an abrupt rendering disappearance. The
+1,350-sample recording and its eight largest regional changes contain no
+foreground mechanic to compare. After a further approach, a second recording
+contains 601 samples over 19.99 seconds; its contact sheet and eight largest
+regional changes retain the squad and airship. Native readback
+`requested_009701.ppm`, taken afterward, also shows those models. The mechanic
+is outside that final view.
+
+Run `20261012-091407-463` addresses the capture gap by recording continuously
+through the approach and neutral hold. It saves 7,995 successful presents.
+The video contains 3,600 samples over 119.98 seconds. Movement and camera
+adjustments occupy the first portion; the neutral comparison starts at sample
+2268, half a second after the last neutral-input acknowledgment, and lasts
+approximately 44.38 seconds. Contact sheets and the eight largest changes in
+the mechanic region show him repairing the wheel, standing up, then walking
+toward the player. Inspection of samples 2998 through 3006 shows his opaque
+body progressively leaving through the right edge. This observed absence is
+ordinary NPC movement, not a reproduced rendering disappearance. It does not
+explain the user's independently reported soldier and airship pop-out, nor
+prove the cause of the first run's uncaptured absence.
+
+All selected external sample timestamps in both runs have preceding and
+following successful-present records, and all present rows retain the baseline
+modes above. The largest recording gaps are 0.078 seconds and 0.085 seconds
+in the first run, and 0.106 seconds in the continuous recording. No decoded
+sample in these three videos has all channels at or below 2. This checks for
+the earlier whole-screen black state, rather than individual missing models.
+The local validation is saved as `visibility-mechanic-validation.json`.
+
+A late native capture request in the continuous run did not complete before
+the scheduled shutdown. There is no native readback of that run's final state;
+the screenshot helper's unchanged output still belongs to the preceding run.
+The continuous transition conclusion therefore rests on the external footage.
+Fixed pad-poll routes again produced different movement distances, reinforcing
+the need to verify each actual view and avoid treating polling counts as a
+reproducible camera trajectory. No renderer behavior was changed.
+
 ## Scoped source findings
 
 The SDK source below is from the investigation's preserved `9058dc4` base.
