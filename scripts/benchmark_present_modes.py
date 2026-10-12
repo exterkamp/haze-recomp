@@ -1,7 +1,7 @@
 """Measure renderer variants in an ordinary, nonprofiling native build.
 
 Record timed blocks while a visually verified gameplay scene stays still.
-RSX_CPU_WORK_FILE must point to CONTROL and RSX_PRESENT_CSV must be set before
+The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set before
 launch. Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
 during these blocks. Menus/loading do not establish gameplay performance.
@@ -50,7 +50,8 @@ def record(args):
     cpu, close = process_clock(args.pid)
     result = dict(pid=args.pid, exe=str(args.exe.resolve()),
                   qpc_frequency=frequency.value, warmup_s=args.warmup,
-                  measure_s=args.seconds, blocks=[], complete=False, note=__doc__)
+                  measure_s=args.seconds, mode_column=args.mode_column,
+                  blocks=[], complete=False, note=__doc__)
 
     def wait(seconds):
         deadline = time.monotonic() + seconds
@@ -91,6 +92,9 @@ def report(args):
         rows = [{key: int(value) for key, value in row.items()}
                 for row in csv.DictReader(stream)]
     summaries = []
+    mode_column = windows.get('mode_column', 'cpu_work')
+    if mode_column not in ('cpu_work', 'shadow_compare', 'depth_export'):
+        raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
         selected = [(prev, cur) for prev, cur in zip(rows, rows[1:])
                     if prev['qpc'] >= block['start_qpc'] and cur['qpc'] <= block['end_qpc']]
@@ -99,7 +103,7 @@ def report(args):
         for prev, cur in selected:
             if cur['present_id'] != prev['present_id'] + 1:
                 raise ValueError('Missing present inside a recorded block')
-            if prev['cpu_work'] != block['flags'] or cur['cpu_work'] != block['flags']:
+            if prev[mode_column] != block['flags'] or cur[mode_column] != block['flags']:
                 raise ValueError('Mode did not settle before the measured block; increase warmup')
             if cur['qpc'] <= prev['qpc']:
                 raise ValueError('Nonpositive present interval')
@@ -125,6 +129,8 @@ if __name__ == '__main__':
     runner.add_argument('--pid', type=int, required=True)
     runner.add_argument('--exe', type=Path, required=True)
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export'], default='cpu_work',
+                        help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
     runner.add_argument('--output', type=Path, required=True)
@@ -137,6 +143,8 @@ if __name__ == '__main__':
     if args.action == 'record':
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 1023 for f in args.flags):
             parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..1023')
+        if args.mode_column != 'cpu_work' and any(f not in (0,1) for f in args.flags):
+            parser.error('Shadow/depth export flags must be 0 or 1')
         record(args)
     else:
         if args.min_frames < 60:

@@ -74,7 +74,7 @@ normal-build observation, not a speedup comparison; no interval exceeds the
 
 The shadow investigation remains open. Actual depth binding at frame 2193 uses
 linear depth16 (`B2`), 2048×2048, wrap `60030303`, filter `02022000`, remap
-`0000AAE4`, and control0 `80000000`. The wrap high nibble requests LEQUAL depth
+`0000AAE4`, and control0 `80000000`. The wrap high nibble requests GEQUAL depth
 comparison, which the renderer's ordinary sampler previously ignored. This is
 a separate, observed shadow lead; soldier visibility and every camera-dependent
 artifact are not yet verified as fixed.

@@ -99,6 +99,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Frame-boundary presentation test failed.' }
     & $python "$root/tests/test_firmware_relocation.py"
     if ($LASTEXITCODE -ne 0) { throw 'Firmware ELF relocation tests failed.' }
+    & $python "$root/tests/test_present_modes.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Present-window benchmark validation failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }
@@ -201,6 +203,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Fragment shadow test compilation failed.' }
     & $shadowTest
     if ($LASTEXITCODE -ne 0) { throw 'Fragment shadow comparison GPU test failed.' }
+    $depthExportTest = Join-Path $root 'local/test_fp_depth.exe'
+    & $clang /nologo /EHsc /W0 /O1 "/I$sdk/include" "/Fe$depthExportTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_depth.cpp" "$sdk/libs/video/rsx_fp_decompiler.c" /link d3d11.lib d3dcompiler.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment depth-export test compilation failed.' }
+    & $depthExportTest
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment depth-export GPU test failed.' }
     $clearTest = Join-Path $root 'local/test_color_clear.exe'
     & $clang /nologo /W0 /O1 "/Fe$clearTest" "/Fo$root/local/test_color_clear.obj" "$sdk/libs/video/tests/test_color_clear.c" /link d3d12.lib dxgi.lib d3dcompiler.lib
     if ($LASTEXITCODE -ne 0) { throw 'Color clear test compilation failed.' }
