@@ -20,7 +20,12 @@ submissions stop is now traced to guest occlusion-result model-list filtering.
 The exact speaker model is removed in eight recorded decisions, matching its
 absence one native frame later. A full PPU fallback replay accepts that model
 in all eight cases. The default job dispatch uses an SPU queue, so this
-disagreement is the next investigation target; no fix is established.
+disagreement is now reproduced offline by the identified SPU implementation.
+It overflows near-plane depth arithmetic to host infinities and NaNs; a local
+overflow-clamp experiment restores all eight rejected soldier cases. The
+runtime's single-precision helpers do not implement SPU extended-range
+overflow semantics. An architectural correction and live validation remain
+to be done; no permanent fix is established.
 
 ## Initial native evidence
 
@@ -1059,16 +1064,94 @@ changed, with global occlusion enable verified as 1; mode 2 was restored
 before closing. The next comparison will retain normal dispatch during the
 approach and switch immediately before triggering the conversation.
 
+## Live PPU comparison and deterministic SPU replay
+
+Run `20261012-200320-879` retains default dispatch during navigation, then
+switches only job 11's mode byte from 2 to 0 immediately before walking into
+the conversation trigger. The write is read back at QPC 1347663.6246052;
+the final neutral command starts at 1347665.2588132. Global occlusion enable
+`0x0169F608` remains 1, verified both at the mode write and during capture.
+There is no input after the black transition. The external helmet threshold
+starts the capture at 1347688.0475473, and the gate closes at
+1347709.3422569. Timing differs from the default run, so these captures are
+aligned by the scripted scene and native counters, not elapsed seconds.
+
+All 40 consecutive native images, 6182..6221, show the speaker through the
+close-up and pullback. All 43 filter records retain `0x4ACE4000`; none removes
+it. The same four body/head mesh fingerprints submit in every captured frame.
+Matching draw traces contain 46,080 `execute` outcomes and no other outcomes;
+N and N+1 present modes preserve the baseline settings. Ledgers balance and
+all recorded renderer rejection counters remain zero. Mode 2 is restored and
+read back after capture, before normal exit with 6,766 successful presents.
+The external observer completes 180 seconds and 5,401 samples. Local evidence
+uses prefix `visibility-conversation-decision15`. This is a live fallback
+comparison with occlusion enabled, rather than another global filter bypass.
+
+The live SPU ELF at guest address `0x00F2C100` matches the complete extracted
+`spu_0039_at_00F1C100.elf` byte for byte. The filename records its offset in
+the original PPU ELF file, not its guest virtual address. Its runtime image
+ID is 40, entry 0x3080, and the 22,224-byte ELF has SHA256
+`9E2CFD00BE69653E7EDB3CF45095D0FBC0F4839D9100F80CBC21BDDA2715E9D0`.
+This identifies the implementation without confusing guest job 11 with an
+SPU image number.
+
+A second offline harness loads that ELF's original constants into an SPU
+local store, copies the captured worker block at buffer +0x6AA50 into LS
+0x18000, and runs the original lifted bounds/filter function at LS 0x4DE0
+with its 96-function dependency closure. DMA reads use the captured guest
+buffer, with checked extents; the job's 256-wide floating-point depth data
+is read in tiles by the original code. The accepted identifiers are compacted
+by the original SPU function. No always-visible callback is substituted.
+
+For all 43 default-path records, the replay's entire accepted identifier list
+matches the recorded list exactly, including the eight missing-speaker cases.
+This reproduces the decisions without live job scheduling. Clearing only the
+captured depth buffer to zero still rejects the speaker in precisely the same
+eight records. The local comparison is `spu-replay-comparison.json` in the
+decision13 directory. An earlier one-bounds harness used incorrect raster
+width/height arguments and is superseded by this full tiled-function replay.
+
+Target-specific float probes expose the failure inside the SPU raster path.
+For rejected consumer frame 4273, a clipped face contains projected xyz/depth
+triplets approximately (0.610,1,FLT_MAX), (0.724,-1,FLT_MAX),
+(-1,-1,1.372), and (-1,1,1.303). The depth convention is reciprocal-like;
+the projection code deliberately uses the maximum finite host float when
+the relevant depth denominator is nonpositive. The lifted raster code then
+performs operations such as `256 * FLT_MAX`, producing host infinity, followed
+by other operations producing NaNs. With the original helpers these triangles
+return no visible samples even against zero depth.
+
+The architectural requirement differs from those host IEEE operations.
+Section 9.1 of the [SPU ISA v1.2, printed pages 195–196](https://arcb.csc.ncsu.edu/~mueller/cluster/ps3/SDK3.0/docs/arch/SPU_ISA_v1.2_27Jan2007_pub.pdf)
+specifies extended-range single precision, finite maximum bit pattern
+0x7FFFFFFF, saturation on overflow, and no NaN or infinity results. The SDK's
+`spu_fm`, `spu_fma`, `spu_fms` and `spu_fnms` currently use ordinary host
+float arithmetic, which demonstrably violates that overflow behavior in this
+captured model-filter path. This supports a runtime arithmetic correction,
+rather than a renderer-distance or job-scheduling workaround.
+
+As an isolated diagnostic, the replay clamps infinite arithmetic results to
+signed host FLT_MAX before subsequent operations. All 43 speaker cases then
+pass, including all eight formerly rejected cases. Comparing the complete
+lists, these eight records add only `0x4ACE4000`; one later record also adds
+unidentified model `0x4ACE4FA0`. No recorded accepted model is removed.
+The comparison is `spu-clamp-overflow-comparison.json`. This experiment is not
+an architectural fix: host FLT_MAX differs from the SPU extended maximum,
+and treating extended operands, rounding, underflow, comparisons and
+conversions needs consistent implementation and regression coverage. It has
+not been applied to the game or SDK. The preserved executable's hash remains
+`EF9CF6AB69EB984E6F22805C003608220CD45E78ECA126B2C5BDAFF7F7B06B7B`.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
 main checkout's changing performance candidates. The scene phase is now known:
 approaching the soldiers and starting the first conversation. The immediate
-speaker-model rejection is now established, and the clean disabled-occlusion
-comparison preserves him throughout the close-up. Next is a live comparison
-of job 11's PPU fallback with occlusion still enabled, followed by tracing the
-SPU implementation responsible for the differing decisions. The airship needs
-an equivalent model association and rejection trace. A confirmed underlying
-cause and comparison are required before any fix or completion claim. The
-separate whole-scene black intervals are not a substitute for that evidence.
+speaker-model rejection, live PPU fallback comparison, deterministic SPU
+replay, and arithmetic-overflow mechanism are now established. Next is a
+consistent correction of SPU extended-range arithmetic, appropriate helper
+regressions, and live comparison using the normal SPU job mode. The airship
+needs an equivalent model association and rejection trace before assuming
+the same cause. No permanent fix or completion is claimed. The separate
+whole-scene black intervals are not a substitute for model-specific evidence.
