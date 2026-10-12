@@ -816,14 +816,126 @@ this executable is not 4 GB aligned, so the helper identifies it using the
 known entry descriptor and validates the pointer chain rather than assuming
 the current SDK header's allocation alignment applies to older game objects.
 
+## Native airship disappearance and guest enable-byte comparison
+
+Run `20261012-182638-760` reproduces both kinds of disappearance in native
+captures during the first conversation. Frames 7974 and 7975 show the close
+speaker and the parked airship. In 7976 the airship is absent while the speaker
+remains visible; 7977 shows the airship again. In 7978 through 7981 the speaker
+is absent while the airship remains visible. All eight images were inspected
+together. Matching draw CSVs cover this interval, with the material filter off.
+The run exits normally after 10,627 successful presents. Comparing source-count
+and attribute-8 fingerprints across 7975/7976/7977 produces multiple candidate
+airship parts, but none has yet been spatially identified. Do not treat changing
+vertex-program or PSO fingerprints alone as evidence of a missing mesh.
+
+The initial enable-byte probe in that run fails after its first eight captures:
+the VM discovery helper overwrites a caller's `base` path variable with an
+allocation address. The first phase never writes byte 0; cleanup restores 1.
+After correcting the helper, a second probe successfully records five phases
+of eight native images each and verifies the 1/0/1/0/1 byte writes. This occurs
+after the close conversation camera phase and shows visible soldiers in all
+conditions. Its trace gate also differs from the run's configured gate, so the
+retry supplies no matched draw trace. These limitations prevent a causal claim.
+The local evidence uses prefix `visibility-conversation-byte7`.
+
+Run `20261012-183512-733` repeats the corrected probe at the first close helmet
+peak, with the proper trace gate. All 40 native frames have matched draw CSVs;
+their present counters N and N+1 retain the baseline modes. The writes to guest
+byte `0x0169F608` and phase-end readbacks are verified, and cleanup restores 1.
+Frames 7197 through 7200 show the close speaker with the byte enabled. In 7201
+through 7204 he is absent, with no submissions for the associated body/head
+mesh candidates. The first disabled phase, 7205 through 7212, shows him again.
+Later enabled and disabled phases, through 7236, show visible bodies as the
+scripted camera pulls away and turns. Thus the initial return coincides with
+disabling the byte, but the later phases do not repeat the disappearance. This
+is timing-confounded evidence, not proof that this control fixes the defect.
+Player input is neutral during the comparison; the conversation camera moves.
+The run exits normally after 9,521 successful presents. Local records use
+prefix `visibility-conversation-byte8`, including `byte-probe.json`,
+`contact.png`, and `validation.json`.
+
+Both runs emit three body-source geometry trace messages, but their output
+directories were created too late or not created at all. The trace writer does
+not create its directory, and the three-draw limit is consumed even when the
+input-file open fails. Consequently neither run supplies valid body input
+geometry for projection. The next capture must create its directory before
+opening the trace gate. No body geometry identification is claimed here.
+
+Run `20261012-184225-880` reverses the phase order to 0/1/0/1/0, setting the
+byte to 0 after loading and before the approach. Native frames 15459 through
+15466 show the close speaker with the byte disabled. In the first enabled
+phase, 15467 and 15468 show him, 15469 through 15472 show the background in his
+place, and 15473 and 15474 show him again. Frames 15475 through 15498 show
+visible bodies in both conditions as the camera pulls away. All 40 images were
+inspected together; their matched draw trace contains only `execute` outcomes,
+and present modes at N and N+1 retain the baseline values. The head pair has no
+submissions in 15469 through 15472. Other body instances are still submitted
+in 15469 and 15472, and none of the four associated mesh candidates is submitted
+in 15470 or 15471. The renderer ledger balances with zero rejection counters
+and zero diagnostic sampling skips. The probe verifies all byte writes and
+readbacks, restores its original 0, and a separate verified write restores 1
+before normal process closure. The run exits normally after 15,956 presents.
+
+This reversed order makes the bounds-list control a more promising lead, but
+the same short close-camera interval is still a potential confound. Holding
+the byte disabled through that entire interval is the next comparison; the
+two phase-order runs alone do not establish causation.
+
+Creating the geometry directory before this run preserves all three valid
+11,691-source traces. Each has 2,846 compact vertices. Traces 1 and 2 correspond
+to draw frame 15458; trace 3 corresponds to native frame 15459. The emitted
+vertex shader's position path divides attribute-0 xyz by its w, transforms
+with constant vectors 0 through 3, then applies viewport scale/offset. Projecting
+trace 3 through that path onto native 15459 places points on the speaker's
+helmet, shoulders and torso. It confirms that this mesh is part of the visible
+armored soldier, rather than only the concealed face identified previously.
+Of its vertices, 961 project inside the clip volume; the full mesh extends
+below the close-up image. Trace 2 is an off-screen instance. Local evidence is
+under prefix `visibility-conversation-byte9`, including `body-overlay.png`,
+`byte-probe.json`, `validation.json`, and the geometry directory.
+
+Run `20261012-185439-387` holds the byte disabled through the first three
+eight-image phases. Native frames 5008 through 5031 show the speaker throughout
+the close-up and subsequent pullback, including the interval where the phase
+order comparisons lose him. The associated body and head batches remain
+submitted throughout. The later enabled phase, 5032 through 5039, and final
+disabled phase, 5040 through 5047, also show visible soldiers after the close-up.
+The byte writes and phase-end readbacks are verified; cleanup restores 0 and
+a separate verified write restores 1 before closing the game. All 40 images
+were inspected together. Matching CSVs contain only `execute` outcomes, and
+all native counters N and N+1 preserve the baseline modes. The process exits
+normally after 7,122 successful presents. Its external observer completes
+180 seconds and preserves 4,120 samples; instrumentation reduces the achieved
+sample rate. Local evidence uses prefix `visibility-conversation-byte10`.
+
+This comparison strengthens the bounds/occlusion-path lead but requires a
+clean repeat: an additional 150-poll forward command was sent after the scene
+had already reached its black conversation transition, and overlaps the first
+three capture phases. Its following neutral command starts at QPC
+1343531.8441235. The scripted view still follows the recognizable close-up and
+pullback, but this run must not be described as neutral-input throughout.
+The preceding reversed comparison did keep input neutral through its captures.
+
+Static follow-up connects this bounds list to guest worker job type 11 through
+`007ED838` -> `00682648`. The job table at `0x00DFBDDC` resolves entry 11 to
+OPD `0x00E6DE30`, code `00682BC8`; the separate mode byte is 2. The worker clears
+a 0x40000-byte buffer through `007ED660`, processes geometry with `007ECDD0`,
+prepares data with `007ED590`, then tests each bounds pair with `007ED6D8` and
+compacts accepted identifiers. This supplies concrete producer/consumer
+functions for further tracing. It does not establish that a particular
+worker result caused a captured disappearance, and the guest job number must
+not be confused with an SPU image number.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
 main checkout's changing performance candidates. The scene phase is now known:
 approaching the soldiers and starting the first conversation. The next useful
-comparison can now target the body-material batches and upstream bounds/visibility
-path during the first conversation. Native images reproduce it; the remaining
+comparison can now repeat the full disabled interval with neutral input and
+trace the guest worker's bounds result for the identified soldier. Native
+images reproduce it; the remaining
 evidence is the reason the associated model submissions disappear. A confirmed cause and comparison are required
 before any fix or completion claim. The separate whole-scene black intervals are not a substitute for that
 model-specific comparison.
