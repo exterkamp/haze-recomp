@@ -29,7 +29,7 @@ $settings = @{
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     HAZE_INPUT = $(if ($InputMode -eq 'Controller') { 'controller' } else { 'keyboard' })
     HAZE_INPUT_CONFIG = $(if ($env:HAZE_INPUT_CONFIG) { $env:HAZE_INPUT_CONFIG } else { Join-Path $root 'config\input.ini' })
-    HAZE_GRAPHICS_CONFIG = $(if ($GraphicsConfig) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($GraphicsConfig) } elseif ($env:HAZE_GRAPHICS_CONFIG) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:HAZE_GRAPHICS_CONFIG) } else { Join-Path $root 'config\graphics.ini' })
+    HAZE_GRAPHICS_CONFIG = $(if ($GraphicsConfig) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($GraphicsConfig) } elseif ($env:HAZE_GRAPHICS_CONFIG) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:HAZE_GRAPHICS_CONFIG) } elseif (Test-Path -LiteralPath (Join-Path $root 'config\graphics.ini')) { Join-Path $root 'config\graphics.ini' } else { $null })
 }
 $old = @{}
 foreach ($key in $settings.Keys) {

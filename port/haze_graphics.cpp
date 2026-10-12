@@ -1,4 +1,5 @@
 #include "haze_graphics.h"
+#include "haze_display.h"
 #include "rsx_graphics_settings.h"
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,22 @@ std::string trim(std::string text) {
     const auto first=text.find_first_not_of(" \t\r\n");
     if (first==std::string::npos) return {};
     return text.substr(first,text.find_last_not_of(" \t\r\n")-first+1);
+}
+bool automatic_size(const rsx_graphics_option& option) {
+    return !std::strcmp(option.key,"render_resolution") || !std::strcmp(option.key,"window_size");
+}
+const char* fallback(const rsx_graphics_option& option) {
+    if(!std::strcmp(option.key,"display_mode")) return "borderless";
+    if(automatic_size(option)) return "auto";
+    // Desktop rendering must not implicitly multiply the shadow atlas size.
+    if(!std::strcmp(option.key,"shadow_resolution")) return "native";
+    return option.fallback;
+}
+bool valid(const rsx_graphics_option& option,const char* value) {
+    return (automatic_size(option) && value && !std::strcmp(value,"auto")) || rsx_graphics_valid(&option,value);
+}
+std::string allowed(const rsx_graphics_option& option) {
+    return std::string(automatic_size(option) ? "auto, or " : "")+option.allowed;
 }
 }
 bool haze_graphics_initialize() {
@@ -41,8 +58,8 @@ bool haze_graphics_initialize() {
             std::fprintf(stderr,"[graphics] %s:%u: unknown section/key or duplicate setting\n",path,number); return false;
         }
         auto value=trim(line.substr(split+1));
-        if (!rsx_graphics_valid(option,value.c_str())) {
-            std::fprintf(stderr,"[graphics] %s:%u: invalid %s=%s (expected %s)\n",path,number,key.c_str(),value.c_str(),option->allowed); return false;
+        if (!valid(*option,value.c_str())) {
+            std::fprintf(stderr,"[graphics] %s:%u: invalid %s=%s (expected %s)\n",path,number,key.c_str(),value.c_str(),allowed(*option).c_str()); return false;
         }
         values.emplace(key,value);
     }
@@ -50,15 +67,29 @@ bool haze_graphics_initialize() {
     // Validate the complete file and overrides before changing the process.
     for (const auto& option:rsx_graphics_options) {
         const char* value=std::getenv(option.environment);
-        if (value && *value && !rsx_graphics_valid(&option,value)) {
-            std::fprintf(stderr,"[graphics] Invalid %s=%s (expected %s)\n",option.environment,value,option.allowed); return false;
+        if (value && *value && !valid(option,value)) {
+            std::fprintf(stderr,"[graphics] Invalid %s=%s (expected %s)\n",option.environment,value,allowed(option).c_str()); return false;
         }
     }
+    std::map<std::string,std::string> effective;
     for (const auto& option:rsx_graphics_options) {
         const char* current=std::getenv(option.environment);
         const auto found=values.find(option.key);
-        const std::string value=current && *current ? current :
-            found!=values.end() ? found->second.c_str() : option.fallback;
+        effective[option.key]=current && *current ? current :
+            found!=values.end() ? found->second.c_str() : fallback(option);
+    }
+    if(effective["render_resolution"]=="auto" || effective["window_size"]=="auto") {
+        haze_display_defaults detected{};
+        if(!haze_display_detect(effective["monitor"].c_str(),detected)) return false;
+        auto dimensions=[](unsigned w,unsigned h) { return std::to_string(w)+"x"+std::to_string(h); };
+        if(effective["render_resolution"]=="auto")
+            effective["render_resolution"]=dimensions(detected.render_width,detected.render_height);
+        if(effective["window_size"]=="auto")
+            effective["window_size"]=dimensions(detected.window_width,detected.window_height);
+    }
+    std::fprintf(stderr,"[graphics] %s %s\n",file.is_open() ? "Loaded" : "Defaults; no file at",path);
+    for (const auto& option:rsx_graphics_options) {
+        const auto& value=effective.at(option.key);
 #ifdef _WIN32
         if (_putenv_s(option.environment,value.c_str())!=0) return false;
 #else

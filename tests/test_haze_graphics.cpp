@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <map>
 #include <string>
+#include "../port/haze_display.cpp"
 #include "../port/haze_graphics.cpp"
 static void clear_options() {
     for (const auto& o:rsx_graphics_options) _putenv_s(o.environment,"");
@@ -32,10 +33,41 @@ int main() {
     clear_options(); config("[graphics]\nframe_limit=60\n");
     _putenv_s("RSX_SHARPENING","2"); assert(!haze_graphics_initialize());
     assert(!std::getenv("RSX_MAX_FPS"));
-    clear_options(); config("[graphics]\n"); assert(haze_graphics_initialize());
-    for (const auto& o:rsx_graphics_options) assert(!std::strcmp(std::getenv(o.environment),o.fallback));
+    haze_display_defaults detected{}; assert(haze_display_detect("primary",detected));
+    auto dimensions=[](unsigned w,unsigned h) { return std::to_string(w)+"x"+std::to_string(h); };
+    auto check_defaults=[&](const char* monitor="primary") {
+        assert(std::getenv("RSX_RENDER_RESOLUTION")==dimensions(detected.render_width,detected.render_height));
+        assert(std::getenv("RSX_WINDOW_SIZE")==dimensions(detected.window_width,detected.window_height));
+        assert(!std::strcmp(std::getenv("RSX_SHADOW_RESOLUTION"),"native"));
+        assert(!std::strcmp(std::getenv("RSX_WINDOW_MODE"),"borderless"));
+        for (const auto& o:rsx_graphics_options)
+            if(!automatic_size(o)) assert(!std::strcmp(std::getenv(o.environment),!std::strcmp(o.key,"monitor") ? monitor : fallback(o)));
+    };
+    clear_options(); config("[graphics]\n"); assert(haze_graphics_initialize()); check_defaults();
+    clear_options(); config("[graphics]\nrender_resolution=auto\nwindow_size=auto\nmonitor=1\n");
+    assert(haze_display_detect("1",detected)); assert(haze_graphics_initialize()); check_defaults("1");
+    clear_options(); config("[graphics]\nrender_resolution=auto\nwindow_size=auto\n");
+    _putenv_s("RSX_RENDER_RESOLUTION","1920x1080"); _putenv_s("RSX_WINDOW_SIZE","960x540");
+    assert(haze_graphics_initialize());
+    assert(!std::strcmp(std::getenv("RSX_RENDER_RESOLUTION"),"1920x1080"));
+    assert(!std::strcmp(std::getenv("RSX_WINDOW_SIZE"),"960x540"));
+    clear_options(); config("[graphics]\nrender_resolution=native\nwindow_size=800x450\n");
+    _putenv_s("RSX_RENDER_RESOLUTION","auto"); _putenv_s("RSX_WINDOW_SIZE","auto");
+    assert(haze_display_detect("primary",detected)); assert(haze_graphics_initialize()); check_defaults();
+    clear_options(); config("[graphics]\nrender_resolution=automatic\n"); assert(!haze_graphics_initialize());
+    assert(!std::getenv("RSX_MAX_FPS"));
+    clear_options(); config("[graphics]\nmonitor=16\n");
+    haze_display_defaults unused{};
+    if(!haze_display_detect("16",unused)) {
+        assert(!haze_graphics_initialize()); assert(!std::getenv("RSX_MAX_FPS"));
+    }
+    // An absent optional config uses the same defaults as an empty INI.
+    clear_options(); _putenv_s("HAZE_GRAPHICS_CONFIG","");
+    char cwd[MAX_PATH]; assert(GetCurrentDirectoryA(sizeof(cwd),cwd));
+    assert(SetCurrentDirectoryA("local")); assert(haze_graphics_initialize()); check_defaults();
+    assert(SetCurrentDirectoryA(cwd));
     clear_options(); _putenv_s("HAZE_GRAPHICS_CONFIG","local/nonexistent-graphics.ini");
     assert(!haze_graphics_initialize());
     std::remove("local/test-graphics.ini");
-    std::puts("Graphics configuration: all options, defaults, overrides, BOM/CRLF, invalid values and atomic rejection passed.");
+    std::puts("Graphics configuration: INI, automatic monitor defaults, missing optional file, overrides, BOM/CRLF and atomic rejection passed.");
 }

@@ -309,7 +309,10 @@ Graphics are configured in [config/graphics.ini](config/graphics.ini). Restart
 after changing windowed/fullscreen/borderless mode, window size, monitor,
 render resolution, FXAA, anisotropic filtering (up to 16x),
 independent shadow resolution, mip bias, sharpening, exposure, VSync or the
-frame cap. Defaults preserve the current image. Both launchers accept
+frame cap. Defaults use borderless mode at the primary monitor's desktop
+resolution and retain native shadow size. Windowed mode automatically fits a
+16:9 window up to 1280x720 to the monitor's work area.
+Missing settings or an absent default INI use those same defaults. Both launchers accept
 `-GraphicsConfig path/to/settings.ini`; `-RenderResolution 1920x1080` overrides
 the file for that run. See [graphics settings](docs/graphics-settings.md) for
 costs, examples, validation and remaining game-side options.
