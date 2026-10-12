@@ -105,7 +105,7 @@ Another agent's Haze process (PID 31556, shadow-lighting worktree) started after
 launch and was observed during measurement. The strict isolation check rejected
 the run. The table is a contended diagnostic, not evidence of an FPS or pacing
 improvement. The other process was left untouched. The kernel remains off by
-default pending an isolated comparison and broader gameplay validation.
+default pending a repeatable FPS benefit and broader gameplay validation.
 
 Artifacts: `local/native-cursor-abba-{run,windows}.json`,
 `local/native-cursor-abba-presents.csv`,
@@ -129,5 +129,136 @@ to this operation, not a fixed whole-game multiplier.
 
 Artifact: `local/native-cursor-denormal-cost-verified.log`.
 
+## In-game job CPU-cycle comparison
+
+The user authorized continuing comparisons alongside the graphics agent's game;
+an isolated launch is desirable for attribution, not a prerequisite for work.
+Use repeated mode windows and label contention instead of treating it as a
+blocker. Thread CPU counters provide another view alongside wall-time/FPS.
+
+Muted run `20261012-171450-040` used the same ordinary candidate/settings above,
+with `SPU_JOB_TIMING=1` and `SPU_JOB_TIMING_IMAGE=40`. This adds diagnostic logging
+and per-job `QueryThreadCycleTime` counters; its FPS is not an ordinary-build
+performance result. Captures 020563 and 024961 verify the stationary carrier
+view before/after. No input or instruction sampling occurred inside the four
+30-second windows, each preceded by five seconds of settling. The owned process
+closed normally with exit zero. Other Haze launches were observed concurrently.
+
+`summarize_spu_job_modes.py` requires complete windows and matching settled
+native-mode events. It counts only selected-image jobs whose setup and execution
+both fit entirely inside a window. Tests reject missing/late/wrong/changed modes,
+incomplete or invalid counters, insufficient jobs and incomplete windows; jobs
+straddling boundaries and other images are excluded from fixture totals.
+
+| Cursor mode | Complete jobs | Mean run cycles, millions | Median cycles, millions | p95 cycles, millions | Mean job wall ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Original | 463 | 66.231 | 66.553 | 70.558 | 16.299 |
+| Native | 469 | 57.114 | 57.271 | 60.574 | 13.844 |
+| Native | 447 | 57.324 | 57.275 | 60.877 | 14.408 |
+| Original | 492 | 63.367 | 64.889 | 70.280 | 15.223 |
+
+Native mode reduces this completed job's measured CPU cost by roughly 10–14%
+against the bracketing original blocks. Cycles exclude descheduled time but
+still depend on CPU frequency/core placement and workload changes; they are not
+a fixed conversion to milliseconds. The ABI/native inner phase counters are
+zero in this ordinary candidate and are not interpreted as zero work; only the
+outer run/setup counters are available. Setup is about 0.08..0.10 million cycles
+per job. Instrumented, contended FPS was 15.435 / 15.660 / 14.916 / 16.414: no
+consistent frame-rate improvement follows from the job saving.
+
+A separate native-enabled image-40 sample after all timed windows collected 200
+RIPs from 162 announced jobs (134 opened, 28 already gone). The original `3450`
+leaf has no samples; native cursor helpers appear instead. The remaining leading
+locations include task-launch checks (36), the `35B4` scan loop (22), drain (15),
+lockstep tick (9) and `35D0` scan continuation (8). Counts include helpers/waits
+and are not CPU shares. This supports a shift away from the cursor leaf without
+establishing which remaining work delays presentation. Investigate main-thread
+waits/frame submission next before assuming a second SPU kernel raises FPS.
+
+Artifacts: `local/native-cursor-job-{run,windows,cycle-report}.json`,
+`local/native-cursor-job-presents.csv`, `local/native-cursor-job-processes.jsonl`,
+`local/native-cursor-job-instrumented-present-report.json`, and
+`local/native-cursor-job-enabled-samples.json`.
+
+An earlier attempt `20261012-170457-044` accidentally selected a new chapter
+instead of Continue and spent much of its allowance in the intro. Its ten-second
+CPU sample is retained as `local/native-cursor-intro-cpu.json`; snapshots missed
+12,078 of 31,500 process CPU ms. Its timeout prevented normal CSV flushing.
+It supplies no FPS comparison. The subsequent run loaded Continue explicitly
+and scheduled normal close directly after measurements.
+
 Consistent frame pacing and broad unlocked-rate gameplay validation remain
 unfinished; the full goal stays active.
+
+## Frame submission and main-thread waits
+
+Two separate muted, normally closed carrier runs used the profile candidate
+`local/candidates/native-cursor-frame-profile/HazeRecomp.exe`, SHA256
+`DB7F935450FF7E62F72EE7AD02C65494AFD76C2F15E13B94B61F87357B326E45`.
+Both retained 1440p, VSync on, FPS limit zero, native cursor/PPU queue/SPU idle
+enabled, triplet copying disabled. Wait/queue counters and image-42 job timing
+were recorded during a 20-second stationary window. Instruction sampling ran
+afterwards, outside that window. Other Haze processes overlapped these runs.
+Captures 008166/009859 and 010175/012251 verify the carrier view before/after
+the respective runs. These are diagnostic timings, not ordinary-build FPS tests.
+
+The first run, `20261012-172645-268`, exposed instrumentation overhead. Its
+pipeline preparation averaged 16.51 ms, with zero shader compilations or PSO
+creations. Separate instruction samples landed repeatedly in
+`ld_profile_note_hash` and its hash inputs. The profile-only shader-variant table
+scans its entire capacity when a new hash cannot be inserted. That work does
+not exist in ordinary builds and must not be called a production bottleneck.
+
+The second run, `20261012-173044-399`, enabled existing `RSX_PROFILE_LIGHT=1`,
+which disables that optional variant tracking while retaining renderer timings.
+For 338 frames with at least 500 draws (about 1,396 draws/frame), it measured:
+
+| Light-profile measurement | Mean ms |
+| --- | ---: |
+| Present interval | 59.04 |
+| Before first draw | 16.82 |
+| First-to-last draw span | 40.82 |
+| Time in renderer draw processing | 30.22 |
+| Vertex packing | 9.36 |
+| Texture hashing | 4.11 |
+| Texture decoding | 2.15 |
+| Pipeline preparation | 4.72 |
+| Vertex/fragment program preparation | 2.64 / 1.62 |
+| GPU timestamp duration | 2.22 |
+| Fence wait | 2.67 |
+
+Renderer subcategories overlap their parent scopes; do not add them to frame
+time. CPU-side timers measure elapsed scope duration and can include preemption.
+The GPU timestamp does not represent all work or prove that contention is absent.
+The 16.94 diagnostic FPS and first run's 19.69 FPS are not a controlled heavy/light
+comparison: scene workload and concurrent launches changed. The useful result is
+removal of the misleading profile-only hotspot and identification of substantial
+draw processing and variable delay before the first draw. Image-42 jobs averaged
+5.65 ms wall time (p95 10.13 ms, 850 completed jobs); correlation alone does not
+establish that they cause those delays.
+
+The main guest thread (guest TID 1) also spent at least 3.13 seconds of the
+20-second light window in 330-us sleeps at LR `0068EFF0`, called through
+`00682574`. Individual sleeps reached 6.50 ms in one caller group. These waits
+overlap other threads' work and cannot simply be subtracted from frame time.
+This is separate from the already bypassed final frame-pacing wait.
+
+Inspection identifies the loop as `00682538`: it checks `0071F6F0` for an indexed
+work record, sleeps if incomplete, and services pending work before checking
+again. The record table uses a 0x1450-byte stride; `006820B0` reads its status
+byte at offset 8. One completion path also checks offset 9 and drains a queue
+through `0071F648`. Any native wait replacement must preserve both real
+completion and this work servicing, including publication/wake ordering.
+Removing the sleep without identifying the producers is not justified.
+
+Separate eight-second light-profile CPU samples measured roughly 4.72 CPU
+seconds on the main thread, 3.94 on the renderer host, and 4.75 on the audio
+thread. These are another interval, not per-frame costs. The queue counters
+showed much more time waiting for work than acquiring mutexes, with no queue errors. The
+next investigation should distinguish producer completion delays from native
+render preparation before choosing another kernel to replace.
+
+Artifacts: `local/native-frame-{critical,light}-{run,window,report,cpu}.json`,
+their renderer/present CSVs, wait directories and queue directories. The profile
+candidate build and configuration checks passed; the ordinary candidate's full
+regression suite had already passed before these diagnostic-only additions.
