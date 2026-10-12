@@ -9,6 +9,7 @@ without that diagnostic control, the corrected private history is always used.
 Zero selects the previous paths.
 Bit 32 selects heap SPU contexts if SPU_EXECUTION_MODE_FILE uses the same file.
 Bit 64 selects SIMD SPU byte operations in a profiling build using that file.
+Bit 128 selects coherent row blits if GCM_ROW_BLIT_MODE_FILE uses the same file.
 The runner stays muted. Compare individual stage costs as well as FPS: guest
 work and NPC activity can drift even when the camera remains stationary.
 """
@@ -78,8 +79,8 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--pid',type=int,help='Optional native process CPU accounting, including warmup/propagation.')
     a = p.parse_args()
-    if any(f < 0 or f > 127 for f in a.flags) or a.frames < 60 or a.warmup < 60:
-        p.error('Flags must be 0..127; use at least 60 warmup and measured frames.')
+    if any(f < 0 or f > 255 for f in a.flags) or a.frames < 60 or a.warmup < 60:
+        p.error('Flags must be 0..255; use at least 60 warmup and measured frames.')
     blocks = []
     cpu_clock,close_clock=process_clock(a.pid) if a.pid else (None,None)
     try:

@@ -142,7 +142,12 @@ pacing remain open. Alternative texture hashing and timer waiting remain diagnos
 options; private SPU diagnostic history fixes a race without a demonstrated FPS
 gain. The [targeted SPU byte-operation experiment](docs/performance-spu-bytes-2026-10-11.md)
 passed 2.36 million independent oracle comparisons and lowered process CPU use
-in three pairs, but showed no repeatable FPS or pacing gain. **The 30 FPS target remains open.**
+in three pairs, but showed no repeatable FPS or pacing gain. The
+[coherent row-blit comparison](docs/performance-row-blits-2026-10-11.md) reduced
+blit CPU time from about 2.45 to 0.33 ms/frame. Its row-copy blocks measured
+23.55-24.50 FPS; NPC variation prevents assigning the full FPS difference to
+that change. Row copies are now enabled for eligible transfers.
+**The 30 FPS target remains open.**
 
 For reproducible diagnostic captures:
 

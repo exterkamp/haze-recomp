@@ -85,6 +85,7 @@ if(HAZE_RSX_PROFILE)
         DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)
     set_property(SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c"
+        "${PS3RECOMP_DIR}/libs/video/cellGcmSys.c"
         DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)
 endif()

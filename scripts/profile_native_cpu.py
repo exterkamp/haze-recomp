@@ -18,9 +18,15 @@ parser.add_argument('pid',type=int)
 parser.add_argument('seconds',type=float,nargs='?',default=20)
 parser.add_argument('--scan-every',type=int,default=100,
     help='Thread snapshot cadence in sampling iterations; 1 helps find short jobs but adds overhead.')
+parser.add_argument('--tid',type=int,action='append',help='Sample only these thread IDs, after checking process ownership.')
+parser.add_argument('--interval-ms',type=float,default=9,
+    help='Mean randomized interval between sample rounds; use separately from FPS benchmarks.')
+parser.add_argument('--raw-limit',type=int,default=20,help='Maximum individual instruction locations per thread.')
 args=parser.parse_args()
 if not 1<=args.scan_every<=1000:
     parser.error('scan-every must be 1..1000')
+if not .5<=args.interval_ms<=100 or not 1<=args.raw_limit<=1000:
+    parser.error('interval-ms must be .5..100 and raw-limit must be 1..1000')
 
 k=c.WinDLL('kernel32',use_last_error=True)
 d=c.WinDLL('dbghelp',use_last_error=True)
@@ -70,7 +76,7 @@ def scan():
     scan_stats['snapshots']+=1
     ok=k.Thread32First(snap,c.byref(te))
     while ok:
-        if te.th32OwnerProcessID==pid:
+        if te.th32OwnerProcessID==pid and (not args.tid or te.th32ThreadID in args.tid):
             tid=te.th32ThreadID
             scan_stats['owned_entries']+=1; seen_ids.add(tid)
             old=live_ids.get(tid)
@@ -152,7 +158,7 @@ while time.perf_counter()-start<duration:
             if fast_load and rip in (fast_load,fast_load+3):
                 memory_reads[(tid,rcx&0xffffffff)]+=1
     # Avoid repeatedly sampling the same phase of a bursty per-frame job stream.
-    iteration+=1; time.sleep(random.uniform(.004,.014))
+    iteration+=1; time.sleep(random.uniform(.5,1.5)*args.interval_ms/1000)
 elapsed=time.perf_counter()-start
 for tid,th in active.items(): last[tid]=cpu(th)
 process_ms=(process_cpu()-process_begin)/10000
@@ -165,11 +171,12 @@ for tid in sorted(handles,key=lambda t:last[t]-first[t],reverse=True):
     hist=collections.Counter()
     for (t,rip),n in raw.items():
         if t==tid: hist[sym(rip).split('+0x')[0]]+=n
-    rows.append(dict(tid=tid[0],created_filetime=tid[1],cpu_ms=(last[tid]-first[tid])/10000,rips=hist.most_common(20),raw_rips=[(sym(rip),n) for (t,rip),n in raw.most_common() if t==tid][:20],
+    rows.append(dict(tid=tid[0],created_filetime=tid[1],cpu_ms=(last[tid]-first[tid])/10000,rips=hist.most_common(20),raw_rips=[(sym(rip),n) for (t,rip),n in raw.most_common() if t==tid][:args.raw_limit],
                      sampled_read32_addresses=[(f'0x{addr:08X}',n) for (t,addr),n in memory_reads.most_common() if t==tid][:20]))
 tracked_ms=sum(row['cpu_ms'] for row in rows)
 print(json.dumps(dict(elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),
-    scan_every=args.scan_every,process_cpu_ms=process_ms,tracked_thread_cpu_ms=tracked_ms,
+    scan_every=args.scan_every,selected_tids=args.tid,interval_ms=args.interval_ms,
+    process_cpu_ms=process_ms,tracked_thread_cpu_ms=tracked_ms,
     unattributed_cpu_ms=max(0,process_ms-tracked_ms),
     thread_scan=dict(scan_stats,unique_ids=len(seen_ids)),
     coverage_note='Thread snapshots can miss short-lived jobs and CPU used before first observation; RIP samples include waits.',

@@ -166,6 +166,11 @@ if ($Test) {
     & $drawBatchTest
     if ($LASTEXITCODE -ne 0) { throw 'Draw-packet growth and order test failed.' }
     $m2mfTest = Join-Path $root 'local/test_m2mf.exe'
+    $scaledBlitTest = Join-Path $root 'local/test_scaled_blit.exe'
+    & $clang /nologo /W0 /O2 /Gy /Gw "/I$sdk/include" "/Fe$scaledBlitTest" "/Fo$root/local/test_scaled_blit.obj" "$sdk/libs/video/tests/test_scaled_blit.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'Scaled blit test compilation failed.' }
+    & $scaledBlitTest
+    if ($LASTEXITCODE -ne 0) { throw 'Scaled blit semantics/coherency test failed.' }
     & $clang /nologo /W0 /O1 "/Fe$m2mfTest" "/Fo$root/local/test_m2mf.obj" "$sdk/libs/video/tests/test_m2mf.c"
     if ($LASTEXITCODE -ne 0) { throw 'GPU buffer-copy test compilation failed.' }
     & $m2mfTest
