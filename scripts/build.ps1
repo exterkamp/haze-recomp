@@ -292,8 +292,10 @@ if ($Test) {
     $fifoTest = Join-Path $root 'local/test_fifo_recycle.exe'
     & $clang /nologo /W0 /O1 /Gy /Gw "/I$sdk/include" "/Fe$fifoTest" "/Fo$root/local/test_fifo_recycle.obj" "$sdk/libs/video/tests/test_fifo_recycle.c" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling test compilation failed.' }
-    & $fifoTest
-    if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling consumer acknowledgment test failed.' }
+    foreach ($nativeFifoWait in @(0,1)) {
+        & $fifoTest $nativeFifoWait
+        if ($LASTEXITCODE -ne 0) { throw 'FIFO recycling consumer acknowledgment/native wait test failed.' }
+    }
     $fpTest = Join-Path $root 'local/test_fp_decompiler.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$fpTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_decompiler.c" "$sdk/libs/video/rsx_fp_decompiler.c"
     if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler test compilation failed.' }
