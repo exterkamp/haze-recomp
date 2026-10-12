@@ -6,9 +6,11 @@
 #include <emscripten/emscripten.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -55,11 +57,51 @@ struct Pipeline { rsx_be_render_state state; rsx_vertex_layout_plan layout; std:
 std::unordered_map<GLuint, Texture> textures;
 std::unordered_map<GLuint, Pipeline> pipelines;
 std::unordered_map<std::string, GLuint> vertex_shaders, fragment_shaders;
+std::map<std::array<u32,7>,GLuint> sampler_objects;
 GLuint draw_fbo, read_fbo, temp_fbo, vao, vbo, ibo, vs_ubo, ps_ubo, active_pipeline;
 GLuint depth_read_fbo, depth_write_fbo, bound_depth, original_depth;
 std::unordered_map<uint64_t, GLuint> depth_attachments;
 u32 width, height, draws, frames;
+bool validate_gl;
+bool capture_draws=false;
+std::atomic<u32> debug_flags{0};
+u32 capture_frame=0;
+std::array<GLuint,4> draw_colors{};
+GLuint draw_depth=0;
+u32 draw_color_count=~0u;
+std::array<u32,16> sampled_textures{};
+void capture_draw() {
+    static GLuint framebuffer=0, texture=0;
+    if(!framebuffer) {
+        glGenFramebuffers(1,&framebuffer);glGenTextures(1,&texture);
+        glBindTexture(GL_TEXTURE_2D,texture);glTexStorage2D(GL_TEXTURE_2D,1,GL_RGBA8,64,36);
+    }
+    const auto& target=textures.at(draw_colors[0]);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,draw_fbo);glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,framebuffer);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,texture,0);
+    const GLenum buffer=GL_COLOR_ATTACHMENT0;glDrawBuffers(1,&buffer);
+    const bool scissor=glIsEnabled(GL_SCISSOR_TEST);glDisable(GL_SCISSOR_TEST);
+    glBlitFramebuffer(0,0,target.w,target.h,0,0,64,36,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,framebuffer);glReadBuffer(GL_COLOR_ATTACHMENT0);
+    unsigned char pixels[64*36*4];glReadPixels(0,0,64,36,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+    char path[80];snprintf(path,sizeof path,"/wasm-gpu-frame-%03u-draw-%04u.ppm",capture_frame,draws);
+    if(FILE* file=fopen(path,"w")) {
+        const auto& state=pipelines.at(active_pipeline).state;
+        fprintf(file,"P3\n# program=%u target=%u depth=%u/%u cull=%u blend=%u textures=",
+            active_pipeline,draw_colors[0],state.depth_test,state.depth_func,state.cull_enable,state.blend_enable);
+        for(auto handle:sampled_textures)fprintf(file,"%u,",handle);
+        fprintf(file,"\n64 36\n255\n");
+        for(unsigned i=0;i<64*36;i++)fprintf(file,"%u %u %u\n",pixels[i*4],pixels[i*4+1],pixels[i*4+2]);
+        fclose(file);
+    }
+    const auto error=glGetError();
+    if(error)fprintf(stderr,"[webgl] draw capture error=%X\n",error);
+    if(scissor)glEnable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_FRAMEBUFFER,draw_fbo);
+}
 void check_gl(const char* operation, u32 w=0, u32 h=0) {
+    if(!validate_gl)return;
     const GLenum error=glGetError();
     static unsigned reports=0;
     if(error && reports++<32) fprintf(stderr,"[webgl] %s error=0x%X size=%ux%u\n",operation,error,w,h);
@@ -135,6 +177,8 @@ GLuint allocate(Texture t) {
 }
 int init(void*,u32 w,u32 h) {
     width=w;height=h;
+    const char* validation=getenv("HAZE_WASM_GL_VALIDATE");
+    validate_gl=validation && *validation && strcmp(validation,"0")!=0;
     EmscriptenWebGLContextAttributes attributes;
     emscripten_webgl_init_context_attributes(&attributes);
     attributes.majorVersion=2;attributes.minorVersion=0;
@@ -160,6 +204,8 @@ void shutdown(void*) {
     for(const auto& entry:vertex_shaders)if(entry.second)glDeleteShader(entry.second);
     for(const auto& entry:fragment_shaders)if(entry.second)glDeleteShader(entry.second);
     vertex_shaders.clear();fragment_shaders.clear();
+    for(const auto& entry:sampler_objects)glDeleteSamplers(1,&entry.second);
+    sampler_objects.clear();
 }
 void submit(void*,u32) { glFinish(); }
 void set_remap(Texture& t,u32 remap,u32 format) {
@@ -274,13 +320,17 @@ GLuint compile_shader(GLenum stage,const char* hlsl) {
     GLint ok;glGetShaderiv(shader,GL_COMPILE_STATUS,&ok);
     if(!ok) {char log[4096];glGetShaderInfoLog(shader,sizeof log,nullptr,log);
         fprintf(stderr,"[webgl-shader] compile failed: %s\n%s\n",log,text);glDeleteShader(shader);return 0;}
-    cached->second=shader;return shader;
+    cached->second=shader;
+    if(capture && *capture)fprintf(stderr,"[webgl] shader=%u capture=%03u stage=%s\n",shader,capture_index,stage==GL_VERTEX_SHADER?"vs":"ps");
+    return shader;
 }
 u32 pipeline_create(void*,const char* vs,const char* ps,const rsx_be_render_state* state,
                     const rsx_vertex_layout_plan* layout,u32,rsx_be_format,u32) {
     GLuint v=compile_shader(GL_VERTEX_SHADER,vs),f=compile_shader(GL_FRAGMENT_SHADER,ps);
     if(!v || !f)return 0;
     GLuint program=glCreateProgram();glAttachShader(program,v);glAttachShader(program,f);glLinkProgram(program);
+    if(getenv("HAZE_WASM_GPU_CAPTURE") && *getenv("HAZE_WASM_GPU_CAPTURE"))
+        fprintf(stderr,"[webgl] program=%u vertex=%u fragment=%u\n",program,v,f);
     GLint ok;glGetProgramiv(program,GL_LINK_STATUS,&ok);
     if(!ok){char log[4096];glGetProgramInfoLog(program,sizeof log,nullptr,log);
         fprintf(stderr,"[webgl-shader] link failed: %s\n",log);glDeleteProgram(program);return 0;}
@@ -329,9 +379,14 @@ void bind_targets(void*,const u32* surfaces,u32 count,u32 depth) {
     }
     glBindFramebuffer(GL_FRAMEBUFFER,draw_fbo);
     std::array<GLenum,4> buffers;
-    for(u32 i=0;i<4;i++){attach(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0+i,i<count?surfaces[i]:0);buffers[i]=GL_COLOR_ATTACHMENT0+i;}
+    std::array<GLuint,4> colors{};
+    for(u32 i=0;i<count;i++)colors[i]=surfaces[i];
+    if(draw_colors==colors && draw_depth==bound_depth && draw_color_count==count)return;
+    for(u32 i=0;i<4;i++){attach(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0+i,colors[i]);buffers[i]=GL_COLOR_ATTACHMENT0+i;}
     attach(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,bound_depth);
     glDrawBuffers(count,buffers.data());
+    draw_colors=colors;draw_depth=bound_depth;draw_color_count=count;
+    if(!validate_gl)return;
     const GLenum status=glCheckFramebufferStatus(GL_FRAMEBUFFER);
     static unsigned reports=0;
     if(status!=GL_FRAMEBUFFER_COMPLETE && reports++<12) {
@@ -345,10 +400,11 @@ void bind_targets(void*,const u32* surfaces,u32 count,u32 depth) {
 void bind_pipeline(void*,u32 handle) {
     active_pipeline=handle;glUseProgram(handle);
     const auto& s=pipelines.at(handle).state;
-    toggle(GL_DEPTH_TEST,s.depth_test);glDepthMask(s.depth_write);glDepthFunc(compare(s.depth_func));
+    const auto debug=debug_flags.load(std::memory_order_relaxed);
+    toggle(GL_DEPTH_TEST,s.depth_test && !(debug&1));glDepthMask(s.depth_write);glDepthFunc(compare(s.depth_func));
     toggle(GL_BLEND,s.blend_enable);glBlendFuncSeparate(blend_factor(s.sf_rgb),blend_factor(s.df_rgb),blend_factor(s.sf_a),blend_factor(s.df_a));
     glBlendEquationSeparate(blend_equation(s.eq_rgb),blend_equation(s.eq_a));
-    toggle(GL_CULL_FACE,s.cull_enable);glCullFace(s.cull_face==GL_FRONT?GL_FRONT:GL_BACK);
+    toggle(GL_CULL_FACE,s.cull_enable && !(debug&2));glCullFace(s.cull_face==GL_FRONT?GL_FRONT:GL_BACK);
     glFrontFace(s.front_face==GL_CCW?GL_CW:GL_CCW); // vertex epilogue flips Y
     glColorMask((s.color_mask&0x10000)!=0,(s.color_mask&0x100)!=0,(s.color_mask&1)!=0,(s.color_mask&0x1000000)!=0);
     toggle(GL_STENCIL_TEST,s.stencil_enable);glStencilMask(s.s_write_mask);
@@ -362,25 +418,41 @@ void constants(GLuint buffer,GLuint binding,const void* data,u32 bytes) {
 }
 void vs_constants(void*,const void* data,u32 bytes){constants(vs_ubo,0,data,bytes);}
 void ps_constants(void*,const void* data,u32 bytes){constants(ps_ubo,1,data,bytes);}
+GLuint sampler_object(const Texture& texture,const rsx_be_sampler_desc& s) {
+    GLenum min=s.min_linear?GL_LINEAR:GL_NEAREST;
+    if(s.mip_present && texture.mips>1)min=s.min_linear?(s.mip_linear?GL_LINEAR_MIPMAP_LINEAR:GL_LINEAR_MIPMAP_NEAREST)
+        :(s.mip_linear?GL_NEAREST_MIPMAP_LINEAR:GL_NEAREST_MIPMAP_NEAREST);
+    std::array<u32,7> key{min,u32(s.mag_linear?GL_LINEAR:GL_NEAREST),wrap(s.wrap_s),wrap(s.wrap_t),wrap(s.wrap_r),0,0};
+    memcpy(&key[5],&s.min_lod,sizeof(float));memcpy(&key[6],&s.max_lod,sizeof(float));
+    auto [entry,inserted]=sampler_objects.emplace(key,0);
+    if(inserted) {
+        glGenSamplers(1,&entry->second);
+        for(unsigned i=0;i<5;i++) {
+            const GLenum names[]{GL_TEXTURE_MIN_FILTER,GL_TEXTURE_MAG_FILTER,GL_TEXTURE_WRAP_S,GL_TEXTURE_WRAP_T,GL_TEXTURE_WRAP_R};
+            glSamplerParameteri(entry->second,names[i],key[i]);
+        }
+        glSamplerParameterf(entry->second,GL_TEXTURE_MIN_LOD,s.min_lod);
+        glSamplerParameterf(entry->second,GL_TEXTURE_MAX_LOD,s.max_lod);
+    }
+    return entry->second;
+}
 void bind_texture_units(const u32* handles,const rsx_be_sampler_desc* samplers,u32 mask,u32 count,u32 base) {
     for(u32 i=0;i<count;i++) {
         glActiveTexture(GL_TEXTURE0+base+i);
         auto found=textures.find(handles[i]);
         glBindTexture(GL_TEXTURE_2D,0);glBindTexture(GL_TEXTURE_CUBE_MAP,0);
-        if(!(mask&(1u<<i)) || found==textures.end())continue;
+        if(!(mask&(1u<<i)) || found==textures.end()){glBindSampler(base+i,0);continue;}
         const auto& t=found->second;const auto& s=samplers[i];glBindTexture(t.target,t.object?t.object:handles[i]);
         const auto location=pipelines.at(active_pipeline).remap_locations[base+i];
         if(location>=0)glUniform4i(location,t.remap[0],t.remap[1],t.remap[2],t.remap[3]);
-        GLenum min=s.min_linear?GL_LINEAR:GL_NEAREST;
-        if(s.mip_present && t.mips>1)min=s.min_linear?(s.mip_linear?GL_LINEAR_MIPMAP_LINEAR:GL_LINEAR_MIPMAP_NEAREST)
-            :(s.mip_linear?GL_NEAREST_MIPMAP_LINEAR:GL_NEAREST_MIPMAP_NEAREST);
-        glTexParameteri(t.target,GL_TEXTURE_MIN_FILTER,min);glTexParameteri(t.target,GL_TEXTURE_MAG_FILTER,s.mag_linear?GL_LINEAR:GL_NEAREST);
-        glTexParameteri(t.target,GL_TEXTURE_WRAP_S,wrap(s.wrap_s));glTexParameteri(t.target,GL_TEXTURE_WRAP_T,wrap(s.wrap_t));
-        glTexParameteri(t.target,GL_TEXTURE_WRAP_R,wrap(s.wrap_r));
-        glTexParameterf(t.target,GL_TEXTURE_MIN_LOD,s.min_lod);glTexParameterf(t.target,GL_TEXTURE_MAX_LOD,s.max_lod);
+        // Sampler state belongs to a texture unit. Surface views can bind the
+        // same image with different filters or LODs in one guest draw.
+        glBindSampler(base+i,sampler_object(t,s));
     }
 }
-void bind_textures(void*,const u32* handles,const rsx_be_sampler_desc* samplers,u32 mask){bind_texture_units(handles,samplers,mask,16,0);}
+void bind_textures(void*,const u32* handles,const rsx_be_sampler_desc* samplers,u32 mask){
+    std::copy_n(handles,16,sampled_textures.begin());bind_texture_units(handles,samplers,mask,16,0);
+}
 void bind_vertex_textures(void*,const u32* handles,const rsx_be_sampler_desc* samplers,u32 mask){bind_texture_units(handles,samplers,mask,4,16);}
 void viewport(void*,float x,float y,float w,float h){glViewport(x,y,w,h);}
 void scissor(void*,u32 x,u32 y,u32 w,u32 h){glEnable(GL_SCISSOR_TEST);glScissor(x,y,w,h);}
@@ -398,6 +470,7 @@ void draw(void*,rsx_topology topology,const void* vertices,u32 count,u32 stride,
     else glDrawArrays(gl_topology(topology),0,count);
     ++draws;
     check_gl("draw");
+    if(capture_draws && draws<=2048 && draw_color_count)capture_draw();
     if(bound_depth!=original_depth && pipelines.at(active_pipeline).state.depth_write) {
         copy_depth(bound_depth,original_depth);
         glBindFramebuffer(GL_FRAMEBUFFER,draw_fbo);
@@ -422,6 +495,8 @@ void clear_depth(void*,u32 depth,u32 flags,float value,u8 stencil) {
     check_gl("depth clear");
 }
 void present(void*,u32 surface) {
+    capture_draws=(debug_flags.fetch_and(~4u,std::memory_order_relaxed)&4)!=0;
+    if(capture_draws)++capture_frame;
     const auto& t=textures.at(surface);
     glBindFramebuffer(GL_READ_FRAMEBUFFER,read_fbo);attach(GL_READ_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,0);
     attach(GL_READ_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,surface);glReadBuffer(GL_COLOR_ATTACHMENT0);
@@ -465,3 +540,8 @@ extern "C" void haze_webgl_backend_present() {
     rsx_draw_engine_present_buffer(cellGcmGetCurrentDisplayBufferId());
 }
 extern "C" int haze_webgl_backend_pump_messages() {return 0;}
+// Browser playtests can inspect a single frame or isolate rasterization state
+// without restarting the guest. These flags are never enabled during normal play.
+extern "C" EMSCRIPTEN_KEEPALIVE void haze_wasm_gpu_debug(u32 flags) {
+    debug_flags.store(flags,std::memory_order_relaxed);
+}

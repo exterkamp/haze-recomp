@@ -9,6 +9,18 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
+async def evaluate_gpu_workers(workers, expression):
+    async def evaluate(owner):
+        try:
+            return await asyncio.wait_for(owner.evaluate(
+                "(() => { const GLctx=globalThis.hazeGetGL?.(); return GLctx ? (" + expression + ")() : null; })()"), 1)
+        except asyncio.TimeoutError:
+            # Guest threads sleeping in Atomics.wait cannot service inspector
+            # evaluations until they wake; never stall the input driver on them.
+            return None
+    return await asyncio.gather(*(evaluate(owner) for owner in workers))
+
+
 async def profile_workers(browser, output, seconds):
     """Sample the actual guest pthreads, retaining Chrome's raw CPU profiles."""
     connection = await browser.new_browser_cdp_session()
@@ -115,13 +127,31 @@ async def run(args):
                     sound_enabled = False
                 if action.get('evaluate'):
                     record('[test evaluate] ' + json.dumps(await page.evaluate(action['evaluate'])))
+                if action.get('runtime_evaluate'):
+                    for owner in page.workers:
+                        if owner.url.endswith('/runtime-worker.js'):
+                            record('[test runtime evaluate] ' + json.dumps(await owner.evaluate(action['runtime_evaluate'])))
+                if action.get('gpu_evaluate'):
+                    record('[test workers] ' + str(len(page.workers)))
+                    # The game's render pthread occupies pool slot 31. Avoid
+                    # interrupting blocking guest pthreads with JS evaluations.
+                    selected = [page.workers[index] for index in action.get('gpu_workers', [31])
+                                if index < len(page.workers)]
+                    for result in await evaluate_gpu_workers(selected, action['gpu_evaluate']):
+                        if result is not None:
+                            record('[test GPU evaluate] ' + json.dumps(result))
                 keys = action.get('keys', [])
                 for key in keys:
                     await page.keyboard.down(key)
                 await asyncio.sleep(min(3, max(0.05, action.get('hold_ms', 150) / 1000)))
                 for key in keys:
                     await page.keyboard.up(key)
-                record('[test input] ' + json.dumps(action))
+                recorded = dict(action)
+                if 'runtime_evaluate' in recorded:
+                    recorded['runtime_evaluate'] = '<evaluated>'
+                if 'gpu_evaluate' in recorded:
+                    recorded['gpu_evaluate'] = '<evaluated>'
+                record('[test input] ' + json.dumps(recorded))
             if args.profile_after and elapsed >= args.profile_after and profiling is None:
                 profiling = asyncio.create_task(profile_workers(browser, output, 10))
             if args.capture_interval and elapsed - last_capture >= args.capture_interval:

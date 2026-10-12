@@ -80,6 +80,33 @@ int main()
     backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
     backend->readback(nullptr,target,16,16,1,1,result,4);
     const unsigned char mapped[]={51,51,51,51};assert(memcmp(result,mapped,4)==0);
+    // Two units may sample the same image with different wrap modes. Texture
+    // parameters alone incorrectly make the last unit's state affect both.
+    const char* dual_ps=R"(
+        struct PSInput { float4 position:SV_POSITION; float4 tc0:TEXCOORD0; };
+        Texture2D    rsx_tex[16] : register(t0);
+        SamplerState rsx_samp[16] : register(s0);
+        float4 main(PSInput input):SV_TARGET {
+            float a=rsx_tex[0].SampleLevel(rsx_samp[0],float2(1.125,0.5),0).r;
+            float b=rsx_tex[1].SampleLevel(rsx_samp[1],float2(1.125,0.5),0).b;
+            return float4(a,b,0,1);
+        }
+    )";
+    const auto dual=backend->pipeline_create(nullptr,vs,dual_ps,&state,&layout,32,RSX_BE_FMT_R8G8B8A8,1);
+    assert(dual);
+    const auto shared=backend->texture_create(nullptr,RSX_BE_FMT_R8G8B8A8,2,1,1,1,0,0);
+    const unsigned char red_blue[]={255,0,0,255,0,0,255,255};
+    backend->texture_upload(nullptr,shared,0,0,2,1,red_blue,8,1);
+    backend->clear_depth_stencil(nullptr,depth,RSX_BE_CLEAR_DEPTH,1,0);
+    backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,dual);
+    textures[0]=textures[1]=shared;samplers[0].wrap_s=1;samplers[1].wrap_s=3;
+    backend->bind_textures(nullptr,textures,samplers,3);
+    backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
+    backend->readback(nullptr,target,16,16,1,1,result,4);
+    const unsigned char independent_samplers[]={255,255,0,255};
+    assert(glGetError()==GL_NO_ERROR && memcmp(result,independent_samplers,4)==0);
+    backend->pipeline_release(nullptr,dual);backend->texture_release(nullptr,shared);
+    samplers[0].wrap_s=3;textures[1]=0;
     // Releasing a pipeline must leave its shared shader objects usable by a
     // subsequent pipeline with the same guest programs.
     glUseProgram(0);

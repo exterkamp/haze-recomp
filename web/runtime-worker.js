@@ -67,6 +67,7 @@ onmessage = async ({data}) => {
         PS3_NO_GUEST_PTR_TRAP:'1', HAZE_FRAME_TRACE:'1',
         PS3_BROWSER_STORAGE_FREE_KB:String(freeKB),
         HAZE_WASM_GPU_CAPTURE:data.trace ? '1' : '',
+        HAZE_WASM_GL_VALIDATE:data.glValidate ? '1' : '',
       })],
       locateFile: name => '/build/' + name,
       print: text => send('log', text),

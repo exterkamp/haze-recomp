@@ -41,6 +41,7 @@ function launch(assets) {
   const canvas = new OffscreenCanvas(screen.width, screen.height);
   worker.postMessage({type:'start', disc:[...disc.files], firmware:[...firmware.files], assets, canvas,
     trace:new URLSearchParams(location.search).has('trace'),
+    glValidate:new URLSearchParams(location.search).has('glvalidate'),
     smoke:new URLSearchParams(location.search).get('smoke')}, [canvas]);
   stop.disabled = false;
 }

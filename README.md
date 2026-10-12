@@ -600,7 +600,8 @@ keyboard Start advances into its menus. Campaign assets load and the opening
 credits run; visible 3D gameplay and save/reload behavior are still being validated.
 Browser SPU jobs use bounded stacks and heap contexts to avoid exhausting linear
 memory. The backend reuses compiled shaders across pipelines and optimizes their
-register arrays while preserving guest constant-buffer layouts.
+register arrays while preserving guest constant-buffer layouts. Texture units
+use independent cached sampler objects, including when they share an image.
 
 From that worktree, reuse the generated PPU/SPU sources and local assets in the
 main checkout:
@@ -633,6 +634,14 @@ for periodic guest thread reports. `scripts/playtest-wasm.py` records logs,
 screenshots and an explicit gameplay-validation status under `local/wasm-tests`.
 Its `--sound`, `--capture-interval 30`, and `--profile-after 120` options unlock
 sound, retain periodic canvas captures, and sample browser worker CPU activity.
+Add `?glvalidate=1` to enable expensive per-draw WebGL error diagnostics.
+Normal rendering reuses framebuffer attachments and checks errors at presentation.
+The playtest's `--input-file` accepts timed keyboard actions plus `runtime_evaluate`
+and `gpu_evaluate` JavaScript functions for inspecting the module owner or render
+worker. Calling `runtime._haze_wasm_gpu_debug(4)` captures one frame's draw targets
+as small PPM files; `--trace` retrieves those files and the generated shaders.
+Debug bits 1 and 2 temporarily disable depth testing and culling respectively;
+pass 0 to restore guest state. These options are for renderer diagnosis.
 The Wasm build requires shared memory, cross-origin isolation headers from the
 included server, and around 8 GiB of addressable linear memory. Its shader
 dependencies are pinned by the bootstrap script. Unsupported fiber and thread
