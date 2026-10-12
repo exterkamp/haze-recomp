@@ -129,6 +129,50 @@ The final normal build with mode one as its default passes the complete gate
 30 FPS limiter checks. A new isolated performance comparison is still required
 before attributing any frame-rate or pacing change to this fix.
 
+## Separate-build benchmark with the controls agent running
+
+At the user's request, performance was measured using the independent rendering
+executable in `local/candidates/window-origin-final`, without changing or
+stopping the PC-controls worktree's process. Muted normal run
+`20261012-034827-435` exited normally with code zero and flushed 9,974 presents.
+Captures 3799, 5343 and 9904 verify carrier gameplay and the stationary wall/
+barrel view before and after measurement. No captures, builds, shader dumps or
+renderer profiler ran during the six measured blocks. All blocks used ten
+warmup seconds followed by twelve measured seconds. CPU work stayed 259;
+fragment depth export and shadow comparison stayed zero. The reporter verifies
+both endpoints' mode and consecutive present IDs for all 1,427 intervals.
+
+The benchmark tool's optional `--observe-pid` reads the other Haze process's
+CPU counters without changing its affinity, input, priority or lifetime.
+The controls agent's PID 14728 stayed active throughout recording. Process CPU
+is expressed as fully busy CPU cores' worth of time, not a system utilization
+percentage. Shared GPU activity is not measured by these counters.
+
+| XY correction | Frames | Intervals | FPS | p95 ms | Max ms | Renderer cores | Controls cores |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Off | 6243-6467 | 225 | 18.817 | 69.140 | 93.775 | 4.824 | 4.889 |
+| On | 6652-6887 | 236 | 19.761 | 65.879 | 83.885 | 4.758 | 4.953 |
+| Off | 7089-7325 | 237 | 19.886 | 64.525 | 103.192 | 4.712 | 5.223 |
+| On | 7526-7767 | 242 | 20.325 | 64.043 | 77.498 | 4.950 | 5.144 |
+| Off | 7989-8238 | 250 | 20.943 | 64.137 | 103.528 | 4.873 | 4.493 |
+| On | 8452-8688 | 237 | 19.902 | 64.629 | 117.472 | 4.951 | 4.980 |
+
+The paired FPS changes have mixed signs; no repeatable slowdown or speedup is
+established for the correction under this workload. All intervals respect the
+30 FPS ceiling, but pacing remains variable and many intervals exceed 50 ms.
+This separate-executable benchmark does not establish isolated gameplay
+performance: the other game consumes substantial CPU time and shares the GPU.
+It cannot be compared directly to earlier uncontended 29.6 FPS wall samples.
+Raw blocks/report remain local as `window-origin-shared-blocks.json` and
+`window-origin-shared-report.json`.
+
+The preserved WIP is `local/releases/haze-wip-2026-10-11-shadow-origin`.
+Its executable matches the tested candidate SHA-256
+`2DB72DCCDBC44DBB19317B1EB0C662963F212159727552E6E7A9048C55511389`.
+It includes the clipping and deck-paint fixes, defaults to XY correction only,
+and leaves the other rendering experiments disabled. The PC-controls agent's
+independent changes are not merged into this rendering WIP.
+
 ## References
 
 - [RSX window constants](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/RSX/gcm_enums.h) and [register decoder](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/RSX/rsx_decode.h): height/origin/center fields.

@@ -5,6 +5,9 @@ The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set b
 launch. Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
 during these blocks. Menus/loading do not establish gameplay performance.
+Optional --observe-pid reads another Haze process's CPU use; it must remain
+alive throughout recording. Shared CPU/GPU contention still prevents treating
+that session as an isolated performance measurement.
 """
 import argparse
 import csv
@@ -51,7 +54,9 @@ def record(args):
     result = dict(pid=args.pid, exe=str(args.exe.resolve()),
                   qpc_frequency=frequency.value, warmup_s=args.warmup,
                   measure_s=args.seconds, mode_column=args.mode_column,
+                  observed_pids=args.observe_pid,
                   blocks=[], complete=False, note=__doc__)
+    observers = []
 
     def wait(seconds):
         deadline = time.monotonic() + seconds
@@ -60,22 +65,34 @@ def record(args):
             time.sleep(min(.25, max(0, deadline - time.monotonic())))
 
     try:
+        for pid in args.observe_pid:
+            if pid == args.pid:
+                raise ValueError('Observed process must differ from the benchmark process')
+            clock, release = process_clock(pid)
+            observers.append((pid, clock, release))
         for flags in args.flags:
             args.control.write_text(f'{flags}\n')
             wait(args.warmup)
             start = qpc()
             cpu_start = cpu()
+            observed_start = [clock() for _, clock, _ in observers]
             wait(args.seconds)
             cpu_ms = cpu() - cpu_start
             end = qpc()
+            observed_cores = {str(pid): (clock() - initial) * frequency.value /
+                              (end - start) / 1000
+                              for (pid, clock, _), initial in zip(observers, observed_start)}
             block = dict(flags=flags, start_qpc=start, end_qpc=end,
                          process_cpu_ms=cpu_ms,
+                         observed_mean_cores=observed_cores,
                          mean_cores=cpu_ms * frequency.value / (end - start) / 1000)
             result['blocks'].append(block)
             args.output.write_text(json.dumps(result, indent=2) + '\n')
             print(json.dumps(block), flush=True)
         result['complete'] = True
     finally:
+        for _, _, release in observers:
+            release()
         close()
         args.control.write_text(f'{args.flags[0]}\n')
         args.output.write_text(json.dumps(result, indent=2) + '\n')
@@ -128,6 +145,8 @@ if __name__ == '__main__':
     runner.add_argument('control', type=Path)
     runner.add_argument('--pid', type=int, required=True)
     runner.add_argument('--exe', type=Path, required=True)
+    runner.add_argument('--observe-pid', type=int, action='append', default=[],
+                        help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
     runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
@@ -143,8 +162,9 @@ if __name__ == '__main__':
     if args.action == 'record':
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 1023 for f in args.flags):
             parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..1023')
-        if args.mode_column != 'cpu_work' and any(f not in (0,1) for f in args.flags):
-            parser.error('Shadow/depth export flags must be 0 or 1')
+        allowed_modes = (0,1,2) if args.mode_column == 'window_position' else (0,1)
+        if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):
+            parser.error('Use shadow/depth flags 0/1 or window-position flags 0/1/2')
         record(args)
     else:
         if args.min_frames < 60:
