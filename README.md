@@ -14,9 +14,10 @@ application version **01.00**. Other regions and updates are not validated.
 | Standalone native Windows executable | Renders menus and the opening campaign scene, including squad, weapons, carrier and sky |
 | Campaign gameplay, audio, saves | Fresh opening cinematic, first checkpoint/save and first squad-gathering objective verified; movement/camera and pause/resume work; later combat, mission completion and sound quality unvalidated |
 | Online peer-to-peer campaign co-op | Not implemented or validated for Haze |
-| Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
+| Full keyboard and mouse controls | Configurable WASD and all pad buttons; raw mouse directly rotates the player camera in degrees per device count |
 | PC key prompts | Planned; requires UI/asset work |
 | Higher frame rates | Duplicate presentations fixed; native simulation and frame pacing optimization in progress |
+| Custom rendering resolution | Live D3D12 renderer accepts explicit scene/output dimensions; native sizes remain the default |
 | Ultrawide | Research after baseline rendering works; projection and HUD must both be addressed |
 
 The runtime building successfully does not establish that Haze works. Haze's
@@ -176,6 +177,9 @@ The
 [vertex-program cache experiment](docs/performance-vp-cache-2026-10-11.md)
 reduces shader preparation time, but remains disabled because its profiling
 comparison did not establish a reliable FPS gain.
+The [triangle-index upload investigation](docs/performance-triangle-indices-2026-10-11.md)
+measured a repeated 0.85–0.88 ms/frame saving from copying validated triangle
+remaps in bulk. This is now enabled by default; overall pacing still varies.
 
 For reproducible diagnostic captures:
 
@@ -218,6 +222,32 @@ shorter than 1/30 second across 9,575 consecutive presents. A lighter carrier
 view reached 29.41 FPS, while the busy deck remained at 20.70 FPS in that run.
 
 ## Local development
+
+Select a custom internal resolution in the live renderer:
+
+```powershell
+.\scripts\play.ps1 -RenderResolution 1920x1080
+.\scripts\play.ps1 -RenderResolution 2560x1440
+.\scripts\run.ps1 -Seconds 120 -RenderResolution 1777x997 -CaptureFrames 2
+```
+
+`RSX_RENDER_RESOLUTION=WIDTHxHEIGHT` also works with either launcher or the
+executable directly. The launcher parameter takes precedence. Omit both to
+retain the original render sizes. Width and height accept integers from 1 to
+8192, subject to GPU memory and texture-size limits. Restart to change them.
+This option requires the Live renderer.
+
+Haze's observed main scene is 1024x576, followed by a 1280x720 output pass.
+Custom mode renders both at the selected dimensions and scales intermediate
+color/depth targets relative to the scene. For example, 1920x1080 gives a
+1920x1080 scene, 960x540 half-size effects, and a 1920x1080 output. This also
+increases shadow-target sizes and GPU memory use. Guest memory, texture assets,
+camera projection and HUD proportions retain their original conventions;
+selecting a different aspect ratio stretches the picture. Ultrawide projection
+and HUD adaptation remain separate work.
+
+See [custom resolution implementation and validation](docs/custom-render-resolution.md)
+for the rendering changes and native evidence.
 
 Requirements: Windows x64, Visual Studio C++ tools and Windows SDK, Clang,
 CMake, Ninja, Python 3.11+, Git, and 7-Zip. The build script discovers the
@@ -275,16 +305,54 @@ translation provenance under ignored local directories. Import coverage is a
 static inventory of symbols and context registrations; it is not an ABI or
 behavioral compatibility test.
 
+Graphics are configured in [config/graphics.ini](config/graphics.ini). Restart
+after changing windowed/fullscreen/borderless mode, window size, monitor,
+render resolution, FXAA, anisotropic filtering (up to 16x),
+independent shadow resolution, mip bias, sharpening, exposure, VSync or the
+frame cap. Defaults use borderless mode at the primary monitor's desktop
+resolution and retain native shadow size. Windowed mode automatically fits a
+16:9 window up to 1280x720 to the monitor's work area.
+Missing settings or an absent default INI use those same defaults. Both launchers accept
+`-GraphicsConfig path/to/settings.ini`; `-RenderResolution 1920x1080` overrides
+the file for that run. See [graphics settings](docs/graphics-settings.md) for
+costs, examples, validation and remaining game-side options.
+
 PC input is configured in `config/input.ini`. WASD moves; arrows navigate;
 Space confirms/skips; Enter starts; Escape pauses and releases the mouse.
 Click inside the game or press F1 to capture the raw mouse; F1 also releases it.
-The initial capture click does not fire. Short keyboard taps are buffered for
+The initial capture click does not fire. Short keyboard and mouse-button taps are buffered for
 120 ms so they survive slow frames. All sixteen controller buttons have configurable
 keyboard/mouse bindings. Mouse buttons affect the game only while captured,
-and focus loss releases capture and neutralizes keyboard/mouse input. This is
-an initial mapping through the game's pad input, not direct mouse aiming;
-the game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
+and focus loss releases capture and neutralizes keyboard/mouse input.
+Raw device counts rotate the player yaw/pitch
+before the game builds its aim and camera matrices. The right stick stays
+neutral, so mouse movement has no stick deadzone, acceleration, smoothing or
+turn-speed cap. Sensitivity is degrees per count (default `0.10`), and `InvertY`
+reverses vertical motion. Camera pitch still respects the game's limits.
+The game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
 configuration file. Closing the game window now ends its native process.
+
+From an isolated worktree, share the existing SDK, lifts and game assets while
+keeping build products and run logs in the worktree:
+
+```powershell
+.\scripts\build.ps1 -SharedRoot E:\Code\haze-recomp
+.\scripts\test-input.ps1 -SharedRoot E:\Code\haze-recomp
+.\scripts\run.ps1 -SharedRoot E:\Code\haze-recomp -Seconds 600
+```
+
+For renderer changes, `build.ps1 -SdkRoot .\external\ps3recomp` selects an
+independent SDK checkout while `-SharedRoot` continues to supply the lifts and
+game assets. The selected SDK must be at a compatible revision.
+
+`HAZE_MOUSE_TRACE=1` logs raw counts and the resulting angles after the game's
+camera update for diagnostics. The native hook checks the supported ELF's
+instruction and virtual-function signatures before accessing player angles.
+Input regressions cover raw relative events, neutral right-stick packets,
+all sixteen buttons, tap buffering, focus/capture release, distance invariance,
+large flicks, pitch limits and inversion. The isolated executable built and
+booted into the campaign; a Windows raw-input probe measured the configured
+angle changes, and interactive testing confirmed native mouse feel.
 
 The PC defaults were checked against the running game's **Customize Controls**
 page with its Default layout:

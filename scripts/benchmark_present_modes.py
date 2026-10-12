@@ -1,10 +1,19 @@
-"""Measure renderer variants in an ordinary, nonprofiling native build.
+"""Measure renderer/queue variants in an ordinary, nonprofiling native build.
 
 Record timed blocks while a visually verified gameplay scene stays still.
 The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set before
 launch. Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
 during these blocks. Menus/loading do not establish gameplay performance.
+Queue variants require SPURS_QUEUE_WAIT_CONTROL and native mode-event evidence
+for each explicitly selected critical worker host TID when reporting.
+The SPU idle variant uses HAZE_SPU_IDLE_CONTROL and its persistent worker TID.
+The usleep variant uses PS3_USLEEP_MODE_FILE with flags 0/8 and explicitly
+selected hot PPU workers; native mode events must cover each measured block.
+The frame_pacer variant uses HAZE_FRAME_PACER_FILE and the guest main-loop
+thread's native mode events to compare the legacy wait with its opt-in bypass.
+The spu_triplet_copy variant uses HAZE_TRIPLET_COPY_FILE and process-wide native
+mode events; an explicitly selected host TID is unnecessary for that variant.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -16,9 +25,46 @@ import json
 from pathlib import Path
 import statistics
 import time
+import re
 
 from benchmark_cpu_work import process_clock
 from summarize_presents import percentile
+
+
+def verify_process_observation(path, windows, max_gap_s):
+    """Check sampled Haze isolation, including observations bracketing each block.
+
+    This cannot exclude a process whose entire lifetime falls between samples.
+    Do not describe it as evidence of zero system-wide CPU/GPU contention.
+    """
+    observations = [json.loads(line) for line in
+                    path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
+    frequency = windows['qpc_frequency']
+    if not observations or any(row['qpc_frequency'] != frequency for row in observations):
+        raise ValueError('Process observer QPC frequency differs or log is empty')
+    if any(b['qpc'] <= a['qpc'] for a, b in zip(observations, observations[1:])):
+        raise ValueError('Process observations are not strictly chronological')
+    result = []
+    for block in windows['blocks']:
+        before = [i for i, row in enumerate(observations) if row['qpc'] <= block['start_qpc']]
+        after = [i for i, row in enumerate(observations) if row['qpc'] >= block['end_qpc']]
+        if not before or not after:
+            raise ValueError('Process observations do not bracket the entire block')
+        selected = observations[before[-1]:after[0]+1]
+        gaps = [(b['qpc'] - a['qpc']) / frequency for a, b in zip(selected, selected[1:])]
+        if not gaps or max(gaps) > max_gap_s:
+            raise ValueError('Process observation coverage has an excessive gap')
+        for row in selected:
+            processes = row['processes']
+            if len(processes) != 1:
+                raise ValueError('Another Haze process or missing owned process observed')
+            process = processes[0]
+            if (process['ProcessId'] != windows['pid'] or not process['ExecutablePath'] or
+                    Path(process['ExecutablePath']).resolve() != Path(windows['exe']).resolve()):
+                raise ValueError('Observed Haze does not match the owned benchmark executable')
+        result.append(dict(samples=len(selected), max_gap_s=max(gaps)))
+    return dict(source=str(path), blocks=result,
+                note='Only the owned Haze was observed; process lifetimes between samples and other applications are not excluded.')
 
 
 def record(args):
@@ -110,9 +156,45 @@ def report(args):
                 for row in csv.DictReader(stream)]
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
-    if mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position'):
+    worker_modes = None
+    if mode_column == 'spu_triplet_copy':
+        if not args.queue_mode_log:
+            raise ValueError('Native copy mode requires its process-wide mode-event log')
+        worker_modes = {'process': []}
+        for line in args.queue_mode_log.read_text(errors='replace').splitlines():
+            match = re.fullmatch(r'\[haze-spu-triplet-mode\] enabled=([01]) qpc=(\d+)', line)
+            if match: worker_modes['process'].append((int(match[2]), int(match[1])))
+        worker_modes['process'].sort()
+    elif mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer'):
+        if not args.queue_mode_log or not args.queue_wait_tid:
+            raise ValueError('Native mode requires its log and explicitly selected critical host TIDs')
+        worker_modes = {tid: [] for tid in args.queue_wait_tid}
+        pattern = (r'\[spurs-queue-wait-mode\] tid=(\d+) native=([01]) qpc=(\d+)'
+                   if mode_column == 'spurs_queue_wait' else
+                   r'\[haze-spu-idle-mode\] tid=(\d+) enabled=([01]) qpc=(\d+)'
+                   if mode_column == 'spu_idle_wait' else
+                   r'\[haze-frame-pacer-mode\] tid=(\d+) enabled=([01]) qpc=(\d+)'
+                   if mode_column == 'frame_pacer' else
+                   r'\[usleep-mode\] tid=(\d+) guest_tid=\d+ timer=([01]) qpc=(\d+)')
+        for line in args.queue_mode_log.read_text(errors='replace').splitlines():
+            match = re.fullmatch(pattern, line)
+            if match and int(match[1]) in worker_modes:
+                mode = int(match[2]) * (8 if mode_column == 'usleep' else 1)
+                worker_modes[int(match[1])].append((int(match[3]), mode))
+        for events in worker_modes.values():
+            events.sort()
+    elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
+        if not rows or rows[0]['qpc'] > block['start_qpc'] or rows[-1]['qpc'] < block['end_qpc']:
+            raise ValueError('Present CSV does not cover the entire measured block; its fixed ring may have wrapped')
+        if worker_modes is not None:
+            for tid, events in worker_modes.items():
+                before = [mode for qpc, mode in events if qpc <= block['start_qpc']]
+                if not before or before[-1] != block['flags']:
+                    raise ValueError(f'Native mode did not settle for {tid}')
+                if any(block['start_qpc'] < qpc <= block['end_qpc'] for qpc, _ in events):
+                    raise ValueError(f'Native mode changed inside the measured block for {tid}')
         selected = [(prev, cur) for prev, cur in zip(rows, rows[1:])
                     if prev['qpc'] >= block['start_qpc'] and cur['qpc'] <= block['end_qpc']]
         if len(selected) < args.min_frames:
@@ -120,7 +202,7 @@ def report(args):
         for prev, cur in selected:
             if cur['present_id'] != prev['present_id'] + 1:
                 raise ValueError('Missing present inside a recorded block')
-            if prev[mode_column] != block['flags'] or cur[mode_column] != block['flags']:
+            if worker_modes is None and (prev[mode_column] != block['flags'] or cur[mode_column] != block['flags']):
                 raise ValueError('Mode did not settle before the measured block; increase warmup')
             if cur['qpc'] <= prev['qpc']:
                 raise ValueError('Nonpositive present interval')
@@ -134,6 +216,9 @@ def report(args):
             frames_over_33_333_ms=sum(value > 1000 / 30 for value in intervals),
             frames_over_50_ms=sum(value > 50 for value in intervals)))
     result = dict(source=str(args.csv), windows=str(args.windows), blocks=summaries, note=__doc__)
+    if getattr(args, 'process_log', None):
+        result['process_observation'] = verify_process_observation(
+            args.process_log, windows, getattr(args, 'max_process_gap', 4))
     args.output.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result, indent=2))
 
@@ -148,7 +233,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
@@ -157,16 +242,25 @@ if __name__ == '__main__':
     reader.add_argument('csv', type=Path)
     reader.add_argument('windows', type=Path)
     reader.add_argument('--min-frames', type=int, default=180)
+    reader.add_argument('--queue-mode-log', '--mode-event-log', dest='queue_mode_log', type=Path)
+    reader.add_argument('--queue-wait-tid', '--mode-tid', dest='queue_wait_tid', type=int, action='append', default=[])
     reader.add_argument('--output', type=Path, required=True)
+    reader.add_argument('--process-log', type=Path,
+                        help='JSONL from observe_haze_processes.ps1; reject observed Haze contention or incomplete coverage')
+    reader.add_argument('--max-process-gap', type=float, default=4,
+                        help='Maximum allowed seconds between observations, default 4')
     args = parser.parse_args()
     if args.action == 'record':
-        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 1023 for f in args.flags):
-            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..1023')
-        allowed_modes = (0,1,2) if args.mode_column == 'window_position' else (0,1)
+        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 2047 for f in args.flags):
+            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..2047')
+        allowed_modes = ((0,1,2) if args.mode_column == 'window_position' else
+                         (0,8) if args.mode_column == 'usleep' else (0,1))
         if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):
-            parser.error('Use shadow/depth flags 0/1 or window-position flags 0/1/2')
+            parser.error('Use shadow/depth/queue flags 0/1, window-position flags 0/1/2, or usleep flags 0/8')
         record(args)
     else:
+        if not 0 < args.max_process_gap <= 10:
+            parser.error('Process observation gap must be positive and at most 10 seconds')
         if args.min_frames < 60:
             parser.error('Use at least 60 complete intervals per block')
         report(args)

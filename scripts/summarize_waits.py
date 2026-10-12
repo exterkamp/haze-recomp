@@ -25,6 +25,21 @@ def union_ticks(intervals):
     return total + (end - begin if end is not None else 0)
 
 
+def load_names(root):
+    names = {'hle': {}, 'syscall': {}}
+    source = root / 'generated/ppu/ppu_hle_nids.cpp'
+    if source.exists():
+        names['hle'].update((nid.upper().zfill(8), name) for nid, name in re.findall(
+            r'ps3_hle_register\(0x([0-9a-fA-F]+)[uU]?,\s*"([^"]+)"',
+            source.read_text()))
+    source = root / 'external/ps3recomp/runtime/syscalls/lv2_syscall_table.h'
+    if source.exists():
+        for name, number in re.findall(r'^#define\s+(SYS_\w+)\s+(0x[0-9a-fA-F]+|\d+)\b',
+                                      source.read_text(), re.M):
+            names['syscall'][f'{int(number, 0):08X}'] = name.lower()
+    return names
+
+
 def summarize(directory, renderer, first, last, guest_tid=None):
     frames = {}
     with Path(renderer).open(newline="") as f:
@@ -35,13 +50,8 @@ def summarize(directory, renderer, first, last, guest_tid=None):
                 continue
     begin = frames[first]
     end = frames[last]
-    names = {}
     root = Path(__file__).resolve().parents[1]
-    source = root / 'generated/ppu/ppu_hle_nids.cpp'
-    if source.exists():
-        names.update((nid.upper().zfill(8), name) for nid, name in re.findall(
-            r'ps3_hle_register\(0x([0-9a-fA-F]+)[uU]?,\s*"([^"]+)"',
-            source.read_text()))
+    names = load_names(root)
     groups = collections.defaultdict(list)
     intervals = collections.defaultdict(list)
     threads = {}
@@ -67,7 +77,7 @@ def summarize(directory, renderer, first, last, guest_tid=None):
     if not frequency:
         raise ValueError('No recorded calls overlap the requested frames')
     rows = [dict(guest_tid=k[0], kind=k[1], id=k[2],
-                 name=names.get(k[2], k[2]), lr=k[3], arg0=k[4],
+                 name=names.get(k[1], {}).get(k[2].upper(), k[2]), lr=k[3], arg0=k[4],
                  saved_lr=k[5], calls=len(v), wall_ms=sum(v), max_ms=max(v))
             for k,v in groups.items()]
     return dict(first_frame=first, last_frame=last,

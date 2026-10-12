@@ -1,4 +1,6 @@
 param(
+    [string]$SharedRoot,
+    [string]$SdkRoot,
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
@@ -13,6 +15,7 @@ if ($CompareSpuByteOps -and (-not $ProfileRenderer -or $RuntimeOnly)) {
     throw 'CompareSpuByteOps requires a full ProfileRenderer build.'
 }
 $root = Split-Path $PSScriptRoot -Parent
+$assets = if ($SharedRoot) { (Resolve-Path -LiteralPath $SharedRoot).Path } else { $root }
 Set-Location -LiteralPath $root
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -30,13 +33,13 @@ foreach ($line in $environment) {
 $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 $clang = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
-$python = Join-Path $root '.venv\Scripts\python.exe'
-$sdk = Join-Path $root 'external\ps3recomp'
+$python = Join-Path $assets '.venv\Scripts\python.exe'
+$sdk = if ($SdkRoot) { (Resolve-Path -LiteralPath $SdkRoot).Path } else { Join-Path $assets 'external\ps3recomp' }
 if ($RuntimeOnly) {
     $source = $sdk
     $build = Join-Path $root 'build\runtime'
 } else {
-    if (-not (Test-Path -LiteralPath 'generated/ppu/ppu_recomp.h')) {
+    if (-not (Test-Path -LiteralPath "$assets/generated/ppu/ppu_recomp.h")) {
         throw 'No Haze lift exists. Run .venv\Scripts\python.exe scripts/haze.py lift first.'
     }
     $source = Join-Path $root 'port'
@@ -44,21 +47,72 @@ if ($RuntimeOnly) {
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
 $exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory) } else { $build }
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
+if (-not $RuntimeOnly) {
+    & $python "$root/tests/check_profile_configuration.py" $build --enabled $([int][bool]$ProfileRenderer)
+    if ($LASTEXITCODE -ne 0) { throw 'Profiling definitions do not match the requested build.' }
+}
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
+    & $python "$root/tests/test_wait_timeline.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Wait timeline syscall naming and interval-union tests failed.' }
+    $graphicsTest = Join-Path $root 'local/test_haze_graphics.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$graphicsTest" "/Fo$root/local/test_haze_graphics.obj" "$root/tests/test_haze_graphics.cpp" /link user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test compilation failed.' }
+    & $graphicsTest
+    if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test failed.' }
+    $pacerSettingsTest = Join-Path $root 'local/test_frame_pacer_settings.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/Fe$pacerSettingsTest" "/Fo$root/local/test_frame_pacer_settings.obj" "$root/tests/test_frame_pacer_settings.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native frame-pacer selection test compilation failed.' }
+    & $pacerSettingsTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native frame-pacer selection test failed.' }
+    $displayTest = Join-Path $root 'local/test_haze_display.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$displayTest" "/Fo$root/local/test_haze_display.obj" "$root/tests/test_haze_display.cpp" /link user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Display-window test compilation failed.' }
+    & $displayTest
+    if ($LASTEXITCODE -ne 0) { throw 'Display-window test failed.' }
     $bytesTest = Join-Path $root 'local/test_spu_bytes.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$bytesTest" "/Fo$root/local/test_spu_bytes.obj" "$sdk/runtime/spu/tests/test_spu_bytes.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU SIMD byte-operation test compilation failed.' }
     & $bytesTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU SIMD byte-operation oracle test failed.' }
+    $fiTest = Join-Path $root 'local/test_fi_scaling.exe'
+    $fiFlags = @('/clang:-msse4.1')
+    if ($SpuFma) { $fiFlags += @('/clang:-mavx', '/clang:-mfma') }
+    & $clang /nologo /W0 /O2 @fiFlags "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$fiTest" "/Fo$root/local/test_fi_scaling.obj" "$sdk/runtime/spu/tests/test_fi_scaling.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU FI scaling oracle compilation failed.' }
+    & $fiTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU FI scaling rounding/denormal oracle failed.' }
+    $numericTest = Join-Path $root 'local/test_spu_numeric_semantics.exe'
+    & $clang /nologo /W0 /O2 @fiFlags "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$numericTest" "/Fo$root/local/test_spu_numeric_semantics.obj" "$sdk/runtime/spu/tests/test_spu_numeric_semantics.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU numeric semantics test compilation failed.' }
+    & $numericTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU numeric/estimate-refinement test failed.' }
     $coherencyTest = Join-Path $root 'local/test_coherency_lifetime.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$coherencyTest" "/Fo$root/local/" "$sdk/runtime/spu/tests/test_coherency_lifetime.c" "$sdk/runtime/spu/spu_coherency.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime test compilation failed.' }
     & $coherencyTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime/holder-capacity test failed.' }
+    $idleTest = Join-Path $root 'local/test_spu_idle_wait.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/runtime/spu" "/Fe$idleTest" "/Fo$root/local/" "$root/tests/test_spu_idle_wait.c" "$sdk/runtime/spu/spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait test compilation failed.' }
+    & $idleTest
+    if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait predicate/publication test failed.' }
+    if (-not $RuntimeOnly) {
+        $tripletOracle = Join-Path $root 'local/triplet_oracle.c'
+        & $python "$root/scripts/prepare_triplet_oracle.py" "$assets/generated/spu/spu_0041_at_00F2E380/spu_recomp.c" $tripletOracle
+        if ($LASTEXITCODE -ne 0) { throw 'Audited triplet-copy oracle extraction failed.' }
+        $tripletTest = Join-Path $root 'local/test_spu_triplet_copy.exe'
+        & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/runtime/spu" "/I$root/port" "/Fe$tripletTest" "/Fo$root/local/" "$root/tests/test_spu_triplet_copy.c" $tripletOracle
+        if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy oracle compilation failed.' }
+        & $tripletTest
+        if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy full-state oracle failed.' }
+        & $python "$root/tests/test_spu_triplet_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy patch guards failed.' }
+    }
     $abiStorageTest = Join-Path $root 'local/test_abi_storage.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$abiStorageTest" "/Fo$root/local/test_abi_storage.obj" "$sdk/runtime/spu/tests/test_abi_storage.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU ABI storage test compilation failed.' }
@@ -69,6 +123,13 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU private-history test compilation failed.' }
     & $depthTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU history isolation/depth-limit test failed.' }
+    $drainHooksTest = Join-Path $root 'local/test_drain_hooks.exe'
+    & $clang /nologo /W0 /O2 /Gy /Gw "/I$sdk/include" "/Fe$drainHooksTest" "/Fo$root/local/test_drain_hooks.obj" "$sdk/runtime/spu/tests/test_drain_hooks.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'SPU drain hook test compilation failed.' }
+    foreach ($mode in @('default', 'no-ls0', 'exit', 'step', 'jobdrain')) {
+        & $drainHooksTest $mode
+        if ($LASTEXITCODE -ne 0) { throw "SPU drain hook test failed: $mode" }
+    }
     $sleepTest = Join-Path $root 'local/test_usleep_timer.exe'
     & $clang /nologo /W0 /O2 "/Fe$sleepTest" "/Fo$root/local/test_usleep_timer.obj" "$sdk/runtime/syscalls/tests/test_usleep_timer.c"
     if ($LASTEXITCODE -ne 0) { throw 'High-resolution timer test compilation failed.' }
@@ -101,6 +162,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Firmware ELF relocation tests failed.' }
     & $python "$root/tests/test_present_modes.py"
     if ($LASTEXITCODE -ne 0) { throw 'Present-window benchmark validation failed.' }
+    & $python "$root/tests/test_guest_pacer_patch.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }
@@ -112,10 +175,15 @@ if ($Test) {
     & $padTest
     if ($LASTEXITCODE -ne 0) { throw 'Host pad input packet test failed.' }
     $hazeInputTest = Join-Path $root 'local/test_haze_input.exe'
-    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse test compilation failed.' }
     & $hazeInputTest
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse mapping test failed.' }
+    $hazeCameraTest = Join-Path $root 'local/test_haze_camera.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/Fe$hazeCameraTest" "/Fo$root/local/test_haze_camera.obj" "$root/tests/test_haze_camera.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native camera test compilation failed.' }
+    & $hazeCameraTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native camera gating/rotation test failed.' }
     & $python "$sdk/tools/test_spu_text_selection.py"
     if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
     & $python "$sdk/tools/test_spu_trace_registers.py"
@@ -129,7 +197,7 @@ if ($Test) {
         }
     } finally { $env:CC = $oldCC }
     $condTest = Join-Path $root 'local/test_sysprx_lwcond.exe'
-    & $clang /nologo /W0 /O1 /Gy /Gw "/I$root/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
+    & $clang /nologo /W0 /O1 /Gy /Gw "/I$assets/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable test compilation failed.' }
     & $condTest
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable boundary and wait test failed.' }
@@ -139,6 +207,26 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPURS queue query test compilation failed.' }
     & $queueTest
     if ($LASTEXITCODE -ne 0) { throw 'SPURS queue query contract test failed.' }
+    $queueProfileTest = Join-Path $root 'local/test_queue_profile.exe'
+    & $clang /nologo /W0 /O2 "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$queueProfileTest" "/Fo$root/local/test_queue_profile.obj" "$sdk/libs/spurs/tests/test_queue_profile.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPURS queue timing test compilation failed.' }
+    $oldQueueProfile = $env:SPURS_QUEUE_PROFILE
+    $oldQueueControl = $env:SPURS_QUEUE_PROFILE_CONTROL
+    try {
+        $env:SPURS_QUEUE_PROFILE = Join-Path $root 'local/queue-profile-test'
+        $env:SPURS_QUEUE_PROFILE_CONTROL = $null
+        New-Item -ItemType Directory -Force $env:SPURS_QUEUE_PROFILE | Out-Null
+        & $queueProfileTest
+        if ($LASTEXITCODE -ne 0) { throw 'SPURS queue timing attribution test failed.' }
+    } finally {
+        $env:SPURS_QUEUE_PROFILE = $oldQueueProfile
+        $env:SPURS_QUEUE_PROFILE_CONTROL = $oldQueueControl
+    }
+    $nativeQueueTest = Join-Path $root 'local/test_native_queue_wait.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$nativeQueueTest" "/Fo$root/local/" "$sdk/libs/spurs/tests/test_native_queue_wait.c" "$sdk/runtime/spu/spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Native queue wake test compilation failed.' }
+    & $nativeQueueTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native queue publication/wake/lifetime test failed.' }
     $gameDataTest = Join-Path $root 'local/test_gamedata_callback.exe'
     & $clang /nologo /W0 "/I$sdk/include" "/Fe$gameDataTest" "/Fo$root/local/test_gamedata_callback.obj" "$sdk/libs/system/tests/test_gamedata_callback.c"
     if ($LASTEXITCODE -ne 0) { throw 'Game-data callback test compilation failed.' }

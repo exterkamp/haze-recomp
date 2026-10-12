@@ -173,6 +173,28 @@ It includes the clipping and deck-paint fixes, defaults to XY correction only,
 and leaves the other rendering experiments disabled. The PC-controls agent's
 independent changes are not merged into this rendering WIP.
 
+## Combined native-controls WIP
+
+Main merge `d4cefb3` incorporates `feat/native-pc-controls` commit `f828211`
+while retaining SDK `fa8f304`. The combined ordinary build passes the full
+regression gate, including the actual camera-hook tests and rendering GPU
+readbacks (`local/native-controls-merge-tests.log`). Muted native run
+`20261012-041208-023` installs the distance-based mouse hook, reaches carrier
+gameplay (capture 3320), and shows opaque barrels and soldiers in capture
+4710. It closes normally with exit code zero. Its 5,198 complete present
+intervals all remain above 33.333 ms, with a minimum of 33.5061 ms. This whole-run
+ceiling check includes loading and shared-machine activity; it is not a gameplay
+performance benchmark or a new visual off/on comparison.
+
+The preserved combined WIP is
+`local/releases/haze-wip-2026-10-11-native-controls-shadow/Play-Haze.cmd`.
+Executable SHA-256:
+`2B5D8AAA448BC94B2165BCDFE5C790E579F223D83A02A2541957CD597F458D0F`.
+It uses native mouse distance rather than controller-stick rotation, defaults
+to the confirmed XY window correction, and retains the 30 FPS ceiling.
+In-game button prompts and online co-op remain unfinished. Rendering resolution
+is being developed in a separate worktree and is not included in this WIP.
+
 ## References
 
 - [RSX window constants](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/RSX/gcm_enums.h) and [register decoder](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/RSX/rsx_decode.h): height/origin/center fields.

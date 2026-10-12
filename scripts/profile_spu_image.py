@@ -19,8 +19,11 @@ p.add_argument('log',type=Path)
 p.add_argument('--image',type=int,default=40)
 p.add_argument('--seconds',type=float,default=20)
 p.add_argument('--output',type=Path,required=True)
+p.add_argument('--stack-words',type=int,default=0,
+    help='Read up to 256 raw stack words per sample; these are candidates, not unwound frames')
 a=p.parse_args()
 if not 1<=a.seconds<=120: p.error('seconds must be 1..120')
+if not 0<=a.stack_words<=256: p.error('stack-words must be 0..256')
 k=c.WinDLL('kernel32',use_last_error=True); d=c.WinDLL('dbghelp',use_last_error=True)
 for name in ('OpenProcess','OpenThread'):
     f=getattr(k,name); f.argtypes=[w.DWORD,w.BOOL,w.DWORD]; f.restype=w.HANDLE
@@ -33,6 +36,7 @@ k.GetExitCodeThread.argtypes=[w.HANDLE,c.POINTER(w.DWORD)]
 k.GetThreadDescription.argtypes=[w.HANDLE,c.POINTER(w.LPWSTR)]
 k.LocalFree.argtypes=[c.c_void_p]
 k.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,c.POINTER(w.DWORD)]
+k.ReadProcessMemory.argtypes=[w.HANDLE,c.c_void_p,c.c_void_p,c.c_size_t,c.POINTER(c.c_size_t)]
 class Symbol(c.Structure):
     _fields_=[('SizeOfStruct',w.ULONG),('TypeIndex',w.ULONG),('Reserved',c.c_ulonglong*2),
         ('Index',w.ULONG),('Size',w.ULONG),('ModBase',c.c_ulonglong),('Flags',w.ULONG),
@@ -41,9 +45,12 @@ class Symbol(c.Structure):
 d.SymInitializeW.argtypes=[w.HANDLE,w.LPCWSTR,w.BOOL]
 d.SymFromAddr.argtypes=[w.HANDLE,c.c_ulonglong,c.POINTER(c.c_ulonglong),c.POINTER(Symbol)]
 d.SymCleanup.argtypes=[w.HANDLE]
+d.SymGetModuleBase64.argtypes=[w.HANDLE,c.c_ulonglong]
+d.SymGetModuleBase64.restype=c.c_ulonglong
 process=k.OpenProcess(0x410,False,a.pid)
 if not process: raise c.WinError(c.get_last_error())
 active={}; samples=collections.Counter(); stats=collections.Counter()
+stacks=collections.Counter()
 try:
     name=c.create_unicode_buffer(32768); length=w.DWORD(len(name))
     if not k.QueryFullProcessImageNameW(process,0,name,c.byref(length)) or Path(name.value).name.lower()!='hazerecomp.exe':
@@ -81,20 +88,41 @@ try:
                 if k.SuspendThread(thread)==0xffffffff: continue
                 try:
                     if k.GetThreadContext(thread,ptr):
-                        samples[c.c_uint64.from_address(ptr+0xf8).value]+=1
+                        rip=c.c_uint64.from_address(ptr+0xf8).value
+                        samples[rip]+=1
+                        if a.stack_words:
+                            rsp=c.c_uint64.from_address(ptr+0x98).value
+                            words=(c.c_ulonglong*a.stack_words)(); got=c.c_size_t()
+                            if k.ReadProcessMemory(process,rsp,words,c.sizeof(words),c.byref(got)):
+                                # Deduplicate repeated values within one sample. Code
+                                # pointers on the stack can be data or stale returns.
+                                for address in set(words[:got.value//8]):
+                                    if 0x10000 <= address < 0x800000000000:
+                                        stacks[rip,address]+=1
                 finally: k.ResumeThread(thread)
             time.sleep(.002)
     elapsed=time.perf_counter()-start; resolved=collections.Counter(); raw=[]
-    for address,count in samples.most_common():
+    symbol_cache={}
+    def resolve(address):
+        if address in symbol_cache: return symbol_cache[address]
         buffer=c.create_string_buffer(c.sizeof(Symbol)+2048)
         info=c.cast(buffer,c.POINTER(Symbol)); info.contents.SizeOfStruct=c.sizeof(Symbol); info.contents.MaxNameLen=2048
         displacement=c.c_ulonglong()
         symbol=hex(address)
         if d.SymFromAddr(process,address,c.byref(displacement),info) and displacement.value<0x10000:
             symbol=c.string_at(c.addressof(buffer)+Symbol.Name.offset).decode(errors='replace')
-        resolved[symbol]+=count; raw.append(dict(address=hex(address),symbol=symbol,offset=displacement.value,count=count))
+        symbol_cache[address]=(symbol,displacement.value)
+        return symbol_cache[address]
+    for address,count in samples.most_common():
+        symbol,offset=resolve(address)
+        resolved[symbol]+=count; raw.append(dict(address=hex(address),symbol=symbol,offset=offset,count=count))
+    candidates=[dict(rip=hex(rip),leaf=resolve(rip)[0],address=hex(address),
+        symbol=resolve(address)[0],offset=resolve(address)[1],count=count)
+        for (rip,address),count in stacks.most_common()
+        if d.SymGetModuleBase64(process,address)]
     output=dict(image=a.image,elapsed_s=elapsed,stats=dict(stats),samples=sum(samples.values()),
-        symbols=resolved.most_common(),raw=raw,note=__doc__)
+        symbols=resolved.most_common(),raw=raw,stack_words=a.stack_words,
+        stack_candidates=candidates,note=__doc__)
     a.output.write_text(json.dumps(output,indent=2))
     print(json.dumps({key:output[key] for key in ('image','elapsed_s','stats','samples','symbols')},indent=2))
 finally:

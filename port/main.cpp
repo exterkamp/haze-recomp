@@ -48,6 +48,9 @@
 #include <emscripten/threading.h>
 #endif
 #include "haze_input.h"
+#include "haze_camera.h"
+#include "haze_graphics.h"
+#include "haze_display.h"
 #include "haze_pump_profile.h"
 
 #ifdef _WIN32
@@ -192,6 +195,8 @@ extern "C" int  rsx_null_backend_pump_messages(void);
 #ifdef _WIN32
 extern "C" {
 int rsx_live_draw_enabled(void);
+void rsx_live_draw_set_render_reference(uint32_t, uint32_t);
+void rsx_live_draw_set_shadow_reference(uint32_t);
 int rsx_live_draw_init(void*, uint32_t, uint32_t,
     const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
 void rsx_live_draw_present(uint32_t);
@@ -287,7 +292,16 @@ static DWORD WINAPI frame_clock(LPVOID)
     int rsx_ok = 0;
 #ifdef _WIN32
     if (rsx_live_draw_enabled()) {
+        haze_display_prepare();
+        // Haze renders the main scene at 576p before its 720p scanout pass.
+        rsx_live_draw_set_render_reference(1024, 576);
+        rsx_live_draw_set_shadow_reference(2048);
         rsx_ok = rsx_null_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0;
+        if (rsx_ok && !haze_display_apply(rsx_null_backend_get_hwnd())) {
+            fprintf(stderr,"[display] Cannot apply display settings; stopping startup\n");
+            fflush(stderr);
+            ExitProcess(2);
+        }
         if (rsx_ok && rsx_live_draw_init(rsx_null_backend_get_hwnd(), WINDOW_WIDTH,
                                        WINDOW_HEIGHT, live_guest_ptr, nullptr) == 0) {
             s_rsx_live = true;
@@ -521,6 +535,7 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
 
 int main(int argc, char** argv)
 {
+    if (!haze_graphics_initialize()) return 2;
 #if defined(_WIN32) && defined(HAZE_REQUIRE_FMA)
     int cpu[4];
     __cpuid(cpu, 1);
@@ -600,6 +615,7 @@ int main(int argc, char** argv)
      * until the title registers its vblank and flip handlers during init. */
     g_ps3_guest_caller = harness_guest_caller;
     haze_input_initialize();
+    haze_camera_initialize();
 #if defined(__EMSCRIPTEN__) && defined(HAZE_WASM_WEBGL)
     pthread_attr_t frame_attr;
     pthread_attr_init(&frame_attr);
