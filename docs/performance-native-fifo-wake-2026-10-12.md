@@ -81,3 +81,64 @@ without another notification. The candidate is:
 
 Build/test log: `local/native-fifo-wake-build-tests.log`. The native path remains
 off by default until ordinary-build gameplay comparisons establish a benefit.
+
+## First ordinary-build comparison
+
+Run `20261012-180932-320` used the candidate above, native cursor/queue/idle
+paths enabled, 2560x1440 rendering, VSync on and no host FPS cap. A private copy
+of the carrier checkpoint and input file kept this test separate from other
+agents. Captures before and after confirmed gameplay. Four 45-second windows
+followed five-second warmups, with no sampling, builds, captures or input inside
+the windows. Producer TID 24752's native mode events validated each transition.
+
+| Native FIFO wait | FPS | Mean ms | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Off | 25.16 | 39.74 | 52.84 | 61.60 | 96.31 |
+| On | 26.38 | 37.91 | 52.91 | 59.15 | 256.37 |
+| On | 27.27 | 36.67 | 51.92 | 60.67 | 96.26 |
+| Off | 22.97 | 43.54 | 58.45 | 66.25 | 88.36 |
+
+The two-second process observer saw only the owned Haze throughout the first
+pair; its strict coverage check passed. Another agent's game appeared near the
+end of the third window and remained through the fourth. The first pair was
+selected by process coverage, not by its FPS results. That pair's approximately
+4.8% increase is encouraging, but one comparison does not establish a repeatable
+gain. Its p95 barely changed and its worst frame was longer. Scene evolution
+and concurrent activity also prevent interpreting the full table as proof of
+improved frame pacing. A reversed-order run is needed before promotion.
+
+Artifacts: `local/native-fifo-{run,windows}.json`,
+`local/native-fifo-presents.csv`, `local/native-fifo-processes.jsonl`,
+`local/native-fifo-contended-report.json`, and the explicitly selected
+`local/native-fifo-first-pair-{windows,report}.json`.
+
+## Reversed-order repeat
+
+Run `20261012-181957-930` used the same binary/settings with a fresh private
+checkpoint copy and order on/off/off/on. Captures 009581 and 014255 confirmed
+the carrier before and after measurement; the game closed normally with exit
+zero. Producer TID 34072's mode events validated all four 45-second windows.
+The strict process-observation coverage check passed for every block: only the
+owned Haze was observed, with maximum gaps 2.13..2.15 seconds. Other applications
+and processes living entirely between observations are still not excluded.
+
+| Native FIFO wait, reversed | FPS | Mean ms | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| On | 22.89 | 43.68 | 62.30 | 69.83 | 105.54 |
+| Off | 21.36 | 46.82 | 65.19 | 91.26 | 155.83 |
+| Off | 20.21 | 49.49 | 68.47 | 77.65 | 93.12 |
+| On | 22.92 | 43.63 | 61.42 | 70.11 | 91.44 |
+
+Both enabled windows beat both disabled windows for average FPS and p95 frame
+time in this repeat. Averaging the two mean frame times per mode gives 22.91
+versus 20.77 FPS, about 10.3% higher throughput. Averaged per-block p95 values
+are 61.86 versus 66.83 ms; these are not pooled distribution percentiles.
+Together with the first pair, this is stronger evidence for a useful native
+wakeup path than the earlier shader-cache experiment. It is not a universal
+10.3% speedup claim: the animated scene evolves, absolute performance varies
+between launches, and this covers one checkpoint. Stable 30 FPS and consistent
+frame pacing remain unresolved. Keep the change opt-in pending broader scenes
+and longer correctness runs; do not change real command-consumption ownership.
+
+Artifacts: `local/native-fifo-reverse-{run,windows,report}.json`, its presents
+CSV, process-observation JSONL, and the run's native event log/captures.
