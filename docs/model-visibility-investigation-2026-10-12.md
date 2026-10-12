@@ -179,6 +179,53 @@ and gated CSV logging perturb timing; these capture intervals are not valid
 performance measurements. No renderer defaults or model-visibility behavior
 were changed by this investigation.
 
+## Scoped source findings
+
+The SDK source below is from the investigation's preserved `9058dc4` base.
+These checks narrow hypotheses; none establishes the reported failure.
+
+- **Occlusion reports:** `libs/video/cellGcmSys.c:2054` handles GET_REPORT
+  by storing `65535` for type 1 and zero for other report types. The scalar
+  `cellGcmGetReport` at line 2999 reads that stored value. The actual report
+  capacity is 65,536 slots, so observed indices above 255 are valid despite
+  an older comment describing a smaller array. In the local lift, the
+  imported scalar stub `00C2790C` has seven direct call sites: six in
+  `00733F30` read non-type-1 reports; the remaining call in `0073B2B8` reads
+  type 1. The latter has one direct caller, with return address `00663D84`.
+  That caller divides the sample count by a projected rectangle's area and
+  uses the result to scale a subsequent value. This suggests an area-based
+  opacity calculation, rather than per-model submission culling. The function
+  has not been identified by name, and indirect or guest-memory consumers
+  are not ruled out. No report behavior was changed.
+- **Display selection:** `libs/video/rsx_live_draw.c:3530` associates a
+  display buffer with its resolved render surface. Presentation first tries
+  an exact registered surface, then that resolve association, then a logged
+  current-surface fallback. All five investigation runs' `boot.stderr.log`
+  files contain no scanout-fallback or no-color-surface present-skip messages.
+  This does not prove every selected surface is correct.
+- **GPU upload lifetime:** `ld_flush` in `rsx_live_draw.c:1922` submits the
+  command list, signals a fence and waits for completion before resetting
+  the allocator. The vertex/index capacity branch at line 7373 calls this
+  before rewinding transient ring cursors. There is no demonstrated overwrite
+  of an in-flight vertex upload in this path. All five stderr logs also lack
+  the renderer's `[d3d-fail]` messages; only the first run enabled D3D debug.
+- **SPU terminology:** `SPU_DEPTH_RING_FILE` and `spu_depth_guard` in
+  `runtime/spu/spu_drain.c:343` concern host call recursion and diagnostic PC
+  history, not graphics depth or occlusion history. None of the five stderr
+  logs contains the `[spu-depth]` recursion-limit halt message. These controls
+  are not a graphics-depth comparison.
+
+Setting CPU work flags to zero in the earlier comparison disables the selected
+optimization bits; it still uses the hoisted vertex-fetch plan and compact
+payload machinery. It does not validate every alternative vertex decoder.
+
+Native screenshots also add a GPU readback/flush, and gated draw CSV logging
+adds CPU work. These can alter producer/consumer timing even though normal
+presentation already fences the GPU. Stable instrumented captures therefore
+cannot rule out a timing-sensitive guest geometry or command-buffer problem.
+The missing-model sequence should first be confirmed with logging and native
+readbacks disabled, then compared with a narrowly gated trace of that failure.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
