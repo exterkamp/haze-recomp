@@ -1,6 +1,7 @@
 """Measure renderer/queue variants in an ordinary, nonprofiling native build.
 
-Record timed blocks while a visually verified gameplay scene stays still.
+Record timed blocks in a visually verified scene with a documented input trajectory.
+The caller supplies input; --scenario records it and does not drive or verify it.
 The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set before
 launch. Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
@@ -20,6 +21,8 @@ The fifo_recycle_wait variant uses GCM_FIFO_WAIT_CONTROL and requires mode
 events for each explicitly selected producer host TID.
 The spu_float_native variant uses SPU_FLOAT_NATIVE_FILE and process-wide
 mode events; its hardware arithmetic must be built and supported by the CPU/OS.
+The gpu_vertex_pull variant uses RSX_GPU_VERTEX_PULL_FILE and process-wide
+renderer mode events for raw geometry decoding in the vertex shader.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -106,7 +109,7 @@ def record(args):
     result = dict(pid=args.pid, exe=str(args.exe.resolve()),
                   qpc_frequency=frequency.value, warmup_s=args.warmup,
                   measure_s=args.seconds, mode_column=args.mode_column,
-                  observed_pids=args.observe_pid,
+                  observed_pids=args.observe_pid, scenario=args.scenario,
                   blocks=[], complete=False, note=__doc__)
     observers = []
 
@@ -163,14 +166,15 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native'):
+    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native', 'gpu_vertex_pull'):
         if not args.queue_mode_log:
             raise ValueError('Native copy mode requires its process-wide mode-event log')
         worker_modes = {'process': []}
         for line in args.queue_mode_log.read_text(errors='replace').splitlines():
             name = {'spu_triplet_copy':'haze-spu-triplet-mode',
                     'native_cursor':'haze-native-cursor-mode',
-                    'spu_float_native':'spu-float-native-mode'}[mode_column]
+                    'spu_float_native':'spu-float-native-mode',
+                    'gpu_vertex_pull':'gpu-vertex-pull-mode'}[mode_column]
             match = re.fullmatch(r'\[' + name + r'\] enabled=([01]) qpc=(\d+)', line)
             if match: worker_modes['process'].append((int(match[2]), int(match[1])))
         worker_modes['process'].sort()
@@ -226,7 +230,8 @@ def report(args):
                           p95=percentile(intervals, .95), p99=percentile(intervals, .99), max=max(intervals)),
             frames_over_33_333_ms=sum(value > 1000 / 30 for value in intervals),
             frames_over_50_ms=sum(value > 50 for value in intervals)))
-    result = dict(source=str(args.csv), windows=str(args.windows), blocks=summaries, note=__doc__)
+    result = dict(source=str(args.csv), windows=str(args.windows), blocks=summaries,
+                  scenario=windows.get('scenario', 'stationary, no injected input'), note=__doc__)
     if getattr(args, 'process_log', None):
         result['process_observation'] = verify_process_observation(
             args.process_log, windows, getattr(args, 'max_process_gap', 4))
@@ -244,11 +249,13 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','spu_float_native'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','spu_float_native','gpu_vertex_pull'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
     runner.add_argument('--output', type=Path, required=True)
+    runner.add_argument('--scenario', default='stationary, no injected input',
+                        help='Describe the externally driven scene/input trajectory and its limitations')
     reader = actions.add_parser('report')
     reader.add_argument('csv', type=Path)
     reader.add_argument('windows', type=Path)

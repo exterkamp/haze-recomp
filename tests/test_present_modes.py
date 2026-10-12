@@ -137,6 +137,15 @@ class PresentWindows(unittest.TestCase):
                 float_good+'[spu-float-native-mode] enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
 
+            windows['mode_column'] = 'gpu_vertex_pull'
+            args.windows.write_text(json.dumps(windows))
+            pull_good=float_good.replace('spu-float-native-mode','gpu-vertex-pull-mode')
+            run(pull_good)
+            for invalid in ['', float_good, pull_good.replace('qpc=80','qpc=101'),
+                pull_good.replace('enabled=1','enabled=0'),
+                pull_good+'[gpu-vertex-pull-mode] enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
             root = Path(folder)

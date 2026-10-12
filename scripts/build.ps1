@@ -309,6 +309,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler test compilation failed.' }
     & $fpTest
     if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler regression failed.' }
+    $vertexPullTest = Join-Path $root 'local/test_vertex_pull.exe'
+    & $clang /nologo /EHsc /W0 /O2 /Gy /clang:-msse4.1 "/I$sdk/include" "/Fe$vertexPullTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_vertex_pull.cpp" "$sdk/libs/video/rsx_vertex_compact.c" "$sdk/libs/video/rsx_dispatch.c" /link d3d11.lib d3dcompiler.lib
+    if ($LASTEXITCODE -ne 0) { throw 'GPU vertex decoder oracle compilation failed.' }
+    & $vertexPullTest
+    if ($LASTEXITCODE -ne 0) { throw 'GPU vertex decoder WARP oracle failed.' }
     $predicateTest = Join-Path $root 'local/test_fp_predication.exe'
     & $clang /nologo /EHsc /W0 /O1 "/I$sdk/include" "/Fe$predicateTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_predication.cpp" "$sdk/libs/video/rsx_fp_decompiler.c" /link d3d11.lib d3dcompiler.lib
     if ($LASTEXITCODE -ne 0) { throw 'Fragment predication test compilation failed.' }
