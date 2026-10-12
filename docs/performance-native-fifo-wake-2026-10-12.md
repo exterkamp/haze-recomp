@@ -142,3 +142,43 @@ and longer correctness runs; do not change real command-consumption ownership.
 
 Artifacts: `local/native-fifo-reverse-{run,windows,report}.json`, its presents
 CSV, process-observation JSONL, and the run's native event log/captures.
+
+## Movement and squad validation
+
+Muted ordinary run `20261012-182705-707` used the same candidate and settings,
+with native FIFO wakeups enabled throughout. A fresh private checkpoint/input
+file isolated state from other agents. Bounded input walked off the initial
+platform, around the vehicle and into the squad. Capture 016888 shows the
+completed gather objective and close conversation camera; 019975 shows the
+changed camera/squad afterward. The game closed normally with exit zero.
+
+Two 30-second stationary windows after the objective capture, each following
+five seconds of warmup, measured the continuing conversation/post-conversation
+sequence without sampling, captures, input or builds inside either window.
+Native producer TID 59352's events and consecutive present coverage passed.
+Another agent's visibility candidate overlapped both windows; the strict
+process-isolation check rejected them and the separate report is explicitly
+contended. This is functional validation, not an optimization A/B comparison.
+
+| Native FIFO on, contended | FPS | p95 ms | p99 ms | Max ms |
+| --- | ---: | ---: | ---: | ---: |
+| Conversation/progression 1 | 26.92 | 57.45 | 65.09 | 75.42 |
+| Conversation/progression 2 | 30.41 | 48.14 | 56.56 | 75.01 |
+
+The sustained 1–2 FPS collapse did not recur in this traversal. That does not
+prove the intermittent bug fixed, validate the next mission, or establish
+consistent pacing. These windows begin later than the objective capture, so
+they do not measure every frame of the approach or conversation entry.
+
+Artifacts: `local/native-fifo-playthrough-{run,windows}.json`, its presents CSV,
+process-observation JSONL and `native-fifo-playthrough-contended-report.json`.
+
+Before movement, a separate 12-second targeted stack sample selected only main
+TID 59352 and renderer TID 35580, depth 20 every third round at a randomized
+seven-ms cadence. Its 2,744 suspensions totaled 853.40 ms, max 4.08 ms: less
+intrusive than the earlier all-thread unwind, but still a diagnostic rather
+than an FPS measurement. Main CPU was 7,453.125 ms and renderer 6,859.375 ms.
+Other threads were deliberately untracked; whole-process CPU was 48,203.125 ms.
+The stacks confirm real WaitOnAddress FIFO waiting, work-completion polling,
+renderer vertex conversion, texture mutation checks and shader hashing.
+Artifact: `local/native-fifo-active-stacks.json` (UTF-8 with BOM).
