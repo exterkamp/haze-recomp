@@ -115,6 +115,16 @@ if ($Test) {
         if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy full-state oracle failed.' }
         & $python "$root/tests/test_spu_triplet_patch.py"
         if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy patch guards failed.' }
+        $cursorOracle = Join-Path $root 'local/cursor_oracle.c'
+        & $python "$root/scripts/prepare_cursor_oracle.py" "$assets/generated/spu/spu_0039_at_00F1C100/spu_recomp.c" $cursorOracle
+        if ($LASTEXITCODE -ne 0) { throw 'Native cursor oracle extraction failed.' }
+        $cursorTest = Join-Path $root 'local/test_native_cursor.exe'
+        & $clang /nologo /W0 /O2 @fiFlags "/I$sdk/runtime/spu" "/I$root/port" "/Fe$cursorTest" "/Fo$root/local/" "$root/tests/test_native_cursor.c" $cursorOracle
+        if ($LASTEXITCODE -ne 0) { throw 'Native cursor oracle compilation failed.' }
+        & $cursorTest
+        if ($LASTEXITCODE -ne 0) { throw 'Native cursor boundary oracle failed.' }
+        & $python "$root/tests/test_native_cursor_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Native cursor patch guard tests failed.' }
     }
     $abiStorageTest = Join-Path $root 'local/test_abi_storage.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$abiStorageTest" "/Fo$root/local/test_abi_storage.obj" "$sdk/runtime/spu/tests/test_abi_storage.c"
