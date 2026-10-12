@@ -82,12 +82,45 @@ raw comparison six to GEQUAL, not LEQUAL. The decoder and independent expected
 mapping have been corrected; these timings belong to the initial prototype and
 must not be presented as final comparison-sampler performance.
 
-The next native check will test the corrected mapping and a separately observed
-missing fragment depth-export feature. Existing Haze shader captures contain
-control `0300844E` and compute a maximum of neighboring depth samples into
-fp32 r1.z, but the decompiler did not emit SV_DEPTH. This is another observed
-missing contract, not yet proof of the visible artifact's cause. Automated runs
-remain muted and use isolated test saves. Soldiers still need close-up checks.
+The corrected mapping was subsequently exercised in muted normal carrier run
+`20261012-022712-069`, separately from the fragment depth-export feature.
+Captures 5051/6586 compare shadow sampling off/on at the nearby barrel wall;
+7042 adds depth export and includes a fully opaque soldier very close to the
+camera. Captures 7836/8302 compare depth export on/off after camera tilt, with
+the corrected shadow sampler enabled. Rectangular shadow artifacts persist.
+This is evidence against these omissions alone explaining the visible problem,
+not evidence that the missing hardware features should be discarded.
+
+That run timed out without flushing the present ring. Its CPU block records
+are excluded from FPS/frame-pacing conclusions; the shadow recording is also
+incomplete. Both experiments remain off by default pending further rendering
+validation. Automated tests remain muted and use isolated saves. One opaque
+close-up NPC does not establish that every reported soldier case is repaired.
+
+## Corrected sampler performance comparison
+
+Muted normal carrier repeat `20261012-024229-793` exited normally with code
+zero and preserved 8,467 presents. After the separate depth-export blocks, four
+alternating corrected-sampler blocks ran at the same stationary tilted-wall
+view. Depth export remained enabled and CPU work remained 259 in every measured
+row; clipping followed guest state. Each block has five warmup seconds and
+twelve measured seconds, with no captures, builds, profilers or other Haze
+processes during measurement.
+
+| Corrected shadow comparison | Guest frames | Intervals | FPS | p95 ms | Max ms | Mean process cores |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Off | 6597–6950 | 354 | 29.623 | 34.071 | 36.081 | 4.659 |
+| On | 7100–7454 | 355 | 29.623 | 34.059 | 37.980 | 4.763 |
+| Off | 7604–7957 | 354 | 29.604 | 34.061 | 36.396 | 4.707 |
+| On | 8107–8461 | 355 | 29.619 | 34.077 | 34.265 | 4.726 |
+
+All 1,418 complete, consecutive intervals respect the 30 FPS ceiling and none
+exceeds 50 ms. Mode settlement is checked at both interval endpoints. Local
+records are `shadow-corrected-repeat-blocks.json` and
+`shadow-corrected-repeat-report.json`. These timings supersede the incorrect
+prototype as evidence for the current sampler path. They show no material
+pacing regression at this capped view, not its uncapped cost or a busy-deck
+speedup. Visual shadow correctness remains unresolved.
 
 ## Hardware and API references
 

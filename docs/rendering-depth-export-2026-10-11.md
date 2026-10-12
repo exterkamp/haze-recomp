@@ -47,6 +47,56 @@ FOG, so varying-register linkage is exercised correctly.
 Existing 512 shadow comparison GPU cases, native D3D12 sampler decoding,
 near/far clipping, negative-W rejection and decal bias tests remain green.
 
+## Native visual checks
+
+Muted normal carrier run `20261012-022712-069` confirms that the game actually
+executes these programs: trace entries report raw control `0300844E`, the
+624-byte pass at color surface `01120000` / zeta `00780000`, and the 272-byte
+pass at color surface `01360000` / zeta `01400000`. The switch changes effective
+control from `03008440` to `0300844E` and selects a separate pipeline.
+
+Capture 7042 shows a soldier walking very close to the camera fully opaque,
+with the nearby red barrel also opaque. This is a successful case, not a
+controlled clipping comparison for that soldier or proof that all soldier
+visibility defects are fixed. User reports identify soldiers and barrels as
+the most affected objects, so both remain required close-up test subjects.
+
+Captures 7836 (corrected shadow comparison and depth export enabled) and 8302
+(same tilted view, depth export disabled) still show rectangular floor/shadow
+artifacts. These shader omissions alone therefore do not resolve the reported
+camera-dependent shadows. Both experiments remain disabled by default.
+
+This run reached its diagnostic timeout before a normal close and did not
+flush its present ring. Its recorded CPU windows cannot establish FPS or
+frame pacing; neither the complete depth block recording nor the incomplete
+shadow recording is accepted as a performance result. A separately identified
+repeat run is required for timings.
+
+## Completed normal-build performance comparison
+
+Repeat run `20261012-024229-793` exited normally with code zero and flushed
+8,467 successful presents. Capture 2192 verifies carrier gameplay; capture
+3642 verifies the stationary close-barrel, tilted-wall view before measurement.
+No captures, builds, profilers or other Haze instances ran during the measured
+blocks. Audio was muted, the ceiling was 30 FPS, CPU work stayed at 259, depth
+clipping followed guest state, and corrected shadow comparison stayed enabled.
+Each alternating block has five warmup seconds and twelve measured seconds.
+
+| Depth export | Guest frames | Intervals | FPS | p95 ms | Max ms | Mean process cores |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Off | 4577–4931 | 355 | 29.640 | 34.069 | 34.721 | 4.543 |
+| On | 5081–5434 | 354 | 29.598 | 34.070 | 41.002 | 4.418 |
+| Off | 5584–5937 | 354 | 29.612 | 34.089 | 36.133 | 4.504 |
+| On | 6087–6441 | 355 | 29.596 | 34.130 | 36.223 | 4.634 |
+
+All 1,418 complete intervals respect the ceiling and none exceeds 50 ms.
+The reporter checks both interval endpoints for the selected mode and requires
+consecutive present IDs. A separate check confirms the other feature and CPU
+work remain constant in every measured row. Raw records and reports are local
+`depth-export-repeat-blocks.json` / `depth-export-repeat-report.json`.
+This capped view shows no material pacing regression; it cannot establish
+uncapped cost, a busy-deck speedup, or a shadow correctness fix.
+
 ## References
 
 - [RSX shader control constants](https://github.com/RPCS3/rpcs3/blob/master/rpcs3/Emu/RSX/gcm_enums.h): depth export mask `0x0E` (current raw header checked directly).
