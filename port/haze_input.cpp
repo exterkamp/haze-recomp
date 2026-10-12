@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cctype>
 #include <atomic>
+#include <mutex>
 
 namespace {
 std::atomic<HWND> window;
@@ -22,6 +23,14 @@ volatile LONG captured, wheel;
 HazeMouseMotion mouse_motion;
 POINT old_cursor;
 bool enabled = true;
+bool controller_enabled=true;
+bool gamepad_initialized=false;
+std::mutex settings_mutex;
+HazeGamepadState controller_state;
+std::atomic<HazeInputFamily> last_family{HazeInputFamily::Keyboard};
+char config_path[MAX_PATH]{};
+ULONGLONG next_input_update=0, next_config_check=0;
+FILETIME config_time{};
 double sensitivity = 0.10;
 bool invert_y;
 HazeStartupSkip startup_skip;
@@ -74,6 +83,7 @@ void record_key(int vk, bool held, ULONGLONG) {
         next=held ? previous | KEY_HELD | ((previous & KEY_HELD) ? 0u : KEY_PENDING)
                   : previous & ~unsigned(KEY_HELD);
     } while (!message_keys[vk].compare_exchange_weak(previous,next));
+    if (held && !(previous & KEY_HELD) && enabled) last_family=HazeInputFamily::Keyboard;
 }
 void update_title() {
     SetWindowTextA(window, captured ? "Haze | Mouse captured | Esc: Pause | F1: Release mouse"
@@ -118,14 +128,20 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
         record_key((int)wp,true,GetTickCount64());
+        if (!enabled) break;
         if (wp == VK_F1) { if (!(lp & (1ll<<30))) capture(!captured); return 0; }
         if (wp == VK_ESCAPE) { capture(false); return 0; } // Pause, rather than SDK's quit.
-        for (const auto& b : bindings)
-            if (b.button==CELL_PAD_CTRL_START && b.vk==(int)wp) capture(false);
+        {
+            std::lock_guard<std::mutex> lock(settings_mutex);
+            for (const auto& b : bindings)
+                if (b.button==CELL_PAD_CTRL_START && b.vk==(int)wp) capture(false);
+        }
         break;
     case WM_KEYUP: case WM_SYSKEYUP:
         record_key((int)wp,false,GetTickCount64()); break;
     case WM_LBUTTONDOWN:
+        if (!enabled) break;
+        last_family=HazeInputFamily::Keyboard;
         if (!captured && GetForegroundWindow() == hwnd) {
             capture_click=true;
             capture(true);
@@ -154,13 +170,14 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (captured && LOWORD(lp) == HTCLIENT) { SetCursor(nullptr); return TRUE; }
         break;
     case WM_MOUSEWHEEL:
-        if (captured) InterlockedExchange(&wheel,1);
+        if (captured) { InterlockedExchange(&wheel,1); last_family=HazeInputFamily::Keyboard; }
         break;
     case WM_INPUT: {
         RAWINPUT input{}; UINT size = sizeof(input);
         if (captured && GetRawInputData((HRAWINPUT)lp,RID_INPUT,&input,&size,sizeof(RAWINPUTHEADER)) == sizeof(input)
             && input.header.dwType == RIM_TYPEMOUSE && !(input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
             mouse_motion.add(input.data.mouse.lLastX,input.data.mouse.lLastY);
+            if (input.data.mouse.lLastX || input.data.mouse.lLastY) last_family=HazeInputFamily::Keyboard;
         }
         // DefWindowProc must see foreground raw input for system cleanup.
         return DefWindowProc(hwnd,msg,wp,lp);
@@ -170,11 +187,11 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 int poll(u32 port, CellPadHostInput* input, void*) {
     if (port) return 0;
+    std::lock_guard<std::mutex> lock(settings_mutex);
     ULONGLONG now = GetTickCount64();
     bool skip_pressed;
-    bool skipping=startup_skip.sample(now,skip_pressed);
+    startup_skip.sample(now,skip_pressed);
     if (skip_pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
-    if (!enabled) return skipping ? 1 : 0;
     HWND foreground=GetForegroundWindow();
     if (!foreground || foreground != window.load()) {
         mouse_motion.clear();
@@ -182,6 +199,12 @@ int poll(u32 port, CellPadHostInput* input, void*) {
         clear_keys();
         return 1; // All controls neutral immediately on focus loss.
     }
+    if (controller_enabled && controller_state.connected) {
+        const u16 startup_buttons=input->buttons;
+        *input=controller_state.input;
+        input->buttons|=startup_buttons;
+    }
+    if (!enabled) return 1;
     // A rebound key may drive several buttons or movement. Consume its pending
     // tap once, then share the same snapshot across all bindings in this report.
     bool sampled[256]={}, states[256]={};
@@ -197,29 +220,23 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     }
     // Escape always pauses and releases mouse capture, even with Start rebound.
     if (key_down(VK_ESCAPE)) input->buttons |= CELL_PAD_CTRL_START;
-    input->lx = (u8)(128 + 127*((int)key_down(movement[3])-(int)key_down(movement[2])));
-    input->ly = (u8)(128 + 127*((int)key_down(movement[1])-(int)key_down(movement[0])));
+    const int horizontal=(int)key_down(movement[3])-(int)key_down(movement[2]);
+    const int vertical=(int)key_down(movement[1])-(int)key_down(movement[0]);
+    if (horizontal) input->lx=(u8)(128+127*horizontal);
+    if (vertical) input->ly=(u8)(128+127*vertical);
     if (captured) {
         if (InterlockedExchange(&wheel,0)) input->buttons |= CELL_PAD_CTRL_CIRCLE;
     }
-    input->l2=(input->buttons & CELL_PAD_CTRL_L2) ? 255 : 0;
-    input->r2=(input->buttons & CELL_PAD_CTRL_R2) ? 255 : 0;
+    if ((input->buttons & CELL_PAD_CTRL_L2) && !input->l2) input->l2=255;
+    if ((input->buttons & CELL_PAD_CTRL_R2) && !input->r2) input->r2=255;
     return 1;
 }
 void playback(u32 player, const char* uri, int started, void*) {
     if (startup_skip.playback(player,uri,started!=0,GetTickCount64()))
         fprintf(stderr,"[startup] Skipping undecoded startup video: %s\n",uri);
 }
-}
-void haze_input_initialize() {
-    const char* mode=getenv("HAZE_INPUT");
-    enabled=!(mode && !_stricmp(mode,"controller"));
-    cellSail_set_host_playback_callback(playback,nullptr);
-    cellPad_set_host_input_callback(poll,nullptr);
-    if (!enabled) return;
-    const char* config=getenv("HAZE_INPUT_CONFIG");
-    char path[MAX_PATH]{};
-    if (config && *config) GetFullPathNameA(config,MAX_PATH,path,nullptr);
+void load_keyboard_config() {
+    const char* path=config_path;
     for (auto& b : bindings) {
         char value[32];
         GetPrivateProfileStringA("Bindings",b.name,b.fallback,value,sizeof(value),path);
@@ -234,14 +251,34 @@ void haze_input_initialize() {
     }
     char value[32];
     GetPrivateProfileStringA("Mouse","Sensitivity","0.10",value,sizeof(value),path);
-    double requested=strtod(value,nullptr);
-    if (std::isfinite(requested) && requested > 0 && requested <= 10) sensitivity=requested;
+    char* end=nullptr;
+    double requested=strtod(value,&end);
+    sensitivity=.10;
+    if (end!=value && !*end && std::isfinite(requested) && requested > 0 && requested <= 10) sensitivity=requested;
+    else fprintf(stderr,"[input] Invalid Mouse.Sensitivity=%s; using 0.10\n",value);
     invert_y=GetPrivateProfileIntA("Mouse","InvertY",0,path)!=0;
-    fprintf(stderr,"[input] WASD keyboard profile enabled; click/F1 captures raw mouse; Escape pauses\n");
+    clear_keys(); mouse_motion.clear();
+}
+}
+void haze_input_initialize() {
+    const char* mode=getenv("HAZE_INPUT");
+    enabled=!(mode && !_stricmp(mode,"controller"));
+    controller_enabled=!(mode && !_stricmp(mode,"keyboard"));
+    cellSail_set_host_playback_callback(playback,nullptr);
+    cellPad_set_host_input_callback(poll,nullptr);
+    const char* config=getenv("HAZE_INPUT_CONFIG");
+    GetFullPathNameA(config && *config ? config : "config/input.ini",MAX_PATH,config_path,nullptr);
+    std::lock_guard<std::mutex> lock(settings_mutex);
+    load_keyboard_config();
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    if (GetFileAttributesExA(config_path,GetFileExInfoStandard,&attributes)) config_time=attributes.ftLastWriteTime;
+    fprintf(stderr,"[input] %s input; config=%s (reloads while running)\n",
+            !enabled ? "controller" : !controller_enabled ? "keyboard/mouse" : "automatic keyboard/mouse + controller",config_path);
 }
 void haze_input_attach(void* hwnd) {
-    if (!enabled || !hwnd) return;
+    if (!hwnd) return;
     window=(HWND)hwnd;
+    if (controller_enabled) gamepad_initialized=haze_gamepad_initialize(config_path);
     RAWINPUTDEVICE device{0x01,0x02,0,window};
     if (!RegisterRawInputDevices(&device,1,sizeof(device))) {
         fprintf(stderr,"[input] Raw mouse registration failed: %lu\n",GetLastError()); return;
@@ -251,9 +288,41 @@ void haze_input_attach(void* hwnd) {
     update_title();
 }
 bool haze_input_take_mouse(double& x, double& y, double& speed, bool& invert) {
+    std::lock_guard<std::mutex> lock(settings_mutex);
     mouse_motion.take(x,y);
     speed=sensitivity; invert=invert_y;
     return enabled && captured && GetForegroundWindow()==window.load();
+}
+void haze_input_update() {
+    const auto now=GetTickCount64();
+    if (now<next_input_update) return;
+    next_input_update=now+8;
+    if (now>=next_config_check) {
+        next_config_check=now+500;
+        WIN32_FILE_ATTRIBUTE_DATA attributes{};
+        if (GetFileAttributesExA(config_path,GetFileExInfoStandard,&attributes) &&
+            CompareFileTime(&config_time,&attributes.ftLastWriteTime)!=0) {
+            std::lock_guard<std::mutex> lock(settings_mutex);
+            load_keyboard_config();
+            if (gamepad_initialized) haze_gamepad_configure(config_path);
+            config_time=attributes.ftLastWriteTime;
+            fprintf(stderr,"[input] Reloaded %s\n",config_path);
+        }
+    }
+    if (gamepad_initialized) {
+        const auto state=haze_gamepad_update();
+        const bool focused=GetForegroundWindow()==window.load();
+        if (focused && state.connected && (!enabled || last_family!=HazeInputFamily::Keyboard))
+            last_family=state.family;
+        if (focused && state.activity) { last_family=state.family; capture(false); }
+        std::lock_guard<std::mutex> lock(settings_mutex);
+        controller_state=focused ? state : HazeGamepadState{};
+    }
+}
+HazeInputFamily haze_input_family() { return last_family.load(); }
+void haze_input_shutdown() {
+    capture(false);
+    haze_gamepad_shutdown(); gamepad_initialized=false;
 }
 #elif defined(__EMSCRIPTEN__)
 #include "cellPad.h"
@@ -303,4 +372,10 @@ bool haze_input_take_mouse(double& x,double& y,double& speed,bool& invert) {
 void haze_input_initialize() {}
 void haze_input_attach(void*) {}
 bool haze_input_take_mouse(double&,double&,double&,bool&) { return false; }
+#endif
+
+#ifndef _WIN32
+void haze_input_update() {}
+void haze_input_shutdown() {}
+HazeInputFamily haze_input_family() { return HazeInputFamily::Keyboard; }
 #endif

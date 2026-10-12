@@ -290,7 +290,7 @@ $env:PS3_DEV_FLASH = 'C:\path\to\dev_flash'
 
 # Interactive development build (experimental):
 .\scripts\play.ps1
-# Or use an XInput controller:
+# Or restrict input to SDL-supported controllers:
 .\scripts\play.ps1 -InputMode Controller
 
 # Synthetic SDK regression checks (no game execution):
@@ -317,20 +317,25 @@ Missing settings or an absent default INI use those same defaults. Both launcher
 the file for that run. See [graphics settings](docs/graphics-settings.md) for
 costs, examples, validation and remaining game-side options.
 
-PC input is configured in `config/input.ini`. WASD moves; arrows navigate;
+PC input is configured in `config/input.ini`, which reloads while running.
+The launcher defaults to automatic keyboard/mouse and SDL gamepad input.
+WASD moves; arrows navigate;
 Space confirms/skips; Enter starts; Escape pauses and releases the mouse.
 Click inside the game or press F1 to capture the raw mouse; F1 also releases it.
 The initial capture click does not fire. Short keyboard and mouse-button taps are buffered for
-120 ms so they survive slow frames. All sixteen controller buttons have configurable
+one host report so they survive slow frames without stretching releases. All sixteen controller buttons have configurable
 keyboard/mouse bindings. Mouse buttons affect the game only while captured,
-and focus loss releases capture and neutralizes keyboard/mouse input.
+and focus loss releases capture and neutralizes all input.
 Raw device counts rotate the player yaw/pitch
-before the game builds its aim and camera matrices. The right stick stays
-neutral, so mouse movement has no stick deadzone, acceleration, smoothing or
+before the game builds its aim and camera matrices. Mouse motion does not drive
+the right stick, so it has no stick deadzone, acceleration, smoothing or
 turn-speed cap. Sensitivity is degrees per count (default `0.10`), and `InvertY`
 reverses vertical motion. Camera pitch still respects the game's limits.
 The game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
-configuration file. Closing the game window now ends its native process.
+configuration file. SDL supports hotplug and custom device mappings; controller
+buttons, axes, deadzones, trigger threshold and look inversion also live in the
+INI. See [controls implementation and verification](docs/controls.md).
+Closing the game window now ends its native process.
 
 From an isolated worktree, share the existing SDK, lifts and game assets while
 keeping build products and run logs in the worktree:
@@ -583,7 +588,7 @@ turn the camera and move the player along the deck. These tests establish
 opening-scene input and persistence; they do not establish mission completion.
 
 The SDK now exposes a port-owned pad-input callback. Haze uses it for its
-keyboard/raw-mouse mapping, while controller mode retains XInput. Regressions
+keyboard/raw-mouse mapping and the SDL3 controller wrapper. Regressions
 exercise actual guest pad packets, pressure values, neutral release, mouse
 delta consumption and focus/capture gating. A native window-close probe exits
 with code zero. Interactive mouse feel still needs validation.

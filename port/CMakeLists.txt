@@ -307,6 +307,18 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime
 )
 
+if(WIN32)
+    include(controller-dependency.cmake)
+    target_sources(${PROJECT_NAME} PRIVATE haze_gamepad.cpp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
+    if(TARGET SDL3::SDL3-shared)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL3::SDL3-shared> $<TARGET_FILE_DIR:${PROJECT_NAME}>)
+        install(FILES $<TARGET_FILE:SDL3::SDL3-shared> DESTINATION bin)
+    endif()
+endif()
+
 # The runtime is C++, and on Apple also Objective-C. Letting CMake infer the
 # link language from the generated C would leave the C++ standard library out.
 set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)

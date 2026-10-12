@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('KeyboardMouse','Controller')][string]$InputMode = 'KeyboardMouse',
+    [ValidateSet('Auto','KeyboardMouse','Controller')][string]$InputMode = 'Auto',
     [string]$ExecutablePath,
     [string]$GraphicsConfig,
     [ValidatePattern('^[1-9][0-9]{0,3}x[1-9][0-9]{0,3}$')]
@@ -27,7 +27,7 @@ $settings = @{
     RSX_LIVE_DRAW = '1'
     RSX_RENDER_RESOLUTION = $(if ($RenderResolution) { $RenderResolution } else { $env:RSX_RENDER_RESOLUTION })
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
-    HAZE_INPUT = $(if ($InputMode -eq 'Controller') { 'controller' } else { 'keyboard' })
+    HAZE_INPUT = $(if ($InputMode -eq 'Controller') { 'controller' } elseif ($InputMode -eq 'KeyboardMouse') { 'keyboard' } else { 'auto' })
     HAZE_INPUT_CONFIG = $(if ($env:HAZE_INPUT_CONFIG) { $env:HAZE_INPUT_CONFIG } else { Join-Path $root 'config\input.ini' })
     HAZE_GRAPHICS_CONFIG = $(if ($GraphicsConfig) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($GraphicsConfig) } elseif ($env:HAZE_GRAPHICS_CONFIG) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:HAZE_GRAPHICS_CONFIG) } elseif (Test-Path -LiteralPath (Join-Path $root 'config\graphics.ini')) { Join-Path $root 'config\graphics.ini' } else { $null })
 }

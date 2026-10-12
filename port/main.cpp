@@ -372,6 +372,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             drain_and_present();
 
             if (pump_messages() != 0) {
+                haze_input_shutdown();
 #ifdef _WIN32
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
 #endif
@@ -379,6 +380,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 // guest workers, rather than leaving an invisible game running.
                 exit(0);
             }
+            haze_input_update();
             /* Present on a guest flip. A present on a fixed clock can catch the
              * drain mid-frame and flash a partial one. Before the first flip
              * present freely, so the window is not blank during boot. */

@@ -1,6 +1,7 @@
 param(
     [string]$SharedRoot,
     [string]$SdkRoot,
+    [string]$SDL3Root,
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
@@ -34,7 +35,7 @@ $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\c
 $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 $clang = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
 $python = Join-Path $assets '.venv\Scripts\python.exe'
-$sdk = if ($SdkRoot) { (Resolve-Path -LiteralPath $SdkRoot).Path } else { Join-Path $assets 'external\ps3recomp' }
+$sdk = if ($SdkRoot) { (Resolve-Path -LiteralPath $SdkRoot).Path } elseif (Test-Path -LiteralPath "$root/external/ps3recomp/CMakeLists.txt") { Join-Path $root 'external\ps3recomp' } else { Join-Path $assets 'external\ps3recomp' }
 if ($RuntimeOnly) {
     $source = $sdk
     $build = Join-Path $root 'build\runtime'
@@ -47,7 +48,9 @@ if ($RuntimeOnly) {
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
 $exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory) } else { $build }
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
+$controllerArgs = @()
+if ($SDL3Root) { $controllerArgs += "-DFETCHCONTENT_SOURCE_DIR_SDL3=$((Resolve-Path -LiteralPath $SDL3Root).Path)" }
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)" @controllerArgs
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 if (-not $RuntimeOnly) {
     & $python "$root/tests/check_profile_configuration.py" $build --enabled $([int][bool]$ProfileRenderer)

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <cassert>
 #include <string>
+#include <fstream>
 static bool focused=true;
 static bool keys[256];
 static ULONGLONG ticks=100;
@@ -36,6 +37,11 @@ static LRESULT test_window_proc(WNDPROC,HWND,UINT msg,WPARAM,LPARAM lp) {
 #include "../port/haze_input.cpp"
 extern "C" void cellPad_set_host_input_callback(CellPadHostInputCallback,void*) {}
 extern "C" void cellSail_set_host_playback_callback(CellSailHostPlaybackCallback,void*) {}
+static HazeGamepadState fake_pad;
+bool haze_gamepad_initialize(const char*) { return true; }
+void haze_gamepad_configure(const char*) {}
+HazeGamepadState haze_gamepad_update() { return fake_pad; }
+void haze_gamepad_shutdown() {}
 static CellPadHostInput sample() {
     CellPadHostInput input{0,128,128,128,128,0,0};
     assert(poll(0,&input,nullptr)==1);
@@ -162,11 +168,45 @@ int main() {
     assert(!sample().buttons);
     enabled=false;
     CellPadHostInput controller{0,128,128,128,128,0,0};
-    assert(poll(0,&controller,nullptr)==0); // XInput owns normal controller mode.
+    assert(poll(0,&controller,nullptr)==1 && !controller.buttons);
     startup_skip.playback(123,uri,true,ticks); ticks+=400;
     assert(poll(0,&controller,nullptr)==1 && (controller.buttons&CELL_PAD_CTRL_CROSS));
     startup_skip.playback(123,uri,false,ticks);
-    assert(poll(0,&controller,nullptr)==0);
+    controller.buttons=0;
+    assert(poll(0,&controller,nullptr)==1 && !controller.buttons);
+    // Controller input and keyboard input coexist; triggers retain pressure.
+    enabled=true; gamepad_initialized=true; controller_enabled=true;
+    fake_pad.connected=true; fake_pad.activity=true;
+    fake_pad.family=HazeInputFamily::PlayStation;
+    fake_pad.input={CELL_PAD_CTRL_L2,200,128,128,40,90,0};
+    focused=true; next_input_update=next_config_check=0;
+    haze_input_update();
+    p=sample();
+    assert(p.lx==200 && p.ry==40 && p.l2==90);
+    assert(haze_input_family()==HazeInputFamily::PlayStation);
+    fake_pad.activity=false;
+    window_proc(window,WM_KEYDOWN,VK_SPACE,0);
+    haze_input_update();
+    assert(haze_input_family()==HazeInputFamily::Keyboard);
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_CROSS) && p.lx==200 && p.l2==90);
+    window_proc(window,WM_KEYUP,VK_SPACE,0);
+    focused=false; p=sample();
+    assert(!p.buttons && p.lx==128 && p.ry==128 && !p.l2);
+    focused=true; fake_pad={}; ticks+=10; haze_input_update();
+    assert(!sample().buttons && sample().lx==128);
+    // Saving a real INI changes the running mapper without restarting it.
+    GetFullPathNameA("local/test-input-reload.ini",MAX_PATH,config_path,nullptr);
+    {
+        std::ofstream file(config_path);
+        file<<"[Bindings]\nCross=J\nForward=I\n[Mouse]\nSensitivity=0.25\nInvertY=1\n";
+    }
+    config_time={}; next_config_check=0; ticks+=10;
+    haze_input_update();
+    keys['J']=keys['I']=true;
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_CROSS) && p.ly==1);
+    keys['J']=keys['I']=false;
+    assert(sensitivity==.25 && invert_y);
+    DeleteFileA(config_path);
     HazeStartupSkip isolated; bool pressed=true;
     assert(!HazeStartupSkip::known_video(nullptr));
     assert(!HazeStartupSkip::known_video("frd.pam"));
