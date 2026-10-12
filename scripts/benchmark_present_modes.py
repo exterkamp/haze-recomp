@@ -190,7 +190,7 @@ def report(args):
                 worker_modes[int(match[1])].append((int(match[3]), mode))
         for events in worker_modes.values():
             events.sort()
-    elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear', 'vertex_cache', 'geometry_cache'):
+    elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear', 'vertex_cache', 'geometry_cache', 'vertex_workers'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
         if not rows or rows[0]['qpc'] > block['start_qpc'] or rows[-1]['qpc'] < block['end_qpc']:
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
@@ -260,10 +260,11 @@ if __name__ == '__main__':
     if args.action == 'record':
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 8191 for f in args.flags):
             parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..8191')
-        allowed_modes = ((0,1,2) if args.mode_column == 'window_position' else
+        allowed_modes = ((0,1,2,3) if args.mode_column == 'vertex_workers' else
+                         (0,1,2) if args.mode_column == 'window_position' else
                          (0,8) if args.mode_column == 'usleep' else (0,1))
         if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):
-            parser.error('Use shadow/depth/queue flags 0/1, window-position flags 0/1/2, or usleep flags 0/8')
+            parser.error('Use shadow/depth/queue flags 0/1, vertex-worker flags 0..3, window-position flags 0/1/2, or usleep flags 0/8')
         record(args)
     else:
         if not 0 < args.max_process_gap <= 10:
