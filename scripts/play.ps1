@@ -1,9 +1,10 @@
 param(
-    [ValidateSet('KeyboardMouse','Controller')][string]$InputMode = 'KeyboardMouse'
+    [ValidateSet('KeyboardMouse','Controller')][string]$InputMode = 'KeyboardMouse',
+    [string]$ExecutablePath
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$exe = Join-Path $root 'build\haze\HazeRecomp.exe'
+$exe = if ($ExecutablePath) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExecutablePath) } else { Join-Path $root 'build\haze\HazeRecomp.exe' }
 $elf = Join-Path $root 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable first with scripts/build.ps1.' }
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The local decrypted Haze executable is missing.' }
