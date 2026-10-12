@@ -1,4 +1,4 @@
-# Nearby model visibility investigation (in progress)
+# Nearby model visibility investigation
 
 The user reports entire soldiers and airships disappearing and reappearing,
 especially up close, including while neither the player nor camera moves.
@@ -7,26 +7,34 @@ and starting the first conversation.
 The requested investigation is on a new branch in the existing worktree:
 `investigate/model-visibility`, based on `9c48009`. Its independent SDK branch
 is `investigate/haze-model-visibility`, based on `9058dc4`. This preserves the
-previous shadow clear correction. No model visibility fix is established yet.
-The first-conversation recording now contains an externally observed
-visible / missing / visible soldier sequence, also reproduced in native
-readbacks. A matching draw trace identifies mesh batches whose submission
-tracks the soldier's visibility. Projected vertex captures now place the
-initially selected 4,596-vertex batch inside the yellow helmet, explaining why
-suppressing it leaves the opaque body visible. Two body-material batches share
-that part's exact vertex-program constant fingerprint within a frame and
-disappear alongside it in the clearest missing intervals. The reason these
-submissions stop is now traced to guest occlusion-result model-list filtering.
-The exact speaker model is removed in eight recorded decisions, matching its
-absence one native frame later. A full PPU fallback replay accepts that model
-in all eight cases. The default job dispatch uses an SPU queue, so this
-disagreement is now reproduced offline by the identified SPU implementation.
-It overflows near-plane depth arithmetic to host infinities and NaNs; a local
-overflow-clamp experiment restores all eight rejected soldier cases. The
-runtime's single-precision helpers do not implement SPU extended-range
-overflow semantics. An isolated extended-range prototype now keeps the
-speaker visible throughout a live capture with normal SPU dispatch and
-occlusion enabled. A permanent arithmetic correction remains to be done.
+previous shadow clear correction. The investigation identifies the cause for
+both reported model types; no permanent runtime fix is committed.
+
+Both disappearance types are caused by the guest occlusion filter receiving
+incorrect results from the emulated SPU arithmetic. The occlusion SPU image39
+(runtime image40) rasterizes clipped model bounds using projected maximum
+depth values. Ordinary host float operations overflow these to infinities
+and NaNs. Real SPU single precision instead uses extended-range finite
+values and saturating overflow. The resulting incorrect rejection removes
+the whole model before renderer submission; this is not render distance.
+
+Native images, matching geometry/draw captures, and model-filter records
+identify speaker `0x4ACE4000` and airship `0x4ACEB6C0`. Complete offline SPU
+replay reproduces all 43 accepted lists in the initial soldier recording and
+all 42 in the later airship recording. Clearing the software occluder depth
+does not prevent the erroneous rejection. The airship's three rejections
+match three missing native frames exactly, followed by immediate returns.
+
+An isolated extended-range arithmetic prototype restores every rejected
+speaker and airship in those recorded inputs without removing any accepted
+model. A live speaker comparison with normal SPU dispatch and occlusion
+enabled retains the model in all 40 decisions and keeps it visible in all
+40 native images through the close-up and pullback. Original-arithmetic
+replay of those same live inputs reproduces nine speaker rejections.
+The airship correction is validated offline, not by an equivalent live
+candidate comparison. The prototype preserves ordinary host rounding and
+is not a complete architectural floating-point implementation. Production
+implementation and broader regression testing remain follow-up work.
 
 ## Initial native evidence
 
@@ -1200,17 +1208,88 @@ remain zero, and `probe_skip_sampling` remains zero. The observer completes
 its 180-second recording (5,401 samples) before the game is closed.
 The preserved baseline executable retains its original SHA256.
 
-## Outstanding evidence
+## Airship model association and matching SPU rejection
+
+Run `20261012-203633-397`, label `visibility-conversation-airship17`, uses
+the unchanged decision-trace candidate with the original arithmetic. It
+records the first conversation with normal job11 mode `2` and global
+occlusion enable `1`, verified before approach. No dispatch-mode or
+occlusion-enable writes are made. Final approach is followed by neutral
+input at QPC `1349786.6549859`; there is no subsequent player/camera input.
+The observer opens the gate at `1349797.4574947` and closes it at
+`1349819.710037`. Forty native frames, 8385 through 8424, and 42 model-filter
+records cover the close-up and pullback.
+
+The airship disappears in native frames 8393, 8398, and 8403, returning in
+the immediately following frame each time. Frame 8403 is particularly clear:
+the two nearby soldiers remain visible while the entire parked airship and
+its attached passenger structure vanish. Local full-size comparisons are
+`visibility-airship17-disappearance-8393.png`, `-8398.png`, and `-8403.png`.
+This reproduces the previously observed independent airship disappearance.
+
+Geometry selected by source count 6,822 and attribute-8 fingerprint
+`12c22404fd6d4912` is now spatially identified. Its three captures, at draw
+frames 8386-8388, each contain 3,109 decoded vertices. Their shader divides
+packed position xyz by w before applying vertex constants 0-3. Projection
+through the captured constants and viewport adjustment places the points on
+the airship's attached passenger structure in the same-numbered native
+images. All 3,109 vertices project inside the viewport in each capture.
+The overlays are `visibility-airship17-geometry-overlay-1.png` through `-3.png`.
+
+Reconstructing world positions with the contemporary recorded view matrix
+places all captured vertices inside model `0x4ACEB6C0`'s bounds. For trace 1,
+the reconstructed range is approximately [-33.39,1.66,-11.08] through
+[-29.99,5.80,-7.69]. The model's recorded full bounds are
+[-56.0732,0.9104,-33.8121] through [-19.6188,8.6763,2.6764], covering the
+whole airship assembly. The projection and bounds checks are saved as
+`local/visibility-conversation-airship17-geometry/airship-projection.json`.
+The small inter-frame differences in reconstructed positions are not used
+to claim exact per-vertex world transforms.
+
+The guest filter removes `0x4ACEB6C0` in consumer frames 8392, 8397, and 8402,
+matching the three missing-airship native frames one frame later. Its
+identified 6,822-source batch is also absent from the matched draw CSV at
+8393, 8398, and 8403 and returns at 8394, 8399, and 8404. There are seven
+recorded worker-list entries for the airship: the initial three reject it,
+and the later four accept it. Do not interpret frames where it is not in
+the worker input list as a rejection.
+
+The unmodified full tiled SPU replay matches every complete accepted list
+in all 42 records. Each of the three airship rejections persists with the
+software occluder depth buffer cleared to zero. Target-specific probes
+show the same overflow as the speaker case: operations involving projected
+FLT_MAX depths produce infinities, including `-256 * FLT_MAX` at raster
+function 0x4518, followed by invalid arithmetic.
+
+The extended-range prototype accepts all three rejected airship cases and
+preserves the four accepted cases. Across all 42 recorded lists, it adds
+only the rejected speaker in ten records and the rejected airship in three
+records, with overlap in two records. No previously accepted identifier is
+removed. Comparisons are `spu-airship-replay-comparison.json`,
+`spu-replay-comparison.json`, and `spu-extended-overflow-comparison.json` in
+`local/visibility-conversation-airship17-decisions`.
+
+This run closes normally with exit code 0 and 10,076 successful presents.
+The draw gate contains 48,640 execute outcomes and no rejection outcomes.
+Native N and N+1 mode checks have no errors; renderer packet/group ledgers
+balance, rejection counters remain zero, and diagnostic sampling stays off.
+Thus both reported disappearance types are traced to the guest's occlusion
+filter using incorrectly emulated SPU single-precision arithmetic, rather
+than distance selection or renderer packet rejection. The local prototype
+is validated live for the speaker and offline against captured airship inputs;
+this does not claim a live airship correction comparison or a complete
+architectural floating-point implementation.
+
+## Implementation follow-up
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
 main checkout's changing performance candidates. The scene phase is now known:
 approaching the soldiers and starting the first conversation. The immediate
-speaker-model rejection, live PPU fallback comparison, deterministic SPU
-replay, and arithmetic-overflow mechanism are now established. Next is a
-consistent correction of SPU extended-range arithmetic, appropriate helper
-regressions, and broader validation. The isolated live arithmetic comparison
-using normal SPU job mode now passes. The airship
-needs an equivalent model association and rejection trace before assuming
-the same cause. No permanent fix or completion is claimed. The separate
-whole-scene black intervals are not a substitute for model-specific evidence.
+speaker and airship model rejections, deterministic full SPU replay, and
+arithmetic-overflow mechanism are established. The requested investigation
+on a new branch is complete. A production fix should consistently implement
+SPU extended-range arithmetic, add appropriate helper regressions, and receive
+broader live validation. No permanent runtime correction is committed here.
+The separate whole-scene black intervals are not explained by these
+model-specific results.
