@@ -1,9 +1,9 @@
 (() => {
   const button = document.querySelector('#sound');
-  let context, node, state, connecting;
+  let context, node, state, requested = false;
   window.hazeAudioConnect = ({buffer, offset}) => {
     state = new Uint32Array(buffer, offset, 8);
-    connecting = (async () => {
+    (async () => {
       context = new AudioContext({sampleRate:48000, latencyHint:'interactive'});
       await context.audioWorklet.addModule('audio-worklet.js');
       node = new AudioWorkletNode(context, 'haze-audio', {
@@ -17,10 +17,11 @@
         button.textContent = context.state === 'running' ? 'Sound enabled' : 'Enable sound';
       };
       button.disabled = false;
+      if (requested) await enable();
     })().catch(error => { button.textContent = 'Audio unavailable'; console.error(error); });
   };
   async function enable() {
-    await connecting;
+    requested = true;
     if (!context || !state) return;
     if (context.state !== 'running') {
       Atomics.store(state, 0, Atomics.load(state, 1));
@@ -29,6 +30,6 @@
     Atomics.store(state, 2, context.state === 'running' ? 1 : 0);
   }
   button.onclick = enable;
-  document.querySelector('#screen').addEventListener('pointerdown', enable);
+  document.addEventListener('pointerdown', enable);
   document.addEventListener('keydown', enable);
 })();

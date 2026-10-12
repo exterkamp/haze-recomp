@@ -8,7 +8,14 @@ body{margin:2rem auto;max-width:1280px;padding:0 1rem;background:#17191a;color:#
 h1{color:#efcd36}label{display:block;margin:1rem 0}button{padding:.7rem 1.4rem;font:inherit}
 canvas{display:block;width:100%;background:#000;margin-top:1rem;aspect-ratio:16/9}
 pre{max-height:18rem;overflow:auto;font-size:12px;white-space:pre-wrap}small{color:#bbb}
+body.gameplay{margin:0;padding:0;max-width:none;background:#000;overflow:hidden}
+body.gameplay #controls{display:none}
+body.gameplay #screen{position:fixed;inset:0;width:100vw;height:100vh;margin:0;object-fit:contain;outline:none}
+body.gameplay #status{position:fixed;z-index:1;bottom:2rem;left:1rem;right:1rem;text-align:center;pointer-events:none}
+body.gameplay #status[hidden]{display:none}
 </style>
+<body class="gameplay">
+<main id="controls">
 <h1>Haze Recomp</h1>
 <p>Experimental browser port. Campaign rendering, movement, mouse look, and audio work; frame rate is still limited.</p>
 <div id="assets">
@@ -20,11 +27,12 @@ Files are read locally; they are not uploaded.</p>
 </div>
 <button id="stop" disabled>Stop</button>
 <button id="sound" disabled>Enable sound</button>
-<p id="status" role="status">Checking browser support…</p>
 <small>This Wasm64 build requires a 64-bit browser, shared memory and approximately 8 GB of addressable Wasm memory.</small>
-<canvas id="screen" width="1280" height="720" tabindex="0"></canvas>
 <p>WASD: move · Mouse: look (click to capture) · Space: confirm/jump · Enter: Start · E: square · R: triangle · X: circle · Arrow keys: menus · F1: release mouse. Standard gamepads are supported.</p>
 <pre id="log"></pre>
+</main>
+<p id="status" role="status">Checking browser support…</p>
+<canvas id="screen" width="1280" height="720" tabindex="0" aria-label="Haze game"></canvas>
 <script src="app.js"></script>
 <script src="audio.js"></script>
 <script src="input.js"></script>

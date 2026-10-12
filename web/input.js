@@ -4,7 +4,7 @@ const mapping = {Tab:0, ControlLeft:1, Mouse2:2, Enter:3, Escape:3,
   ArrowUp:4, ArrowRight:5, ArrowDown:6, ArrowLeft:7, KeyQ:8, KeyF:9,
   KeyG:10, Mouse0:11, KeyR:12, KeyX:13, Space:14, KeyE:15};
 const padBits = [14,13,15,12,10,11,8,9,0,3,1,2,4,6,7,5];
-let mouseX = 0, mouseY = 0, previous = '';
+let mouseX = 0, mouseY = 0, previous = '', mouseCaptured = false;
 const canvas = document.querySelector('#screen');
 function captureMouse() {
   canvas.focus();
@@ -38,7 +38,12 @@ function poll() {
   let buttons = 0;
   for (const [code, bit] of Object.entries(mapping)) if (keys.has(code)) buttons |= 1 << bit;
   const axes = [Number(keys.has('KeyD')) - Number(keys.has('KeyA')),
-    Number(keys.has('KeyS')) - Number(keys.has('KeyW')), mouseX * .045, mouseY * .045];
+    Number(keys.has('KeyS')) - Number(keys.has('KeyW')), 0, 0];
+  const captured = document.pointerLockElement === canvas;
+  if (worker && (mouseX || mouseY || captured !== mouseCaptured)) {
+    worker.postMessage({type:'mouse', x:mouseX, y:mouseY, captured});
+    mouseCaptured = captured;
+  }
   mouseX = mouseY = 0;
   const pad = [...navigator.getGamepads()].find(pad => pad?.mapping === 'standard');
   if (pad) {

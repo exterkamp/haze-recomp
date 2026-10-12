@@ -158,6 +158,27 @@ int main()
     assert(glGetError()==GL_NO_ERROR && memcmp(result,independent_samplers,4)==0);
     backend->pipeline_release(nullptr,dual);backend->texture_release(nullptr,shared);
     samplers[0].wrap_s=3;textures[1]=0;
+    // Queue different indexed geometry and constants without a readback between
+    // draws: uploads must preserve all earlier commands' data.
+    backend->clear_depth_stencil(nullptr,depth,RSX_BE_CLEAR_DEPTH,1,0);
+    backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,program);
+    textures[0]=texture;backend->bind_textures(nullptr,textures,samplers,1);
+    float left[6][8],right[6][8];
+    memcpy(left,vertices,sizeof left);memcpy(right,vertices,sizeof right);
+    for(unsigned i=0;i<6;i++) { left[i][0]=(left[i][0]-1)*0.5f;right[i][0]=(right[i][0]+1)*0.5f; }
+    const u32 forward[]={0,1,2,3,4,5},reverse[]={2,1,0,5,4,3};
+    const float red_constants[]={0,0,0,0,1,0,0,1};
+    const float blue_constants[]={0,0,0,0,0,0,1,1};
+    backend->bind_ps_constants(nullptr,red_constants,sizeof red_constants);
+    backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,left,6,32,forward,6);
+    backend->bind_ps_constants(nullptr,blue_constants,sizeof blue_constants);
+    backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,right,6,32,reverse,6);
+    const unsigned char red_result[]={51,0,0,255},blue_result[]={0,0,153,255};
+    backend->readback(nullptr,target,8,16,1,1,result,4);
+    assert(glGetError()==GL_NO_ERROR && memcmp(result,red_result,4)==0);
+    backend->readback(nullptr,target,24,16,1,1,result,4);
+    assert(glGetError()==GL_NO_ERROR && memcmp(result,blue_result,4)==0);
+    backend->bind_ps_constants(nullptr,ps_constants,sizeof ps_constants);
     // Releasing a pipeline must leave its shared shader objects usable by a
     // subsequent pipeline with the same guest programs.
     glUseProgram(0);
@@ -168,7 +189,10 @@ int main()
     backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,reused);
     textures[0]=texture;backend->bind_textures(nullptr,textures,samplers,1);
     backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
-    backend->present(nullptr,target);
+    // Repeated handoffs must retain a usable WebGL drawing buffer. Detaching
+    // it made subsequent presents fall back to synchronous CPU pixel copies.
+    for(unsigned frame=0;frame<32;frame++)backend->present(nullptr,target);
+    assert(EM_ASM_INT({return !!Module.hazeCanvasOutput && !Module.hazePixelCapture;}));
     assert(glGetError()==GL_NO_ERROR);
     backend->pipeline_release(nullptr,reused);
     backend->shutdown(nullptr);

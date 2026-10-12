@@ -21,12 +21,15 @@ EM_JS(void, haze_publish_canvas, (), {
             drawingWidth:GLctx.drawingBufferWidth,drawingHeight:GLctx.drawingBufferHeight,
             framebuffer:GLctx.getParameter(GLctx.DRAW_FRAMEBUFFER_BINDING)?.name ?? 0,
             lost:GLctx.isContextLost()}));
-    const frame=GLctx.canvas.transferToImageBitmap();
+    let output=Module.hazeCanvasOutput;
+    if(!output || output.width!==GLctx.canvas.width || output.height!==GLctx.canvas.height) {
+        output=Module.hazeCanvasOutput=new OffscreenCanvas(GLctx.canvas.width,GLctx.canvas.height);
+    }
+    output.getContext('2d').drawImage(GLctx.canvas,0,0);
+    const frame=output.transferToImageBitmap();
     postMessage({type:'haze-frame', frame},[frame]);
-    // Explicitly renew the default framebuffer after handing its storage to
-    // ImageBitmap. Chromium otherwise retains a detached drawing buffer in
-    // worker contexts that also render into user framebuffers.
-    GLctx.canvas.width=GLctx.canvas.width;
+    // Transfer the compositor copy, retaining the WebGL drawing buffer. Direct
+    // transfer detaches that buffer on Chromium and forces CPU readback later.
 });
 EM_JS(void, haze_publish_pixels, (int w,int h,int out_w,int out_h), {
     let capture=Module.hazePixelCapture;
@@ -554,7 +557,7 @@ void present(void*,u32 surface) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER,0);glDisable(GL_SCISSOR_TEST);
     const GLenum read_status=glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
     const GLenum draw_status=glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
-    if((frames&127)==0) {
+    if(validate_gl && (frames&127)==0) {
         unsigned char pixel[4]{};
         glReadPixels(t.w/2,t.h/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
         fprintf(stderr,"[webgl] present surface=%u %ux%u format=%X fbo=%X/%X pixel=%u,%u,%u,%u\n",

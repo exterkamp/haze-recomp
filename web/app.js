@@ -4,8 +4,13 @@ const start = document.querySelector('#start');
 const stop = document.querySelector('#stop');
 const status = document.querySelector('#status');
 const log = document.querySelector('#log');
+const query = new URLSearchParams(location.search);
+const diagnostics = query.has('debug') || query.has('manual') || query.has('smoke');
+document.body.classList.toggle('gameplay', !diagnostics);
+let logText = '', logPending = false;
 let worker;
 function runtimeFailed(text) {
+  status.hidden = false;
   status.textContent = 'Runtime failed: ' + text;
   record(text);
   worker?.terminate();
@@ -14,9 +19,21 @@ function runtimeFailed(text) {
 }
 function record(text) {
   console.log(text);
-  log.textContent = (log.textContent + text + '\n').slice(-100000);
-  log.scrollTop = log.scrollHeight;
+  if (!diagnostics) return;
+  logText = (logText + text + '\n').slice(-100000);
+  if (!logPending) {
+    logPending = true;
+    setTimeout(() => {
+      log.textContent = logText;
+      log.scrollTop = log.scrollHeight;
+      logPending = false;
+    }, 250);
+  }
 }
+if (!diagnostics) document.addEventListener('pointerdown', () => {
+  if (document.body.classList.contains('gameplay') && !document.fullscreenElement && document.fullscreenEnabled)
+    document.documentElement.requestFullscreen().catch(error => console.warn('Fullscreen unavailable: ' + error.message));
+}, {once:true});
 const supported = crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined' && typeof Worker !== 'undefined';
 status.textContent = supported ? 'Select the disc and firmware directories.' : 'Shared memory is unavailable. Run scripts/serve-wasm.py and open its localhost URL.';
 disc.onchange = () => { start.disabled = !supported || !disc.files.length || !!worker; };
@@ -31,7 +48,10 @@ function launch(assets) {
     if (data.type === 'frame') {
       display.transferFromImageBitmap(data.frame);
       window.hazeVideoFrames = (window.hazeVideoFrames || 0) + 1;
-      if (window.hazeVideoFrames === 1) status.textContent = 'Haze is running.';
+      if (window.hazeVideoFrames === 1) {
+        status.textContent = 'Haze is running.';
+        status.hidden = !diagnostics;
+      }
     }
     else if (data.type === 'audio') window.hazeAudioConnect(data);
     else if (data.type === 'status') status.textContent = data.text;
@@ -51,12 +71,17 @@ stop.onclick = () => {
   // Reload also terminates all pthread workers owned by the module.
   location.search = '?manual=1';
 };
-if (supported && !new URLSearchParams(location.search).has('manual')) {
+function chooseAssets(message) {
+  document.body.classList.remove('gameplay');
+  status.hidden = false;
+  status.textContent = message;
+}
+if (supported && !query.has('manual')) {
   fetch('/assets/manifest.json').then(response => response.json()).then(assets => {
     if (assets.disc?.some(path => path.toUpperCase() === 'PS3_GAME/USRDIR/EBOOT.ELF')) {
       document.querySelector('#assets').hidden = true;
       status.textContent = 'Starting with local game assets...';
       launch(assets);
-    }
-  }).catch(error => record('Local assets unavailable: ' + error.message));
+    } else chooseAssets('Choose your local game assets to start.');
+  }).catch(error => chooseAssets('Local assets unavailable: ' + error.message));
 }

@@ -108,7 +108,7 @@ async def run(args):
             if any('There is no free space to save game data' in line for line in logs):
                 break
             if (args.sound or args.audio) and not sound_enabled and await page.locator('#sound').is_enabled():
-                await page.locator('#sound').click()
+                await page.mouse.click(10, 10)
                 sound_enabled = True
             elapsed = time.monotonic() - started
             if args.input_file and args.input_file.exists():

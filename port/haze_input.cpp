@@ -264,6 +264,8 @@ bool haze_input_take_mouse(double& x, double& y, double& speed, bool& invert) {
 #include <atomic>
 namespace {
 std::atomic<uint32_t> browser_buttons{0}, browser_axes{0x80808080};
+std::atomic<bool> browser_mouse_captured{false};
+HazeMouseMotion browser_mouse_motion;
 HazeStartupSkip browser_startup;
 int browser_poll(u32 port, CellPadHostInput* input, void*) {
     if (port) return 0;
@@ -282,12 +284,21 @@ void browser_playback(u32 player, const char* uri, int started, void*) {
 extern "C" EMSCRIPTEN_KEEPALIVE void haze_wasm_input(uint32_t buttons, uint32_t axes) {
     browser_buttons.store(buttons); browser_axes.store(axes);
 }
+extern "C" EMSCRIPTEN_KEEPALIVE void haze_wasm_mouse(int32_t x, int32_t y, int captured) {
+    if (browser_mouse_captured.exchange(captured != 0) != (captured != 0) || !captured)
+        browser_mouse_motion.clear();
+    if (captured) browser_mouse_motion.add(x,y);
+}
 void haze_input_initialize() {
     cellPad_set_host_input_callback(browser_poll, nullptr);
     cellSail_set_host_playback_callback(browser_playback, nullptr);
 }
 void haze_input_attach(void*) {}
-bool haze_input_take_mouse(double&,double&,double&,bool&) { return false; }
+bool haze_input_take_mouse(double& x,double& y,double& speed,bool& invert) {
+    browser_mouse_motion.take(x,y);
+    speed=0.10; invert=false;
+    return browser_mouse_captured.load();
+}
 #else
 void haze_input_initialize() {}
 void haze_input_attach(void*) {}

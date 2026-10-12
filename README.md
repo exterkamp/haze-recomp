@@ -667,9 +667,11 @@ test at 48 kHz. Haze reaches its title screen with readable text and game audio;
 keyboard Start advances into its menus. Campaign assets load and the opening
 credits run. A campaign checkpoint renders its 3D scene and post-processing;
 WASD movement, mouse look, and pause/resume have been verified in Chromium.
-The carrier-deck scene measured approximately 6 FPS on the test machine (RTX
-5080 with Chromium/ANGLE); performance is still experimental. Full campaign
-progression has not been validated.
+The synchronized build measured approximately 5–9 FPS across two carrier-deck
+views on the test machine (RTX 5080 with Chromium/ANGLE). Synchronizing the native
+branches and retaining GPU presentation have not resolved the low frame rate;
+performance is still experimental. Full campaign progression has not been
+validated. See [browser integration and measurements](docs/browser-sync-2026-10-12.md).
 Browser SPU jobs use bounded stacks and heap contexts to avoid exhausting linear
 memory. The backend reuses compiled shaders across pipelines and optimizes their
 register arrays while preserving guest constant-buffer layouts. Texture units
@@ -680,6 +682,8 @@ scale coordinates by their image dimensions.
 Passes that sample their own render target use a reusable GPU snapshot.
 Resized depth images retain writes across consecutive draws and synchronize
 when a clear, snapshot, fence, target change, or presentation requires it.
+Presentation transfers a GPU compositor copy while retaining WebGL's drawing
+buffer, avoiding the recurring CPU pixel-readback fallback.
 
 From that worktree, reuse the generated PPU/SPU sources and local assets in the
 main checkout:
@@ -690,8 +694,11 @@ py -3 scripts/bootstrap-wasm.py
 py -3 scripts/serve-wasm.py
 ```
 
-Open <http://127.0.0.1:8085/> in a current 64-bit Chromium browser. The local
-server automatically connects `game/disc` and `local/tools/rpcs3/dev_flash` from
+Open <http://127.0.0.1:8085/> in a current 64-bit Chromium browser. The
+game fills the browser window with no log or buttons. Click anywhere to enable
+sound and request browser fullscreen; browsers require that first gesture.
+Add `?debug=1` for the controls and log, or use F11 for browser fullscreen.
+The local server automatically connects `game/disc` and `local/tools/rpcs3/dev_flash` from
 the main checkout, and opening the page boots the decrypted `EBOOT.ELF` directly.
 It serves asset byte ranges on demand and binds only to localhost. Override the
 paths with `--game-dir` and `--firmware-dir`; add `?manual=1` to choose folders
@@ -705,10 +712,12 @@ without a manual filesystem sync. This used an isolated test browser profile.
 
 WASD, mouse look, and keyboard menu controls have been exercised in-game.
 Standard gamepads have a browser bridge but have not been tested with hardware.
-Click the canvas to capture the mouse and press F1 to release it. The page lists
-the remaining mappings.
-Click **Enable sound** or interact with the canvas to unlock Web Audio. The
-game's audio clock continues at 48 kHz while browser sound is suspended.
+Click the canvas to capture the mouse and press F1 to release it. WASD moves,
+Enter opens Start/pause, Space confirms/jumps, X goes back, and arrows navigate
+menus. The diagnostic page lists the remaining mappings. Browser mouse counts
+use the same distance-based camera hook as the native port, retaining motion
+until the simulation consumes it. The game's audio clock continues at 48 kHz
+while browser sound is suspended.
 
 Use `?smoke=1` for the runtime check, `?smoke=gl` for the GPU check,
 `?smoke=audio` for PCM playback (build target `HazeAudioSmoke`), or `?trace=1`

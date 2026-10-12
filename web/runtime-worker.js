@@ -2,6 +2,7 @@
    selected multi-gigabyte disc files on demand instead of copying them to RAM. */
 let runtime;
 let input = {buttons:0, axes:0x80808080};
+let mouseCaptured = false;
 const send = (type, text) => postMessage({type, text});
 function entries(files) {
   return files.map(file => ({name:file.webkitRelativePath.split('/').slice(1).join('/') || file.name, data:file}));
@@ -40,6 +41,11 @@ function mountAssets(FS, WORKERFS, kind, files, manifest) {
   }
 }
 onmessage = async ({data}) => {
+  if (data.type === 'mouse') {
+    mouseCaptured = data.captured;
+    runtime?._haze_wasm_mouse?.(data.x,data.y,mouseCaptured ? 1 : 0);
+    return;
+  }
   if (data.type === 'input') {
     input = data;
     runtime?._haze_wasm_input?.(data.buttons, data.axes);
@@ -87,6 +93,7 @@ onmessage = async ({data}) => {
     FS.mount(IDBFS, {autoPersist:true}, '/hdd0');
     await new Promise((resolve, reject) => FS.syncfs(true, error => error ? reject(error) : resolve()));
     runtime._haze_wasm_input?.(input.buttons, input.axes);
+    runtime._haze_wasm_mouse?.(0,0,mouseCaptured ? 1 : 0);
     if (data.trace)
       setInterval(() => runtime._haze_wasm_report?.(), 15000);
     send('status', 'Booting Haze (browser renderer under development)…');

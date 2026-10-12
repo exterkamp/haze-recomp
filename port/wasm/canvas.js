@@ -7,6 +7,8 @@ addEventListener('error', event => {
 Module['preRun'] ??= [];
 // Pthread workers initialize without running the owner's preRun hooks.
 globalThis.hazeGetGL = () => typeof GLctx === 'undefined' ? null : GLctx;
+// Optional live comparison in the render worker: 0 = timer, 2 = immediate.
+globalThis.hazeSetRenderTiming = mode => _emscripten_set_main_loop_timing(mode, mode === 0 ? 1 : 0);
 Module['preRun'].push(() => {
   // This hook allocates the canvas handoff record before initRuntime. Set
   // Binaryen's guard bounds before the first instrumented malloc call.
