@@ -6,6 +6,28 @@ defaults off; main retains the established execution path. This is a first
 operation migrated to host data and arithmetic, not a replacement of the
 entire engine or its memory system.
 
+## Compatibility after rebasing onto current main/haze
+
+The experiment was rebased onto root `a872469` and SDK `9d282dd`. The SDK now
+implements corrected extended-range single precision, including truncation
+toward zero. The old native cursor's host IEEE additions failed the extracted
+boundary oracle at the first changed local-store float byte. The oracle was
+retained; the shortcut was corrected instead.
+
+The host-data cursor operation now accepts a scalar numerical-policy function.
+Its adapter supplies `spu_float_add`, without recreating vector lanes, guest
+register scratch state, or translated instruction dispatch. Integer updates,
+pair ordering, pointer guards and publication behavior remain as before.
+An additional 160 comparisons cover extended finite encodings, tiny operands,
+cancellation and saturation across all four host rounding modes with FTZ/DAZ
+on/off. All **4,360 boundary comparisons** pass. Extracted pair timings are
+420–425 cycles reference versus 65.7–67.2 native (6.30–6.45x); these are local
+CPU-cycle measurements and must not be read as a whole-game FPS increase.
+
+The earlier gameplay/benchmark evidence below predates this SDK arithmetic
+correction. Its candidate hashes remain historical evidence; a rebuilt candidate
+requires its own performance comparison before attributing any changed FPS.
+
 ## Evidence and boundary
 
 The refreshed muted image-40 diagnostic `20261012-163000-781`, ordinary candidate

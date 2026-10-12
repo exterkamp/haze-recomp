@@ -100,6 +100,31 @@ int main(void)
         g_spu_ls_watch_n=1;guard_unchanged(site);g_spu_ls_watch_n=0;
         g_spu_smc_watch=1;guard_unchanged(site);g_spu_smc_watch=0;
     }
+    // Preserve corrected scalar arithmetic across host rounding/denormal modes,
+    // including extended finite values that host IEEE arithmetic calls NaNs.
+    const uint32_t fp_pairs[][2]={
+        {0x3F800000,0x3C23D70A},{0x3F800000,0x33000000},
+        {0x3F800000,0x80000001},{0x3F800000,0xB3000000},
+        {0x7F800000,0x3F800000},{0x7FFFFFFF,0x7FFFFFFF},
+        {0x00800000,0x807FFFFF},{0x00000001,0x80000001},
+        {0xBF800000,0x3F800000},{0xFF800000,0x7FFFFFFF}};
+    const unsigned correctness_mxcsr=_mm_getcsr();
+    for(unsigned mode=0;mode<8;++mode) {
+        _mm_setcsr((correctness_mxcsr&~(0x6000u|0x8040u))|
+            ((mode&3u)<<13)|(mode&4u?0x8040u:0));
+        for(unsigned site=0;site<2;++site)
+            for(unsigned pair=0;pair<sizeof(fp_pairs)/sizeof(*fp_pairs);++pair) {
+                reset(site,0x1000,0x1100,pair);
+                for(unsigned base=0x1000;base<=0x1100;base+=0x100)
+                    for(unsigned field=0;field<6;++field) {
+                        const uint32_t word=fp_pairs[pair][field&1];
+                        haze_cursor_write_word(original.ls+base+4*field,word);
+                        haze_cursor_write_word(native.ls+base+4*field,word);
+                    }
+                compare(site,1);++checks;
+            }
+    }
+    _mm_setcsr(correctness_mxcsr);
     printf("Native cursor: %u boundary comparisons passed (aliasing, float bits, overflow, fallbacks); guard mutations unchanged\n",checks);
     reset(0,0x1000,0x1100,0);
     const uint32_t bits[]={0x3F800000,0x3C23D70A,0,100,0x40000000,0x3C23D70A};
