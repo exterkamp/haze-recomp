@@ -109,6 +109,54 @@ do not turn the microbenchmark percentage into a whole-game claim.
 Artifacts: `local/native-sint16-{run,windows,report}.json`, presents CSV and
 process-observation JSONL.
 
+## Separate light renderer measurement
+
+Profiling candidate SHA256
+`D4313D7109AEE33B9A0A2380BF0E9C918ED534B11ADA1F665FE2D82044BB1BAB`
+uses the same source with renderer timing enabled and `RSX_PROFILE_LIGHT=1`
+to disable the expensive diagnostic shader-variant table. Muted run
+`20261012-191249-087` uses a fresh private checkpoint/controller and the same
+1440p graphics/native-wait settings as the ordinary run. Captures 009839 and
+011844 were viewed and verify the stationary carrier before/after. Four
+180-frame blocks follow 80-frame warmups, with settled mode markers checked
+for every measured row. Normal shutdown returned zero.
+
+| Mode | Frames | Diagnostic FPS | p95 ms | Vertex decode ms | Draw CPU ms | Mean draws | Mean vertices |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Original | 10769–10948 | 28.876 | 48.598 | 3.166 | 20.432 | 1450.0 | 995448 |
+| Specialized | 11061–11240 | 28.845 | 47.742 | 2.960 | 19.631 | 1441.8 | 995057 |
+| Specialized | 11331–11510 | 30.528 | 44.857 | 2.975 | 18.577 | 1217.1 | 1007641 |
+| Original | 11661–11840 | 29.426 | 45.542 | 3.104 | 20.460 | 1299.4 | 967323 |
+
+The bracketing original decode average is 3.135 ms versus 2.967 ms specialized,
+a roughly 0.168-ms difference. The first pair has nearly identical total
+vertices and saves 0.206 ms in decode. Vertex formats and animated draw work
+can still change; this is a modest stage saving, not evidence of consistent
+30 FPS or an ordinary-build speedup. Keep the path opt-in given the preceding
+ordinary comparison.
+
+Other mean elapsed scopes remain substantial: texture hashing 3.251–3.326 ms
+over 110.4–112.3 million source bytes/frame, vertex reference gathering
+1.192–1.277 ms, remapping 1.796–1.911 ms, PSO preparation 2.847–3.102 ms and
+GPU timestamps 1.895–2.125 ms. There are no compiled shaders in these windows.
+These scopes overlap and include preemption; they are not additive CPU shares.
+
+Valid draw boundaries place 7.38–8.44 ms before the first draw, a 23.37–26.51-ms
+draw span and 1.04–1.10 ms after the last draw. Boundary statistics use
+177/179/180/180 frames respectively: absent draw boundaries in the first two
+blocks are excluded only from boundary arithmetic, never from frame-time or
+stage distributions. The span includes command-stream gaps outside draw calls.
+
+Two-second process observations bracket every measured block, with maximum
+gaps below 2.10 seconds; all covering observations contain only the owned Haze.
+This does not exclude other applications or processes between observations.
+Profiling-build FPS is diagnostic and must not be compared against ordinary
+build FPS to claim an optimization gain.
+
+Artifacts: `local/native-sint16-stage-{run,blocks,summary}.json`, renderer and
+present CSVs, and process-observation JSONL. The resulting texture-check lead is
+tested separately in [the write-watch feasibility report](performance-write-watch-2026-10-12.md).
+
 ## Separate texture-check lead
 
 Current texture checks read the full source once per cached texture per frame.
