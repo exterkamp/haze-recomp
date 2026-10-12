@@ -151,8 +151,11 @@ if ($Test) {
     $fmaFlags = $(if ($SpuFma) { @('/clang:-mavx', '/clang:-mfma') } else { @() })
     & $clang /nologo /W0 /O2 /clang:-msse4.1 @fmaFlags "/I$sdk/include" "/Fe$fmaTest" "/Fo$root/local/test_spu_fma.obj" "$root/tests/test_spu_fma.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU fused arithmetic test compilation failed.' }
-    & $fmaTest
-    if ($LASTEXITCODE -ne 0) { throw 'SPU fused arithmetic differs from scalar reference.' }
+    $floatVectors = Join-Path $root 'local/spu-float-oracle.bin'
+    & $python "$sdk/runtime/spu/tests/test_spu_float_oracle.py" $floatVectors
+    if ($LASTEXITCODE -ne 0) { throw 'SPU exact arithmetic oracle generation failed.' }
+    & $fmaTest $floatVectors
+    if ($LASTEXITCODE -ne 0) { throw 'SPU extended single-precision arithmetic regression failed.' }
     $frameTest = Join-Path $root 'local/test_frame_pump.exe'
     & $clang /nologo /W0 /O1 /std:c++20 "/Fe$frameTest" "/Fo$root/local/test_frame_pump.obj" "$root/tests/test_frame_pump.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Frame-pump test compilation failed.' }
