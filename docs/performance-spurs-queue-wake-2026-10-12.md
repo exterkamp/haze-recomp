@@ -123,3 +123,26 @@ visual checks at each transition are required for the next attempt; poll
 counts must not be treated as elapsed time. The final profiling build also
 passed its actual compile-rule guard for all six PPU/SPU/queue/RSX sources in
 `local/squad-native-queue-final-build.log`.
+
+A second reverse-order preparation, `local/runs/20261012-072329-976`,
+reached the Continue Campaign menu using visually checked four-poll input
+pulses. It was closed normally with exit 0 at 07:31:09 UTC before recording
+any gameplay windows after another Haze instance was observed running from
+the shadow-lighting worktree. It adds no gameplay performance evidence.
+The diagnostic runner now permits an explicit timeout up to 1,800 seconds
+to accommodate navigation and longer measured windows; its default remains
+60 seconds and its audio remains muted by default.
+
+The supplied shadow-clear correction, root `9c48009` / SDK `9058dc4`, is
+merged with the queue experiment. The combined SDK retains both histories
+and the benchmark reporter validates both `depth_clear` present rows and
+per-thread native queue mode events. The earlier A/B figures above describe
+the original executable hash, before this rendering correction; they must
+not be relabeled as measurements of the merged candidate.
+
+The combined ordinary build passed the full `build.ps1 -SpuFma -Test` gate
+with exit 0 (`local/queue-depth-clear-build-tests.log`), including the shadow
+clear GPU readbacks and native queue/coherency regressions. It is preserved
+at `local/candidates/queue-depth-clear/HazeRecomp.exe`, SHA-256
+`9D14F67D28199E6A1388A10F9C4FFFDD4098EBC1C152D7DBA34723949F88FB49`.
+This verifies the merged regression suite, not its in-game framerate.

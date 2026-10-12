@@ -1,6 +1,6 @@
 param(
     [string]$SharedRoot,
-    [ValidateRange(1,600)][int]$Seconds = 60,
+    [ValidateRange(1,1800)][int]$Seconds = 60,
     [ValidateRange(0,10000)][int]$TraceCalls = 0,
     [ValidateSet(0,2,4,8,16)][int]$CaptureFrames = 0,
     [ValidateRange(0,1000000)][int]$FrameSkip = 0,
