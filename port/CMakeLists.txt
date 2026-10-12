@@ -173,6 +173,7 @@ add_executable(${PROJECT_NAME}
     main.cpp
     stubs.cpp
     haze_input.cpp
+    haze_camera.cpp
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
@@ -229,6 +230,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${PS3RECOMP_DIR}/runtime/platform"        # win32_compat.h and friends
     "${PS3RECOMP_DIR}/libs/video"
     "${PS3RECOMP_DIR}/libs/input"
+    "${PS3RECOMP_DIR}/libs/codec"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 

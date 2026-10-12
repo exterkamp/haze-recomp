@@ -1,4 +1,5 @@
 param(
+    [string]$SharedRoot,
     [ValidateRange(1,600)][int]$Seconds = 60,
     [ValidateRange(0,10000)][int]$TraceCalls = 0,
     [ValidateSet(0,2,4,8,16)][int]$CaptureFrames = 0,
@@ -11,19 +12,20 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$assets = if ($SharedRoot) { (Resolve-Path -LiteralPath $SharedRoot).Path } else { $root }
 $exe = Join-Path $root 'build\haze\HazeRecomp.exe'
-$elf = Join-Path $root 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
+$elf = Join-Path $assets 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable first.' }
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The decrypted Haze ELF is missing.' }
 $runDir = Join-Path $root ('local\runs\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
-$shaderCache = Join-Path $root 'local\cache\rsx-shaders'
+$shaderCache = Join-Path $assets 'local\cache\rsx-shaders'
 New-Item -ItemType Directory -Path $shaderCache -Force | Out-Null
 # This is a bounded diagnostic runner, not a claim of working gameplay.
 # Keep missing imports visible rather than relying on fabricated success.
 $settings = @{
-    PS3_VFS_ROOT = (Join-Path $root 'game\disc')
-    PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $root 'local\tools\rpcs3\dev_flash' })
+    PS3_VFS_ROOT = (Join-Path $assets 'game\disc')
+    PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $assets 'local\tools\rpcs3\dev_flash' })
     PS3_NET_ONLINE = '1'
     YDKJ_NO_CRI_CTX = '1' # Disable the SDK's unrelated image-22 game-specific patch.
     PS3_SAVEDATA_ROOT = $(if ($env:PS3_SAVEDATA_ROOT) { $env:PS3_SAVEDATA_ROOT } else { Join-Path $root 'local\state\savedata' })
