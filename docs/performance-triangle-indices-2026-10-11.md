@@ -45,8 +45,8 @@ the validated vertex remapper. Their index upload currently calls an external
 bounds-checked accessor once per occurrence. CPU-work bit 1024 instead copies
 the complete-triangle prefix when the map is present and large enough. Short
 maps retain the accessor path; strips, fans and quads retain their winding and
-restart conversion. The default remains 259 until native comparison supports
-changing it. A new `topology_index_ms` scope times this work separately.
+restart conversion. The initial experiment retained default 259. A new
+`topology_index_ms` scope times this work separately.
 
 The production writer passes 2,064 independent ordered-oracle cases covering
 duplicate maps, identity fallback, undersized maps, incomplete triangles,
@@ -64,6 +64,36 @@ indices, checking output equality outside the timed region:
 | 2 | 1.490 | 0.135 |
 | 3 | 1.348 | 0.134 |
 
-These are synthetic stage costs, not FPS gains. Repeated native off/on blocks
-and normal-build measurements are required before claiming gameplay benefit.
-Captures, raw profiles, generated translations and executable files stay local.
+These are synthetic stage costs, not FPS gains.
+
+## Repeated native comparison
+
+Muted profiling run `20261012-042956-862` uses SDK experiment `fe9e69b`.
+Captures 4501 and 7831 verify carrier gameplay before/after measurement.
+All six blocks use 80 warmup frames followed by 180 measured frames; there
+are no captures, builds, instruction sampling or job logs during the blocks.
+No other Haze or compiler process appears in the repeated process checks.
+The presentation CSV independently verifies consecutive IDs and the CPU-work
+mode at both endpoints of all 1,080 intervals. Window-position mode stays one.
+The process closes normally with exit code zero.
+
+| Path | Frames | Index ms | Draw CPU ms | FPS | p95 ms | Draws/frame |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Accessor | 5123–5302 | 1.0896 | 21.924 | 24.399 | 52.601 | 1336.2 |
+| Bulk copy | 5421–5600 | 0.2085 | 20.624 | 25.445 | 50.812 | 1260.8 |
+| Accessor | 5721–5900 | 1.0608 | 23.546 | 23.927 | 55.482 | 1353.2 |
+| Bulk copy | 6021–6200 | 0.2135 | 23.028 | 23.504 | 54.591 | 1405.2 |
+| Accessor | 6321–6500 | 1.0607 | 23.025 | 23.485 | 58.862 | 1418.1 |
+| Bulk copy | 6621–6800 | 0.2102 | 20.997 | 24.131 | 54.188 | 1423.2 |
+
+Index construction saves 0.847–0.881 ms/frame in all three pairs. In the last
+pair the draw counts differ by less than 0.4%, and the index-stage saving still
+holds. Overall FPS changes have mixed signs; NPC activity and texture decode
+work vary. All shader compilation counters stay zero. This supports enabling
+the bit-exact index optimization by default (CPU-work flags 1283), without
+claiming that it alone fixes pacing or delivers a particular FPS increase.
+Normal-build measurement remains separate from these instrumented results.
+
+Raw blocks/report are local `topology-copy-profile-blocks.json` and
+`topology-copy-profile-report.json`. Captures, raw profiles, generated
+translations and executable files stay local.
