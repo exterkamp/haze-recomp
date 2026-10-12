@@ -5,6 +5,7 @@ analysis/
 generated/
 build/
 .venv/
+.worktrees/
 external/*
 !external/ps3recomp/
 __pycache__/
