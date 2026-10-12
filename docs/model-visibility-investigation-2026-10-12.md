@@ -287,6 +287,33 @@ reproducible camera trajectory. No renderer behavior was changed.
 The SDK source below is from the investigation's preserved `9058dc4` base.
 These checks narrow hypotheses; none establishes the reported failure.
 
+- **Black-screen guest correlation:** In external run
+  `20261012-083842-069`, fifteen low-address reads attributed to guest function
+  `00722E98` first appear between renderer summaries 4928 and 4960, shortly
+  after the externally observed black transition around presents 4926/4927.
+  The reads alternate between `0x33B` and `0x32B`. Generated code confirms that
+  this function follows the stack backchain and copies saved return addresses;
+  these are invalid stack-walk reads, not direct model or occlusion reads.
+  Its two direct callers request six and 32 entries respectively. The captured
+  executable lacks the later optional null-read stack-context diagnostic, so
+  this log cannot identify which caller or invocation produced the reads.
+  The generic reporter reaches its 16-message cap (including one boot read),
+  so later silence is not evidence of recovery. The next three external runs
+  each report only the known boot read and do not reach that cap. All recorded
+  group-drop counters, movie packets and queue-full counts remain zero in the
+  black run through its final renderer summary at frame 5568; incoming packets
+  and executed groups both fall. This narrows the whole-screen observation
+  beyond a dropped-draw explanation, but does not establish causality or link
+  it to individual model pop-out. The local correlation is
+  `visibility-black-guest-correlation.json`. If this transition recurs, capture
+  a native image and bounded caller context before changing guest behavior.
+- **Texture-cache capacity:** `libs/video/rsx_live_draw.c:2916` handles the
+  4,096-entry limit by replacing the least recently used descriptor and
+  retiring its old resource after the open command list reaches a fence.
+  The logged `full` counter counts encounters that select this eviction path;
+  it does not mean new textures were rejected. The black run's final summary
+  has zero texture decode failures and zero white-texture bindings. Cache
+  occupancy alone therefore supplies no demonstrated disappearance cause.
 - **Occlusion reports:** `libs/video/cellGcmSys.c:2054` handles GET_REPORT
   by storing `65535` for type 1 and zero for other report types. The scalar
   `cellGcmGetReport` at line 2999 reads that stored value. The actual report
