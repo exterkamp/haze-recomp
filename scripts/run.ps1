@@ -9,6 +9,7 @@ param(
     [switch]$Audio,
     [switch]$CaptureAudio,
     [string]$ExecutablePath,
+    [string]$GraphicsConfig,
     [switch]$Uncapped,
     [ValidatePattern('^[1-9][0-9]{0,3}x[1-9][0-9]{0,3}$')]
     [ValidateScript({ $dimensions = $_ -split 'x'; [int]$dimensions[0] -le 8192 -and [int]$dimensions[1] -le 8192 })]
@@ -37,6 +38,7 @@ $settings = @{
     YDKJ_NO_CRI_CTX = '1' # Disable the SDK's unrelated image-22 game-specific patch.
     PS3_SAVEDATA_ROOT = $(if ($env:PS3_SAVEDATA_ROOT) { $env:PS3_SAVEDATA_ROOT } else { Join-Path $root 'local\state\savedata' })
     HAZE_INPUT_CONFIG = $(if ($env:HAZE_INPUT_CONFIG) { $env:HAZE_INPUT_CONFIG } else { Join-Path $root 'config\input.ini' })
+    HAZE_GRAPHICS_CONFIG = $(if ($GraphicsConfig) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($GraphicsConfig) } elseif ($env:HAZE_GRAPHICS_CONFIG) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:HAZE_GRAPHICS_CONFIG) } else { Join-Path $root 'config\graphics.ini' })
     PS3_HLE_TRACE = [string]$TraceCalls
     PS3_HLE_UNRESOLVED = 'fail'
     HAZE_BOOT_REPORT = '1'
@@ -47,7 +49,7 @@ $settings = @{
     PS3_VERBOSE = $(if ($null -ne $env:PS3_VERBOSE) { $env:PS3_VERBOSE } else { '0' })
     RSX_LIVE_DRAW = $(if ($Renderer -eq 'Live') { '1' } else { '0' })
     RSX_RENDER_RESOLUTION = $(if ($RenderResolution) { $RenderResolution } else { $env:RSX_RENDER_RESOLUTION })
-    RSX_MAX_FPS = $(if ($Uncapped) { '0' } elseif ($env:RSX_MAX_FPS) { $env:RSX_MAX_FPS } else { '30' })
+    RSX_MAX_FPS = $(if ($Uncapped) { '0' } else { $env:RSX_MAX_FPS })
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     PS3_MILESTONE_OUT = (Join-Path $runDir 'boot-milestones.log')
     CELLMARK_DUMP = $(if ($CaptureFrames -gt 0) { [string]$CaptureFrames } else { $null })
@@ -82,6 +84,12 @@ try {
         Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
         if (-not $p.WaitForExit(5000)) { throw 'Timed-out native process did not terminate.' }
     }
+    # Record effective file/env settings reported by the native process, rather
+    # than only launcher overrides (which are usually empty with an INI).
+    $effectiveGraphics = [ordered]@{}
+    foreach ($line in (Get-Content -LiteralPath (Join-Path $runDir 'boot.stderr.log') -TotalCount 64)) {
+        if ($line -cmatch '^\[graphics\] ([a-z_]+)=(.*)$') { $effectiveGraphics[$matches[1]] = $matches[2] }
+    }
     $result = [ordered]@{
         timestamp_utc = [DateTime]::UtcNow.ToString('o')
         timeout_seconds = $Seconds
@@ -92,10 +100,12 @@ try {
         capture_skip = $FrameSkip
         capture_every = $FrameEvery
         renderer = $Renderer
-        render_resolution = $settings.RSX_RENDER_RESOLUTION
+        render_resolution = $(if ($effectiveGraphics.Contains('render_resolution')) { $effectiveGraphics['render_resolution'] } else { $settings.RSX_RENDER_RESOLUTION })
+        graphics_config = $settings.HAZE_GRAPHICS_CONFIG
+        graphics_settings = $effectiveGraphics
         audio_muted = -not $Audio
         audio_capture = [bool]$CaptureAudio
-        max_fps = $settings.RSX_MAX_FPS
+        max_fps = $(if ($effectiveGraphics.Contains('frame_limit')) { $effectiveGraphics['frame_limit'] } else { $settings.RSX_MAX_FPS })
     }
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'local\boot-result.json') -Encoding UTF8
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDir 'boot-result.json') -Encoding UTF8

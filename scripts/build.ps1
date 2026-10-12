@@ -52,6 +52,16 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
+    $graphicsTest = Join-Path $root 'local/test_haze_graphics.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$graphicsTest" "/Fo$root/local/test_haze_graphics.obj" "$root/tests/test_haze_graphics.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test compilation failed.' }
+    & $graphicsTest
+    if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test failed.' }
+    $displayTest = Join-Path $root 'local/test_haze_display.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$displayTest" "/Fo$root/local/test_haze_display.obj" "$root/tests/test_haze_display.cpp" /link user32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Display-window test compilation failed.' }
+    & $displayTest
+    if ($LASTEXITCODE -ne 0) { throw 'Display-window test failed.' }
     $bytesTest = Join-Path $root 'local/test_spu_bytes.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$bytesTest" "/Fo$root/local/test_spu_bytes.obj" "$sdk/runtime/spu/tests/test_spu_bytes.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU SIMD byte-operation test compilation failed.' }

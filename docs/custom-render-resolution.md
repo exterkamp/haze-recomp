@@ -1,8 +1,11 @@
 # Custom internal rendering resolution
 
-Implemented on `feat/custom-render-resolution` in
+Originally implemented on `feat/custom-render-resolution`. Further graphics
+settings now live on `feat/graphics-settings` in
 `.worktrees/custom-render-resolution`, with an independent SDK worktree on
-the same branch name. The main checkout and PC-controls worktree are separate.
+the same branch name. See [graphics settings](graphics-settings.md) for the
+startup configuration, including independent shadow resolution. The main
+checkout and PC-controls worktree are separate.
 Local game files, generated translations and development tools are shared
 through junctions; build products and diagnostic runs belong to this worktree.
 

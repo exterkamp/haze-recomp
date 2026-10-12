@@ -174,6 +174,8 @@ add_executable(${PROJECT_NAME}
     stubs.cpp
     haze_input.cpp
     haze_camera.cpp
+    haze_graphics.cpp
+    haze_display.cpp
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
