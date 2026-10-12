@@ -97,7 +97,7 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU fingerprint cache test compilation failed.' }
     & $fingerprintTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU fingerprint cache identity/concurrency test failed.' }
-    foreach ($primitive in @('test_spu_helpers', 'test_spu_shufb')) {
+    foreach ($primitive in @('test_spu_helpers', 'test_spu_shufb', 'test_spu_numeric_semantics')) {
         $primitiveTest = Join-Path $root "local/$primitive.exe"
         & $clang /nologo /W0 /O1 /clang:-msse4.1 "/I$sdk/include" "/Fe$primitiveTest" "/Fo$root/local/$primitive.obj" "$sdk/runtime/spu/tests/$primitive.c"
         if ($LASTEXITCODE -ne 0) { throw "SPU SIMD test compilation failed: $primitive" }
@@ -108,8 +108,11 @@ if ($Test) {
     $fmaFlags = $(if ($SpuFma) { @('/clang:-mavx', '/clang:-mfma') } else { @() })
     & $clang /nologo /W0 /O2 /clang:-msse4.1 @fmaFlags "/I$sdk/include" "/Fe$fmaTest" "/Fo$root/local/test_spu_fma.obj" "$root/tests/test_spu_fma.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU fused arithmetic test compilation failed.' }
-    & $fmaTest
-    if ($LASTEXITCODE -ne 0) { throw 'SPU fused arithmetic differs from scalar reference.' }
+    $floatVectors = Join-Path $root 'local/spu-float-oracle.bin'
+    & $python "$sdk/runtime/spu/tests/test_spu_float_oracle.py" $floatVectors
+    if ($LASTEXITCODE -ne 0) { throw 'SPU exact arithmetic oracle generation failed.' }
+    & $fmaTest $floatVectors
+    if ($LASTEXITCODE -ne 0) { throw 'SPU extended single-precision arithmetic regression failed.' }
     $frameTest = Join-Path $root 'local/test_frame_pump.exe'
     & $clang /nologo /W0 /O1 /std:c++20 "/Fe$frameTest" "/Fo$root/local/test_frame_pump.obj" "$root/tests/test_frame_pump.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Frame-pump test compilation failed.' }

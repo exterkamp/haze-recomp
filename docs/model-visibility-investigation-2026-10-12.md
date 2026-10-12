@@ -8,7 +8,8 @@ The requested investigation is on a new branch in the existing worktree:
 `investigate/model-visibility`, based on `9c48009`. Its independent SDK branch
 is `investigate/haze-model-visibility`, based on `9058dc4`. This preserves the
 previous shadow clear correction. The investigation identifies the cause for
-both reported model types; no permanent runtime fix is committed.
+both reported model types. The subsequent runtime correction and its validation
+are recorded in the final section of this document.
 
 Both disappearance types are caused by the guest occlusion filter receiving
 incorrect results from the emulated SPU arithmetic. The occlusion SPU image39
@@ -34,7 +35,8 @@ replay of those same live inputs reproduces nine speaker rejections.
 The airship correction is validated offline, not by an equivalent live
 candidate comparison. The prototype preserves ordinary host rounding and
 is not a complete architectural floating-point implementation. Production
-implementation and broader regression testing remain follow-up work.
+implementation and broader regression testing were follow-up work at this
+stage of the investigation; see the runtime correction below.
 
 ## Initial native evidence
 
@@ -1280,7 +1282,7 @@ is validated live for the speaker and offline against captured airship inputs;
 this does not claim a live airship correction comparison or a complete
 architectural floating-point implementation.
 
-## Implementation follow-up
+## Investigation handoff before the runtime correction
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
@@ -1293,3 +1295,76 @@ SPU extended-range arithmetic, add appropriate helper regressions, and receive
 broader live validation. No permanent runtime correction is committed here.
 The separate whole-scene black intervals are not explained by these
 model-specific results.
+
+## Runtime correction requested after the investigation
+
+SDK commit `0c328cf` implements extended single-precision values in
+`runtime/spu/spu_float.h`, used by the shared lifted/interpreter helpers in
+`runtime/spu/spu_helpers.h`. This applies to all SPU images. Arithmetic,
+fused multiply-add/subtract, interpolation, comparisons, and scaled integer
+conversions preserve finite exponent-255 operands, truncate results toward
+zero, flush denormals/underflow to positive zero, and saturate overflow.
+Fused operations retain the exact product until the final addition and rounding.
+Integer arithmetic avoids host NaNs and does not change the host rounding mode.
+The existing reciprocal estimate tables remain in use. FPSCR exception flags
+remain outside the implementation; this is a correction to numerical results.
+
+The reference is [SPU ISA v1.2](https://arcb.csc.ncsu.edu/~mueller/cluster/ps3/SDK3.0/docs/arch/SPU_ISA_v1.2_27Jan2007_pub.pdf),
+section 9.1 and the single-precision instruction descriptions. Regression tests
+include the failing near-plane calculation, extended operands, overflow before
+cancellation, fused low product bits, tiny subtractands affecting truncation,
+denormals, comparisons, interpolation, and integer conversion boundaries.
+An independent Python unbounded-integer oracle generated 1,500,000 vectors for
+15 operations. C17 and C++20 optimized builds each passed 6,000,124 lane checks.
+The existing helper and numeric-semantics suites also passed (17 numeric tests).
+The oracle is wired into the port's `scripts/build.ps1 -Test` and the SDK's
+Windows, Linux, and macOS CI workflows. Only Windows execution was performed
+locally; the other CI platforms have not been run here.
+
+Replaying the 43 original soldier cases and 42 original airship cases with the
+actual corrected helpers restores every speaker and airship rejection and
+removes no previously accepted model. The 40 prototype-run inputs also retain
+every speaker. One other model, `0x4ACE4780`, changes from accepted to rejected
+at frame 5020 with the full truncation correction. Its corrected projected
+horizontal bounds are 1406 through 3333, entirely outside the 1280-pixel view;
+clearing occluder depth accepts it. This is a changed depth-edge decision,
+not a repeat of the overflow rejection. Full architectural rounding therefore
+does not preserve every incidental original accepted list.
+
+The full game build succeeded with normal renderer settings and produced
+`local/candidates/visibility-runtime-fix/HazeRecomp.exe`, SHA256
+`FA99AB7FE9AED62C591E1241E5B416C703D6F4258E35C5C208B1B2AEB0B4BEB1`.
+For live validation, the same runtime/SPU objects were linked with the existing
+read-only PPU model-filter recorder as
+`local/candidates/visibility-runtime-trace/HazeRecomp.exe`, SHA256
+`B79FF86435AF4C77422FB222D91975003FD4EF156BBB270C40227F8ADB4700C7`.
+The recorder does not replace arithmetic or modify guest visibility settings.
+
+Live run `20261012-210247-419` (`conversation-runtime18`, PID 55896) reached
+the first conversation and exited normally with code 0 and 10,974 successful
+presents. Read-only checks before approach and during capture both found job11
+SPU mode 2, module `0xF2C100`, and global occlusion enable 1. Player input was
+neutral before the conversation close-up and throughout the captured sequence.
+The external observer recorded the transition and opened the diagnostic gate
+at QPC 1351403.7401927, closing it at 1351422.7044967.
+
+All 40 native frames, 9895 through 9934, retain the speaker and the nearby
+airship through the close-up and pullback. All 42 recorded accepted lists match
+the actual corrected-helper offline replay. Speaker `0x4ACE4000` is accepted
+in all 42 inputs; airship `0x4ACEB6C0` is accepted in all six inputs in which it
+is submitted to the worker. Original-arithmetic replay of these exact inputs
+rejects the speaker at frames 9898-9901 and 9903-9907, and the airship at 9898.
+The corrected replay removes no previously accepted model in this recording.
+The identified airship batch (source vertices 6822, UV hash
+`12c22404fd6d4912`) is submitted in every captured native frame.
+The render ledger reports 49,152 executed draws and no rejected/sampling draws;
+all captured frames and their following presents retain the baseline renderer
+controls. The preserved `build/haze/HazeRecomp.exe` still has its original hash
+`EF9CF6AB69EB984E6F22805C003608220CD45E78ECA126B2C5BDAFF7F7B06B7B`.
+
+Local evidence includes `visibility-conversation-runtime18-contact.png`, the
+40 native PPM files under the run directory, the transition AVI/JSON, the
+before/during mode records, draw/present CSVs, validation JSON, and
+`visibility-conversation-runtime18-decisions/spu-runtime-live-summary.json`.
+This validates the reported opening-conversation trigger; full campaign and
+performance regression coverage were not performed.
