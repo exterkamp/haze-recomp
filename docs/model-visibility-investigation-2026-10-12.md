@@ -528,6 +528,38 @@ this remains a timing-perturbed diagnostic. Local evidence is
 `visibility-conversation-model-trace-target-texture.json` and
 `visibility-conversation-model-trace-validation.json`.
 
+## Material-identification probe
+
+Run `20261012-164245-248` tries the existing debug setting
+`LD_SKIP_SAMPLING=5CEF980` to identify the candidate material visually. It
+exits normally with code 0. The probe does **not** select the candidate:
+a short draw trace in this run locates the same 4,596- and 336-vertex
+batches at unit-0 texture address `0x05DC8F00`, rather than `0x05CEF980`.
+Their attribute-8 fingerprints remain `ab7c74af214e9569` and
+`bf3cd8c23d609017`, respectively. Consequently, the still-visible soldier in
+native frame 4628 does not refute the candidate identification: the fixed
+offset was stale. Frame 4793 supplies the relocated bindings in a trace
+covering partial counters 4793 and 4794. Local correlation is
+`visibility-conversation-identify-validation.json`.
+
+An isolated diagnostic build adds `LD_SKIP_SAMPLING_FILE` to select a measured
+texture address during the same run. It also records deliberate suppression
+as `probe_skip_sampling` CSV outcomes and a separate counter included in group
+accounting. Missing/invalid control files and the text `off` disable the live
+filter. The preserved executable retains SHA256 `EF9CF6AB...`; the diagnostic
+candidate is `local/candidates/visibility-live-filter/HazeRecomp.exe`, SHA256
+`541137D645B6265B78F5CBC3781F83619C906EB41EB5D75200CE86CB326A2067`.
+Only the SDK renderer object and runtime archive were rebuilt, then linked
+against the existing game objects into that separate candidate. The SDK
+diagnostic change is not a model-visibility fix.
+
+The first diagnostic attempt, `20261012-165408-595`, closes normally during
+loading after menu navigation had to be repeated. It preserves 13,556
+successful presents but never reaches the model/filter comparison. Its
+observed UI summaries have zero probe skips and balanced group accounting
+with the control set to `off`. The active-filter behavior and causal model
+identification remain unvalidated by that attempt.
+
 ## Scoped source findings
 
 The SDK source below is from the investigation's preserved `9058dc4` base.
