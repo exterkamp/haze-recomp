@@ -2,9 +2,11 @@
 
 Usage: python scripts/profile_native_cpu.py PID [SECONDS]
 Briefly suspends each Haze thread to read its instruction pointer, then resumes
-it before resolving symbols. RIP counts include waiting threads and are NOT
+it before resolving output symbols. Optional native stack walking runs while
+the thread is suspended and can substantially perturb execution. Never use
+this sampler inside FPS benchmark windows. RIP/stack counts include waits and are NOT
 percentages of CPU utilization. CPU milliseconds come from GetThreadTimes.
-Requires the matching executable/PDB in build/haze. No guest state is written.
+Requires the matching executable/PDB in build/haze or --symbol-path. No guest state is written.
 Guest-address counts sample only a recognized fast vm_read32 load instruction.
 """
 import ctypes as c
@@ -22,11 +24,21 @@ parser.add_argument('--tid',type=int,action='append',help='Sample only these thr
 parser.add_argument('--interval-ms',type=float,default=9,
     help='Mean randomized interval between sample rounds; use separately from FPS benchmarks.')
 parser.add_argument('--raw-limit',type=int,default=20,help='Maximum individual instruction locations per thread.')
+parser.add_argument('--symbol-path',type=Path,default=Path(__file__).resolve().parents[1]/'build'/'haze')
+parser.add_argument('--stack-depth',type=int,default=0,
+    help='Optional AMD64 unwind depth, 0 disables it. Build scripts/native_stackwalk.c first.')
+parser.add_argument('--stack-every',type=int,default=10,help='Unwind every N sampling iterations.')
+parser.add_argument('--stack-library',type=Path,
+    default=Path(__file__).resolve().parents[1]/'local'/'native_stackwalk.dll')
 args=parser.parse_args()
 if not 1<=args.scan_every<=1000:
     parser.error('scan-every must be 1..1000')
 if not .5<=args.interval_ms<=100 or not 1<=args.raw_limit<=1000:
     parser.error('interval-ms must be .5..100 and raw-limit must be 1..1000')
+if not 0<=args.stack_depth<=64 or not 1<=args.stack_every<=1000:
+    parser.error('stack-depth must be 0..64 and stack-every must be 1..1000')
+if args.stack_depth and not args.stack_library.is_file():
+    parser.error('Build the native stackwalk helper DLL before requesting stacks')
 
 k=c.WinDLL('kernel32',use_last_error=True)
 d=c.WinDLL('dbghelp',use_last_error=True)
@@ -42,7 +54,13 @@ d.SymInitializeW.argtypes=[w.HANDLE,w.LPCWSTR,w.BOOL]
 d.SymFromAddr.argtypes=[w.HANDLE,c.c_ulonglong,c.POINTER(c.c_ulonglong),c.POINTER(SYMBOL_INFO)]
 d.SymFromName.argtypes=[w.HANDLE,c.c_char_p,c.POINTER(SYMBOL_INFO)]
 h=k.OpenProcess(0x410,False,args.pid); assert h,c.get_last_error()
-assert d.SymInitializeW(h,str(Path(__file__).resolve().parents[1]/'build'/'haze'),True),c.get_last_error()
+assert d.SymInitializeW(h,str(args.symbol_path.resolve()),True),c.get_last_error()
+stackwalk=None
+if args.stack_depth:
+    stack_library=c.WinDLL(str(args.stack_library.resolve()),use_last_error=True)
+    stackwalk=stack_library.haze_profile_stackwalk
+    stackwalk.argtypes=[w.HANDLE,w.HANDLE,c.c_void_p,c.POINTER(c.c_ulonglong),w.UINT]
+    stackwalk.restype=w.UINT
 def symbol(addr):
     b=c.create_string_buffer(c.sizeof(SYMBOL_INFO)+2048)
     info=c.cast(b,c.POINTER(SYMBOL_INFO)); info.contents.SizeOfStruct=c.sizeof(SYMBOL_INFO); info.contents.MaxNameLen=2048
@@ -65,6 +83,7 @@ k.GetProcessIdOfThread.restype=w.DWORD
 k.GetSystemTimeAsFileTime.argtypes=[c.POINTER(c.c_ulonglong)]
 pid=args.pid; duration=args.seconds
 handles={}; active={}; live_ids={}; first={}; last={}; raw=collections.Counter()
+stacks=collections.Counter(); suspension_count=0; suspension_total=0; suspension_max=0
 scan_stats=collections.Counter(); seen_ids=set()
 started_filetime=c.c_ulonglong()
 def running(th):
@@ -149,10 +168,19 @@ while time.perf_counter()-start<duration:
         buf=c.create_string_buffer(1250); cp=(c.addressof(buf)+15)&~15
         c.c_uint32.from_address(cp+0x30).value=0x100003  # CONTROL | INTEGER
         if k.SuspendThread(th)==0xffffffff: continue
+        suspended_begin=time.perf_counter()
         try:
             good=k.GetThreadContext(th,cp); rip=c.c_uint64.from_address(cp+0xf8).value
             rcx=c.c_uint64.from_address(cp+0x80).value
-        finally: k.ResumeThread(th)
+            if good and stackwalk and iteration%args.stack_every==0:
+                output=(c.c_ulonglong*args.stack_depth)()
+                count=stackwalk(h,th,cp,output,args.stack_depth)
+                stacks[(tid,tuple(output[:count]))]+=1
+        finally:
+            k.ResumeThread(th)
+            suspended_elapsed=time.perf_counter()-suspended_begin
+            suspension_count+=1; suspension_total+=suspended_elapsed
+            suspension_max=max(suspension_max,suspended_elapsed)
         if good:
             raw[(tid,rip)]+=1
             if fast_load and rip in (fast_load,fast_load+3):
@@ -172,10 +200,14 @@ for tid in sorted(handles,key=lambda t:last[t]-first[t],reverse=True):
     for (t,rip),n in raw.items():
         if t==tid: hist[sym(rip).split('+0x')[0]]+=n
     rows.append(dict(tid=tid[0],created_filetime=tid[1],cpu_ms=(last[tid]-first[tid])/10000,rips=hist.most_common(20),raw_rips=[(sym(rip),n) for (t,rip),n in raw.most_common() if t==tid][:args.raw_limit],
+                     stacks=[dict(frames=[sym(pc) for pc in addresses],samples=n)
+                             for (t,addresses),n in stacks.most_common() if t==tid][:args.raw_limit],
                      sampled_read32_addresses=[(f'0x{addr:08X}',n) for (t,addr),n in memory_reads.most_common() if t==tid][:20]))
 tracked_ms=sum(row['cpu_ms'] for row in rows)
-print(json.dumps(dict(elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),
+print(json.dumps(dict(pid=pid,exe=pathbuf.value,elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),
     scan_every=args.scan_every,selected_tids=args.tid,interval_ms=args.interval_ms,
+    symbol_path=str(args.symbol_path.resolve()),stack_depth=args.stack_depth,stack_every=args.stack_every,
+    suspension=dict(count=suspension_count,total_ms=suspension_total*1000,max_ms=suspension_max*1000),
     process_cpu_ms=process_ms,tracked_thread_cpu_ms=tracked_ms,
     unattributed_cpu_ms=max(0,process_ms-tracked_ms),
     thread_scan=dict(scan_stats,unique_ids=len(seen_ids)),

@@ -88,6 +88,15 @@ class PresentWindows(unittest.TestCase):
                 pacer_good.replace('enabled=1', 'enabled=0'),
                 pacer_good+'[haze-frame-pacer-mode] tid=37 enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['mode_column'] = 'fifo_recycle_wait'
+            args.windows.write_text(json.dumps(windows))
+            fifo_good = good.replace('spurs-queue-wait-mode', 'gcm-fifo-wait-mode')
+            run(fifo_good)
+            for invalid in [good, fifo_good.replace('tid=37', 'tid=38'),
+                fifo_good.replace('qpc=80', 'qpc=101'),
+                fifo_good.replace('native=1', 'native=0'),
+                fifo_good+'[gcm-fifo-wait-mode] tid=37 native=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
             windows['mode_column'] = 'usleep'
             sleep_good = good.replace('spurs-queue-wait-mode', 'usleep-mode').replace(
                 ' native=', ' guest_tid=8 timer=')
