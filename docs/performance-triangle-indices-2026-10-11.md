@@ -97,3 +97,10 @@ Normal-build measurement remains separate from these instrumented results.
 Raw blocks/report are local `topology-copy-profile-blocks.json` and
 `topology-copy-profile-report.json`. Captures, raw profiles, generated
 translations and executable files stay local.
+
+The subsequent normal-build attempt (`20261012-043632-285`) completed its
+timed blocks but reached the runner's timeout before a normal shutdown.
+Its presentation CSV was not flushed. That attempt also overlapped another
+Haze instance during part of the session. It supplies no valid normal-build
+FPS or pacing result; the stage-cost evidence above remains the basis for
+the optimization.

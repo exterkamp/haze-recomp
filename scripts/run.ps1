@@ -9,9 +9,15 @@ param(
     [switch]$Audio,
     [switch]$CaptureAudio,
     [string]$ExecutablePath,
-    [switch]$Uncapped
+    [switch]$Uncapped,
+    [ValidatePattern('^[1-9][0-9]{0,3}x[1-9][0-9]{0,3}$')]
+    [ValidateScript({ $dimensions = $_ -split 'x'; [int]$dimensions[0] -le 8192 -and [int]$dimensions[1] -le 8192 })]
+    [string]$RenderResolution
 )
 $ErrorActionPreference = 'Stop'
+if ($Renderer -eq 'Legacy' -and ($RenderResolution -or $env:RSX_RENDER_RESOLUTION)) {
+    throw 'Custom rendering resolutions require the Live renderer.'
+}
 $root = Split-Path $PSScriptRoot -Parent
 $assets = if ($SharedRoot) { (Resolve-Path -LiteralPath $SharedRoot).Path } else { $root }
 $exe = if ($ExecutablePath) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExecutablePath) } else { Join-Path $root 'build\haze\HazeRecomp.exe' }
@@ -40,6 +46,7 @@ $settings = @{
     AUDIO_WAV = $(if ($CaptureAudio) { Join-Path $runDir 'audio.f32le' } else { $null })
     PS3_VERBOSE = $(if ($null -ne $env:PS3_VERBOSE) { $env:PS3_VERBOSE } else { '0' })
     RSX_LIVE_DRAW = $(if ($Renderer -eq 'Live') { '1' } else { '0' })
+    RSX_RENDER_RESOLUTION = $(if ($RenderResolution) { $RenderResolution } else { $env:RSX_RENDER_RESOLUTION })
     RSX_MAX_FPS = $(if ($Uncapped) { '0' } elseif ($env:RSX_MAX_FPS) { $env:RSX_MAX_FPS } else { '30' })
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     PS3_MILESTONE_OUT = (Join-Path $runDir 'boot-milestones.log')
@@ -85,6 +92,7 @@ try {
         capture_skip = $FrameSkip
         capture_every = $FrameEvery
         renderer = $Renderer
+        render_resolution = $settings.RSX_RENDER_RESOLUTION
         audio_muted = -not $Audio
         audio_capture = [bool]$CaptureAudio
         max_fps = $settings.RSX_MAX_FPS

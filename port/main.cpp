@@ -174,6 +174,7 @@ extern "C" int  rsx_null_backend_pump_messages(void);
 #ifdef _WIN32
 extern "C" {
 int rsx_live_draw_enabled(void);
+void rsx_live_draw_set_render_reference(uint32_t, uint32_t);
 int rsx_live_draw_init(void*, uint32_t, uint32_t,
     const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
 void rsx_live_draw_present(uint32_t);
@@ -269,6 +270,8 @@ static DWORD WINAPI frame_clock(LPVOID)
     int rsx_ok = 0;
 #ifdef _WIN32
     if (rsx_live_draw_enabled()) {
+        // Haze renders the main scene at 576p before its 720p scanout pass.
+        rsx_live_draw_set_render_reference(1024, 576);
         rsx_ok = rsx_null_backend_init(WINDOW_WIDTH, WINDOW_HEIGHT, title) == 0;
         if (rsx_ok && rsx_live_draw_init(rsx_null_backend_get_hwnd(), WINDOW_WIDTH,
                                        WINDOW_HEIGHT, live_guest_ptr, nullptr) == 0) {
