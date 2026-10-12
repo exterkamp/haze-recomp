@@ -215,6 +215,37 @@ This is a small, inconclusive total-frame benefit, not a decisive multicore
 breakthrough. P95 remains approximately 44–48 ms, so consistent 30 FPS pacing
 is not achieved. Keep workers off by default.
 
+## Rebase checkpoint
+
+After these measurements, the user requested rebasing the experiment onto the
+latest main and SDK haze. Root base: `a872469`; SDK base: `9d282dd`.
+All seven SDK experiment patches replay identically (`git range-diff`), producing
+SDK tip `88e90b7`. Root SDK-reference conflicts retain that rebased tip; the other
+root changes merge automatically. This brings the latest model-arithmetic and
+portable runtime work into the experiment without changing main/haze themselves.
+
+The post-rebase boundary test exposed and corrected an existing native-cursor
+floating-point mismatch with the new SDK numerical semantics; see the
+[cursor compatibility checkpoint](performance-native-cpu-kernels-2026-10-12.md).
+The vertex-worker measurements and candidate hashes above predate this rebase.
+They must not be described as measurements of the combined, rebased build.
+
+The combined ordinary candidate is
+`local/candidates/native-kernels-rebased/HazeRecomp.exe`, SHA256
+`38AA2D1A43DA9F8A789912A47BB71FCDE3E7F10A6353D33F83BB521A1AF8E5C0`.
+After the cursor adapter correction, the full `build.ps1 -SpuFma -Test` suite
+passes, including 4,360 cursor boundary cases, all 252 parallel vertex cases,
+SPU numeric semantics, queue publication/wakes, texture caching/write tracking,
+and GPU shader/clear readbacks. Logs:
+`local/native-kernels-rebased-{build-tests,fixed-build-tests}.log`; the first
+contains the original caught mismatch, the second the passing combined suite.
+
+Muted private-save smoke run `20261012-213659-137` reaches the carrier in viewed
+capture 010284 and closes normally, exit 0. Native cursor/FIFO/queue/idle paths
+and regional texture tracking are enabled; vertex workers and both geometry
+caches are off. This verifies initial gameplay after integration, not a new
+performance benchmark or correctness across later missions.
+
 Private evidence: `local/native-vertex-workers-ordinary-{run,windows,report}.json`,
 `local/native-vertex-workers-ordinary-reverse-{windows,report}.json`, ordinary
 present CSV, both process logs, normal-close log and captures. The baseline

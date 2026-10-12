@@ -1,5 +1,5 @@
 #pragma once
-#include "spu_context.h"
+#include "spu_helpers.h"
 #include "haze_native_cursor.h"
 #include <string.h>
 
@@ -27,7 +27,7 @@ static inline void haze_cursor_advance_buffer(uint8_t* data)
     uint32_t words[6];
     for(unsigned i=0;i<6;++i) words[i]=haze_cursor_read_word(data+4*i);
     memcpy(&cursor,words,sizeof(cursor));
-    haze_native_cursor_advance(&cursor);
+    haze_native_cursor_advance(&cursor,spu_float_add);
     memcpy(words,&cursor,sizeof(cursor));
     const unsigned changed[]={0,8,12,16};
     for(unsigned i=0;i<4;++i) haze_cursor_write_word(data+changed[i],words[changed[i]/4]);
