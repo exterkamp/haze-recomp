@@ -26,7 +26,7 @@ Missing keys use built-in defaults; an empty `[graphics]` section is sufficient.
 
 | Setting | Values / default | Effect and cost |
 | --- | --- | --- |
-| `display_mode` | `windowed` (default), `fullscreen`, `borderless` | Windowed has a title bar and resize frame. Borderless fills the selected monitor without a frame or always-on-top behavior. Fullscreen additionally requests DXGI fullscreen state; Windows may use fullscreen optimizations. If Windows refuses it, a diagnostic reports the borderless fallback. |
+| `display_mode` | `borderless` (default), `windowed`, `fullscreen` | Windowed has a title bar and resize frame. Borderless fills the selected monitor without a frame or always-on-top behavior. Fullscreen additionally requests DXGI fullscreen state; Windows may use fullscreen optimizations. If Windows refuses it, a diagnostic reports the borderless fallback. |
 | `window_size` | `auto` (default), `WIDTHxHEIGHT`, axes 1..8192 | `auto` selects a 16:9 client up to 1280x720 that fits the selected monitor's work area, accounting for DPI, decorations and taskbar space. Explicit sizes set exact client pixels. Independent of internal render resolution. Fullscreen/borderless use the monitor's desktop size instead. |
 | `monitor` | `primary` (default), 1..16 | Selects the primary monitor or a 1-based number from the boot log. Unavailable monitors fail startup instead of silently selecting another screen. |
 | `render_resolution` | `auto` (default), `native`, `WIDTHxHEIGHT`, each axis 1..8192 | `auto` uses the selected monitor's current desktop resolution in physical pixels, limited to 8192 per axis. `native` retains the game's original sizes. Custom/automatic sizes raise raster resolution, including intermediate targets: the 1024x576 scene and 1280x720 scanout both reach the selected size. More GPU work and memory; aspect ratio changes stretch the original projection and HUD. |
@@ -195,7 +195,10 @@ Its final full build/test log is `local/graphics-auto-final-tests.log`, and the 
 `scripts/play.ps1 -ExecutablePath local/candidates/graphics-auto-defaults/HazeRecomp.exe`
 from this worktree, or the adjacent `Play-Haze.cmd`, to launch with its
 `config/graphics.ini`. The default worktree build executable is also updated.
-Candidate SHA-256: `7030EA56CE39E4C2C77392E487B4488DC193E6382B9B6A439EF344AB72CDE59E`.
+Candidate SHA-256 after defaulting to borderless: `01E0E7C414DF6A5D388F0021E0F0991CB1615B0915519D2B37EEFDB96C192ED2`.
+The borderless default passed the focused configuration tests in
+`local/graphics-borderless-default-test.log` and was rebuilt in
+`local/graphics-borderless-default-build.log`.
 
 Automatic-resolution native checks:
 

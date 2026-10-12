@@ -18,6 +18,7 @@ bool automatic_size(const rsx_graphics_option& option) {
     return !std::strcmp(option.key,"render_resolution") || !std::strcmp(option.key,"window_size");
 }
 const char* fallback(const rsx_graphics_option& option) {
+    if(!std::strcmp(option.key,"display_mode")) return "borderless";
     if(automatic_size(option)) return "auto";
     // Desktop rendering must not implicitly multiply the shadow atlas size.
     if(!std::strcmp(option.key,"shadow_resolution")) return "native";

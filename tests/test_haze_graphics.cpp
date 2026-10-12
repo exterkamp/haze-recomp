@@ -39,6 +39,7 @@ int main() {
         assert(std::getenv("RSX_RENDER_RESOLUTION")==dimensions(detected.render_width,detected.render_height));
         assert(std::getenv("RSX_WINDOW_SIZE")==dimensions(detected.window_width,detected.window_height));
         assert(!std::strcmp(std::getenv("RSX_SHADOW_RESOLUTION"),"native"));
+        assert(!std::strcmp(std::getenv("RSX_WINDOW_MODE"),"borderless"));
         for (const auto& o:rsx_graphics_options)
             if(!automatic_size(o)) assert(!std::strcmp(std::getenv(o.environment),!std::strcmp(o.key,"monitor") ? monitor : fallback(o)));
     };
