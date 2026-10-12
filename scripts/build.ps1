@@ -5,6 +5,7 @@ param(
     [switch]$CompareSpuByteOps,
     [switch]$SpuFma,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
+    [string]$OutputDirectory,
     [int]$Jobs = 8
 )
 $ErrorActionPreference = 'Stop'
@@ -42,7 +43,8 @@ if ($RuntimeOnly) {
     $build = Join-Path $root 'build\haze'
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
+$exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory) } else { $build }
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$root/generated/ppu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
@@ -205,6 +207,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Frame limiter test compilation failed.' }
     & $frameLimitTest
     if ($LASTEXITCODE -ne 0) { throw 'Frame limiter deadline/wait test failed.' }
+    $vpCacheTest = Join-Path $root 'local/test_vp_program_cache.exe'
+    & $clang /nologo /W0 /O2 "/I$sdk/include" "/Fe$vpCacheTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_vp_program_cache.c" "$sdk/libs/video/rsx_vp_program_cache.c" "$sdk/libs/video/rsx_vp_decompiler.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex program cache test compilation failed.' }
+    & $vpCacheTest
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex program cache content validation failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
     & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }

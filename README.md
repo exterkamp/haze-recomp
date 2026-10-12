@@ -70,8 +70,8 @@ all visible artifacts. CPU simulation/rendering performance needs further work.
 
 ## Native performance investigation
 
-The minimum target is 30 actual gameplay frames per second with consistent
-33.3 ms intervals. A firsthand [PlayStation LifeStyle review](https://www.playstationlifestyle.net/2009/01/03/ps3-review-haze/)
+The current target is a 30 FPS ceiling with dips acceptable, improved pacing,
+and resolved rendering bugs. A firsthand [PlayStation LifeStyle review](https://www.playstationlifestyle.net/2009/01/03/ps3-review-haze/)
 reports 30 FPS with rare drops in large encounters, while
 [GameSpot's review](https://www.gamespot.com/reviews/haze-review/1900-6191308/)
 describes few frame-rate jitters. These are qualitative retail observations;
@@ -158,6 +158,12 @@ then saved another 1.15–1.28 ms/frame of decoding, with specialized blocks at
 23.16–25.22 FPS. Those loops are now enabled by default.
 **The revised target is a 30 FPS ceiling with dips acceptable.** Reaching
 that ceiling during gameplay and avoiding unnecessary stalls remain open.
+The [depth-clipping investigation](docs/rendering-depth-clip-2026-10-11.md)
+reproduces a close-barrel layering error and adds guest-controlled depth clipping;
+other shadow/model glitches still need validation. The
+[vertex-program cache experiment](docs/performance-vp-cache-2026-10-11.md)
+reduces shader preparation time, but remains disabled because its profiling
+comparison did not establish a reliable FPS gain.
 
 For reproducible diagnostic captures:
 
