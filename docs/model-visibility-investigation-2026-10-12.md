@@ -10,7 +10,9 @@ is `investigate/haze-model-visibility`, based on `9058dc4`. This preserves the
 previous shadow clear correction. No model visibility fix is established yet.
 The first-conversation recording now contains an externally observed
 visible / missing / visible soldier sequence, also reproduced in native
-readbacks. Matching draw-state evidence remains outstanding.
+readbacks. A matching draw trace now identifies two candidate mesh batches
+whose submission tracks the soldier's visibility. Their model identity and
+the cause of their omission still require a causal comparison.
 
 ## Initial native evidence
 
@@ -463,6 +465,69 @@ converted to the original recording's elapsed time. Local artifacts are
 `visibility-conversation-target-trace-coverage.json` and
 `visibility-conversation-target-validation.json`.
 
+## Matched native frames and draw trace
+
+Run `20261012-163003-500` captures the close conversation with a single
+helper owning both the native requests and draw gate. Its color threshold
+only locates the large yellow helmet in the known conversation sequence;
+the disappearance is then verified visually, rather than inferred from that
+threshold. The preserved executable and baseline graphics/modes are retained.
+It exits normally with code 0, saving 11,303 successful presents.
+
+The 48 consecutive native frames cover 7596 through 7643. The soldier is
+visible in 7599, absent in 7600 through 7603, visible in 7604, absent in 7605
+through 7608 and visible again in 7609. The deck, foliage and parked aircraft
+remain visible during the missing states. The draw CSV covers counters 7596
+through 7644 with 54,784 rows, all `execute`; gate boundary counters may be
+partial. The three adjacent comparisons below are entirely inside that gate.
+
+| Native / draw frames | Close soldier | Executed draw rows |
+| --- | --- | --- |
+| 7599 to 7600 | Visible to missing | 1,052 to 1,044 |
+| 7603 to 7604 | Missing to visible | 1,025 to 1,072 |
+| 7604 to 7605 | Visible to missing | 1,072 to 1,060 |
+
+Grouping by surface, topology, source vertex count and fragment-program
+identity, while excluding changing PSO hashes, identifies two candidate
+batches. Each occurs once in the inspected visible frames and zero times in
+all eight missing frames listed above:
+
+- Target `0x014D0000`, triangle topology 5, 4,596 source vertices.
+- Same target and topology, 336 source vertices.
+
+Both use fragment program `0:0x02C4ADC0`, size 1,152 bytes, and live pipeline
+key `25ae28ab4252aa73` when present. Their textures include unit 0 at
+`0x05CEF980` (512x512), unit 1 at `0x09E81F80` (512x512), and unit 2 at
+`0x04E61980` (256x256). Their stable non-position attribute fingerprints and
+repeated material bindings give a more specific candidate than aggregate
+scene counts. These are still mesh candidates, not named model IDs; a scoped
+suppression or geometry identification is needed to prove they are the close
+soldier rather than another object changing in sync.
+
+The renderer's surrounding summaries at 7584 and 7616 show seen groups equal
+executed groups, zero empty groups and zero fetch, degenerate, primitive,
+allocation, pipeline, ring or surface drops. Packet counts also balance, with
+zero movie and queue-full counts. Source inspection confirms that fetch and
+topology failures can return before a CSV row, but increment these drop
+counters. No such failure is recorded around this sequence. Consequently,
+the candidate batches' absence is not explained by a recorded backend draw
+rejection. If their model identity is confirmed, the next boundary to inspect
+is command production/culling before these batches reach the live renderer,
+rather than changing depth or fragment shading on their absent draws.
+
+Every native capture has same-number and next-number successful-present
+records, and all present rows retain the baseline live modes. The external
+recording contains 5,259 samples over 179.84 seconds, all bracketed by
+successful presents. Its largest sample gap is 0.833 seconds during the
+instrumented sequence, so it cannot establish every intermediate state.
+The 48 requests span approximately 23.24 seconds while tracing is active;
+this remains a timing-perturbed diagnostic. Local evidence is
+`visibility-conversation-model-trace-native.contact0.png`, the three
+`visibility-conversation-model-trace-{out,return,out2}.json` comparisons,
+`visibility-conversation-model-trace-normalized.json`,
+`visibility-conversation-model-trace-target-texture.json` and
+`visibility-conversation-model-trace-validation.json`.
+
 ## Scoped source findings
 
 The SDK source below is from the investigation's preserved `9058dc4` base.
@@ -545,7 +610,7 @@ main checkout's changing performance candidates. The scene phase is now known:
 approaching the soldiers and starting the first conversation. The next useful
 comparison can now target the externally recorded soldier sequence during
 the first conversation. Native images now reproduce it; the remaining evidence
-is matching pipeline, vertex and query state, followed by a causal comparison
-before any fix or completion
-claim. The separate whole-scene black intervals are not a substitute for that
+is causal identification of the two matching mesh candidates, then the reason
+their submissions disappear. A confirmed cause and comparison are required
+before any fix or completion claim. The separate whole-scene black intervals are not a substitute for that
 model-specific comparison.
