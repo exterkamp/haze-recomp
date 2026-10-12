@@ -262,3 +262,65 @@ Artifacts: `local/native-frame-{critical,light}-{run,window,report,cpu}.json`,
 their renderer/present CSVs, wait directories and queue directories. The profile
 candidate build and configuration checks passed; the ordinary candidate's full
 regression suite had already passed before these diagnostic-only additions.
+
+## Shader metadata cache with the native cursor enabled
+
+An ordinary-build repeat tests whether the earlier VP metadata cache becomes
+useful for FPS with the image-40 kernel enabled. Native cursor mode remains one
+throughout; only CPU-work bit 512 changes. Flags 1283 retain the default native
+vertex/index paths; 1795 additionally enables the byte-validated VP cache.
+This caches program analysis, not vertex data or game state.
+
+Muted run `20261012-174151-688` used candidate `55BB364C...` and the same 1440p,
+uncapped/VSync-on settings. A fresh private copy of the checkpoint was loaded
+through Continue. Captures 012876 and 016264 verify the carrier before/after;
+normal close returned zero. Four 30-second windows followed five-second warmups,
+with no input, captures, builds or instruction sampling inside them. The existing
+present reporter verified complete consecutive intervals and settled CPU-work
+flags. The process observer saw only the owned Haze in every block, with maximum
+observation gaps of 2.14..2.19 seconds; this does not exclude other applications
+or processes whose entire lifetimes fall between observations.
+
+| VP cache | FPS | Mean frame ms | p95 ms | p99 ms | Process mean cores |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Off | 19.092 | 52.379 | 78.808 | 95.129 | 3.689 |
+| On | 20.277 | 49.317 | 71.522 | 92.263 | 3.711 |
+| On | 22.347 | 44.749 | 64.209 | 85.164 | 3.885 |
+| Off | 21.073 | 47.454 | 66.215 | 89.890 | 3.702 |
+
+The combined result is encouraging but performance also improves over time
+within each mode. Animated NPCs/vehicles keep changing the workload despite a
+stationary camera. This single ABBA sequence does not establish a repeatable
+cache benefit. The reversed-order repeat below did not confirm the improvement.
+Neither stable frame pacing nor the desired framerate is achieved.
+
+Artifacts: `local/native-cursor-vpcache-{run,windows,report}.json`, its presents
+CSV and process-observation JSONL. The native accepted-operation event appears
+before measurement and the present-ring CSV covers all four blocks.
+
+The reversed sequence used fresh fixture/run `20261012-174731-532` with the same
+ordinary binary and settings. Captures 010261/013797 verify gameplay; normal
+close returned zero. Another agent's Haze (PID 57144, visibility-geometry-trace
+candidate in the shadow-lighting worktree) overlapped every measured block.
+Work continued without modifying that process. The strict reporter rejected
+isolated attribution; the separate contended report retains the validated raw
+present intervals without invoking its isolation assertion.
+
+| VP cache, reversed order | FPS | Mean frame ms | p95 ms | p99 ms | Process mean cores |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| On | 17.765 | 56.289 | 83.419 | 103.618 | 3.511 |
+| Off | 21.540 | 46.424 | 62.456 | 69.392 | 4.181 |
+| Off | 18.989 | 52.662 | 78.024 | 92.197 | 3.999 |
+| On | 19.297 | 51.821 | 69.972 | 80.000 | 3.900 |
+
+The repeat is mixed and does not establish a consistent FPS or pacing benefit.
+It also cannot quantify the effect of the other process. Keep the cache opt-in;
+do not convert either sequence or the isolated kernel microbenchmark into an
+end-to-end speedup claim. The confirmed image-40 job cycle saving remains a
+separate result. Next work needs better attribution of the remaining main-thread
+memory-helper and rendering preparation costs, rather than another default
+switch based on noisy FPS alone.
+
+Reverse artifacts: `local/native-cursor-vpcache-reverse-{run,windows}.json`,
+`local/native-cursor-vpcache-reverse-contended-report.json`, its presents CSV,
+and process-observation JSONL.
