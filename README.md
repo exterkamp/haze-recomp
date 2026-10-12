@@ -593,9 +593,11 @@ longer require the upstream experimental environment flag.
 The `feat/wasm-browser` worktree builds a Wasm64 runtime and a WebGL2 backend.
 Browser checks have verified the aligned guest memory arena, pthread events and
 joins, lazy local disc reads, and HLSL-to-GLSL translation with textured GPU
-rendering and pixel readback. Haze itself initializes graphics and reads its pak
-files, but the current boot remains black during loading. Browser gameplay,
-sound, and save/reload behavior are not yet validated.
+rendering, RSX texture channel remapping, depth attachment compatibility, and
+visible canvas pixels. Browser PCM playback passes a shared-memory AudioWorklet
+test at 48 kHz. Haze reaches its title screen with readable text and game audio;
+keyboard Start advances into its menus. Campaign gameplay and save/reload
+behavior are still being validated.
 
 From that worktree, reuse the generated PPU/SPU sources and local assets in the
 main checkout:
@@ -611,16 +613,23 @@ server automatically connects `game/disc` and `local/tools/rpcs3/dev_flash` from
 the main checkout, and opening the page boots the decrypted `EBOOT.ELF` directly.
 It serves asset byte ranges on demand and binds only to localhost. Override the
 paths with `--game-dir` and `--firmware-dir`; add `?manual=1` to choose folders
-instead. Build and game data stay in ignored directories. Browser save and HDD
-directories use IndexedDB, separately from native saves.
+instead. Existing installed data under `game/disc/game/BLUS30094` is read directly
+from those local assets, avoiding a second 4 GB installation. Build and game
+data stay in ignored directories. Browser saves use IndexedDB, separately from
+native saves; when no local installation is present, HDD data also uses IndexedDB.
 
 WASD, mouse look, keyboard buttons, and standard gamepads have browser bridges;
 their in-game behavior still needs verification. Click the canvas to capture the
 mouse and press F1 to release it. The page lists the remaining mappings.
+Click **Enable sound** or interact with the canvas to unlock Web Audio. The
+game's audio clock continues at 48 kHz while browser sound is suspended.
 
-Use `?smoke=1` for the runtime check, `?smoke=gl` for the GPU check, or `?trace=1`
+Use `?smoke=1` for the runtime check, `?smoke=gl` for the GPU check,
+`?smoke=audio` for PCM playback (build target `HazeAudioSmoke`), or `?trace=1`
 for periodic guest thread reports. `scripts/playtest-wasm.py` records logs,
 screenshots and an explicit gameplay-validation status under `local/wasm-tests`.
+Its `--sound`, `--capture-interval 30`, and `--profile-after 120` options unlock
+sound, retain periodic canvas captures, and sample browser worker CPU activity.
 The Wasm build requires shared memory, cross-origin isolation headers from the
 included server, and around 8 GiB of addressable linear memory. Its shader
 dependencies are pinned by the bootstrap script. Unsupported fiber and thread

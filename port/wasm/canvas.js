@@ -1,7 +1,24 @@
-// The DOM canvas has already been transferred to the runtime Worker. Register
-// that OffscreenCanvas so Emscripten can transfer it again to the render pthread.
+// Register the runtime's OffscreenCanvas for transfer to the render pthread.
+// Send completed ImageBitmaps back to the page explicitly: a DOM placeholder
+// does not reliably update through the runtime's multiple worker transfers.
 Module['preRun'] ??= [];
 Module['preRun'].push(() => {
+  if (!ENVIRONMENT_IS_PTHREAD) {
+    const forward = worker => worker.addEventListener('message', event => {
+      if (event.data.type === 'haze-frame') {
+        event.stopImmediatePropagation();
+        const frame = event.data.frame;
+        postMessage({type:'frame', frame}, [frame]);
+      }
+    }, true);
+    PThread.unusedWorkers.forEach(forward);
+    const allocate = PThread.allocateUnusedWorker;
+    PThread.allocateUnusedWorker = () => {
+      const worker = allocate();
+      forward(worker);
+      return worker;
+    };
+  }
   const canvas = Module['canvas'];
   canvas.id = 'canvas';
   const shared = _malloc(16);

@@ -44,6 +44,7 @@
 #include <string.h>
 #ifdef __EMSCRIPTEN__
 #include "haze_wasm_vm.h"
+#include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
 #endif
 #include "haze_input.h"
@@ -303,8 +304,22 @@ static DWORD WINAPI frame_clock(LPVOID)
     fprintf(stderr, "[rsx] %s backend init %s\n", RSX_BACKEND_NAME,
             rsx_ok ? "OK -- window open" : "FAILED");
 
+#ifdef __EMSCRIPTEN__
+    static ULONGLONG next_tick;
+    static int browser_rsx_ok;
+    next_tick = GetTickCount64();
+    browser_rsx_ok = rsx_ok;
+    // OffscreenCanvas presents when its worker returns to JavaScript. Modern
+    // browsers removed commit(), so a blocking native loop never shows frames.
+    emscripten_set_main_loop([] {
+        const int rsx_ok = browser_rsx_ok;
+        static bool scheduled = false;
+        if (!scheduled) {
+            emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, 1);
+            scheduled = true;
+        }
+#else
     ULONGLONG next_tick = GetTickCount64();
-
     for (;;) {
         /* Haze also waits on RSX labels, which do not signal the REF kick.
          * Keep those render-pass dependencies responsive instead of adding
@@ -316,6 +331,7 @@ static DWORD WINAPI frame_clock(LPVOID)
         }
         cellGcm_fifo_kick_wait(g_pump_profile.wait_ms);
         g_pump_profile.wait+=g_pump_profile.now()-wait_begin;
+#endif
         ULONGLONG now = GetTickCount64();
 
         int fired = 0;
@@ -352,11 +368,19 @@ static DWORD WINAPI frame_clock(LPVOID)
             /* Present on a guest flip. A present on a fixed clock can catch the
              * drain mid-frame and flash a partial one. Before the first flip
              * present freely, so the window is not blank during boot. */
-            if (cellGcm_flip_request_count() == 0) {
+            if (cellGcm_flip_request_count() == 0
+#ifdef __EMSCRIPTEN__
+                && fired
+#endif
+            ) {
                 present_frame();
             }
         }
+#ifdef __EMSCRIPTEN__
+    }, 1000, true);
+#else
     }
+#endif
     return 0;
 }
 

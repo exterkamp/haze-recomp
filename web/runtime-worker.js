@@ -47,16 +47,26 @@ onmessage = async ({data}) => {
   }
   if (data.type !== 'start' || runtime) return;
   try {
-    const moduleFile = data.smoke === 'gl' ? 'HazeWebGLSmoke.js' : data.smoke ? 'HazeWasmSmoke.js' : 'HazeRecomp.js';
+    // MEMFS statvfs reports a synthetic capacity. Persistent game data shares
+    // this origin's IndexedDB quota, which the browser can report accurately.
+    const storage = await navigator.storage.estimate();
+    const freeKB = Math.max(0, Math.min(0x7fffffff, Math.floor(((storage.quota || 0) - (storage.usage || 0)) / 1024)));
+    send('log', '[storage] Available browser quota: ' + freeKB + ' KiB');
+    const discPaths=data.assets?.disc || data.disc.map(file => file.webkitRelativePath.split('/').slice(1).join('/'));
+    const installed=discPaths.some(path => /^game\/BLUS30094\/USRDIR\/.+\.pak/i.test(path));
+    if(installed) send('log','[storage] Using installed game data from your local asset directory.');
+    const moduleFile = data.smoke === 'audio' ? 'HazeAudioSmoke.js' : data.smoke === 'gl' ? 'HazeWebGLSmoke.js' : data.smoke ? 'HazeWasmSmoke.js' : 'HazeRecomp.js';
     const {default:createHaze} = await import('/build/' + moduleFile);
     runtime = await createHaze({
-      canvas:data.canvas,
+      canvas:data.smoke === 'audio' ? undefined : data.canvas,
       // libc caches environ during initialization, before callMain. Supply the
       // environment before constructors run and before the guest pthread starts.
       preRun:[module => Object.assign(module.ENV, {
-        PS3_VFS_ROOT:'/disc', PS3_DEV_FLASH:'/firmware', PS3_SAVEDATA_ROOT:'/savedata',PS3_HDD0_ROOT:'/hdd0',
+        PS3_VFS_ROOT:'/disc', PS3_DEV_FLASH:'/firmware', PS3_SAVEDATA_ROOT:'/savedata',PS3_HDD0_ROOT:installed?'/disc':'/hdd0',
         PS3_VERBOSE:'0', PS3_HLE_UNRESOLVED:'fail', YDKJ_NO_CRI_CTX:'1',
-        PS3_NO_GUEST_PTR_TRAP:'1', HAZE_FRAME_TRACE:'1', AUDIO_MUTE:'1',
+        PS3_NO_GUEST_PTR_TRAP:'1', HAZE_FRAME_TRACE:'1',
+        PS3_BROWSER_STORAGE_FREE_KB:String(freeKB),
+        HAZE_WASM_GPU_CAPTURE:data.trace ? '1' : '',
       })],
       locateFile: name => '/build/' + name,
       print: text => send('log', text),
@@ -64,6 +74,8 @@ onmessage = async ({data}) => {
       onAbort: text => send('error', String(text)),
     });
     const {FS, WORKERFS, IDBFS, ENV} = runtime;
+    if (runtime._haze_wasm_audio_buffer)
+      postMessage({type:'audio', buffer:runtime.HEAPU8.buffer, offset:Number(runtime._haze_wasm_audio_buffer())});
     mountAssets(FS, WORKERFS, 'disc', data.disc, data.assets);
     mountAssets(FS, WORKERFS, 'firmware', data.firmware, data.assets);
     const elf = FS.readdir('/disc/PS3_GAME/USRDIR').find(name => name.toUpperCase() === 'EBOOT.ELF');

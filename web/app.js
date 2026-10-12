@@ -18,13 +18,17 @@ function launch(assets) {
   start.disabled = true;
   status.textContent = 'Loading WebAssembly…';
   worker = new Worker('runtime-worker.js');
+  const screen = document.querySelector('#screen');
+  const display = screen.getContext('bitmaprenderer');
   worker.onmessage = ({data}) => {
-    if (data.type === 'status') status.textContent = data.text;
+    if (data.type === 'frame') display.transferFromImageBitmap(data.frame);
+    else if (data.type === 'audio') window.hazeAudioConnect(data);
+    else if (data.type === 'status') status.textContent = data.text;
     else if (data.type === 'log') record(data.text);
     else if (data.type === 'error') { status.textContent = 'Runtime failed: ' + data.text; record(data.text); }
   };
   worker.onerror = event => { status.textContent = 'Runtime failed: ' + event.message; record(event.message); };
-  const canvas = document.querySelector('#screen').transferControlToOffscreen();
+  const canvas = new OffscreenCanvas(screen.width, screen.height);
   worker.postMessage({type:'start', disc:[...disc.files], firmware:[...firmware.files], assets, canvas,
     trace:new URLSearchParams(location.search).has('trace'),
     smoke:new URLSearchParams(location.search).get('smoke')}, [canvas]);

@@ -4,6 +4,7 @@
 #include <SPIRV/GlslangToSpv.h>
 #include <spirv_glsl.hpp>
 #include <mutex>
+#include <cctype>
 #include <vector>
 
 namespace {
@@ -34,6 +35,42 @@ std::string separate_samplers(const char* hlsl) {
         }
     }
     return source;
+}
+void apply_texture_remaps(std::string& source) {
+    size_t offset=0;
+    bool sampled=false;
+    while((offset=source.find('(',offset))!=std::string::npos) {
+        size_t start=offset;
+        while(start && (std::isalnum(static_cast<unsigned char>(source[start-1])) || source[start-1]=='_')) --start;
+        const auto function=source.substr(start,offset-start);
+        if(function!="texture" && function!="textureLod" && function!="textureGrad" &&
+           function!="textureProj" && function!="texelFetch") {++offset;continue;}
+        const auto comma=source.find(',',offset+1);
+        if(comma==std::string::npos)break;
+        auto sampler=source.substr(offset+1,comma-offset-1);
+        sampler.erase(0,sampler.find_first_not_of(" \t\n"));
+        sampler.erase(sampler.find_last_not_of(" \t\n")+1);
+        const bool vertex=sampler.rfind("rsx_vtex",0)==0;
+        const std::string prefix=vertex?"rsx_vtex":"rsx_tex";
+        if(sampler.rfind(prefix,0)!=0 || sampler.size()==prefix.size()) {++offset;continue;}
+        const auto suffix=sampler.substr(prefix.size());
+        if(suffix.find_first_not_of("0123456789")!=std::string::npos) {++offset;continue;}
+        const unsigned unit=std::stoul(suffix)+(vertex?16:0);
+        size_t end=offset+1;int nesting=1;
+        while(end<source.size() && nesting) {if(source[end]=='(')++nesting;else if(source[end]==')')--nesting;++end;}
+        const auto replacement="haze_swizzle("+source.substr(start,end-start)+", haze_remap["+std::to_string(unit)+"])";
+        source.replace(start,end-start,replacement);offset=start+replacement.size();sampled=true;
+    }
+    if(sampled) source.insert(source.find('\n')+1,R"(
+precision highp float;
+precision highp int;
+uniform ivec4 haze_remap[20];
+float haze_channel(vec4 value, int lane) { return lane<4 ? value[lane] : (lane==5 ? 1.0 : 0.0); }
+vec4 haze_swizzle(vec4 value, ivec4 lanes) {
+    return vec4(haze_channel(value,lanes.x),haze_channel(value,lanes.y),
+                haze_channel(value,lanes.z),haze_channel(value,lanes.w));
+}
+)");
 }
 }
 
@@ -96,6 +133,7 @@ bool haze_hlsl_to_glsl(const char* hlsl, bool vertex, std::string& source, std::
             compiler.set_name(sampler.combined_id, compiler.get_name(sampler.image_id));
         }
         source = compiler.compile();
+        apply_texture_remaps(source);
         return true;
     } catch (const std::exception& exception) {
         error = exception.what();

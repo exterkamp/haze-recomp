@@ -19,11 +19,13 @@ Files are read locally; they are not uploaded.</p>
 <button id="start" disabled>Start development build</button>
 </div>
 <button id="stop" disabled>Stop</button>
+<button id="sound" disabled>Enable sound</button>
 <p id="status" role="status">Checking browser support…</p>
 <small>This Wasm64 build requires a 64-bit browser, shared memory and approximately 8 GB of addressable Wasm memory.</small>
 <canvas id="screen" width="1280" height="720" tabindex="0"></canvas>
 <p>WASD: move · Mouse: look (click to capture) · Space: confirm/jump · Enter: Start · E: square · R: triangle · X: circle · Arrow keys: menus · F1: release mouse. Standard gamepads are supported.</p>
 <pre id="log"></pre>
 <script src="app.js"></script>
+<script src="audio.js"></script>
 <script src="input.js"></script>
 </html>
