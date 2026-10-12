@@ -7,7 +7,7 @@ param(
     [switch]$ProfileRenderer,
     [switch]$CompareSpuByteOps,
     [switch]$SpuFma,
-    [switch]$NativeSpuFloat,
+    [switch]$NativeSpuFloat = $true,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
     [string]$OutputDirectory,
     [int]$Jobs = 8
@@ -97,7 +97,7 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU numeric/estimate-refinement test failed.' }
     if ($NativeSpuFloat) {
         $nativeFloatTest = Join-Path $root 'local/test_spu_float_native.exe'
-        & $clang /nologo /W0 /O2 /clang:-msse4.1 /DSPU_FLOAT_NATIVE_RUNTIME=1 "/I$sdk/runtime/spu" "/Fe$nativeFloatTest" "/Fo$root/local/test_spu_float_native.obj" "$sdk/runtime/spu/tests/test_spu_float_native.c"
+        & $clang /nologo /W0 /O2 /Ob1 /clang:-O2 /clang:-msse4.1 /clang:-ffp-contract=off /DSPU_FLOAT_NATIVE_RUNTIME=1 "/I$sdk/runtime/spu" "/Fe$nativeFloatTest" "/Fo$root/local/test_spu_float_native.obj" "$sdk/runtime/spu/tests/test_spu_float_native.c"
         if ($LASTEXITCODE -ne 0) { throw 'Native SPU floating-point oracle compilation failed.' }
         & $nativeFloatTest
         if ($LASTEXITCODE -ne 0) { throw 'Native SPU hardware arithmetic/FP state/fallback oracle failed.' }

@@ -553,6 +553,22 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
 
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    /* Haze's normal configuration uses the measured native paths. Explicit
+     * environment overrides remain available for diagnostic A/B comparisons.
+     * Hardware arithmetic checks CPU/OS support and falls back internally. */
+    static const char* native_defaults[][2] = {
+        {"HAZE_TEXTURE_WRITE_WATCH", "1"},
+        {"HAZE_NATIVE_CURSOR", "1"},
+        {"GCM_FIFO_WAIT_NATIVE", "1"},
+        {"SPURS_QUEUE_WAIT_NATIVE", "1"},
+        {"HAZE_SPU_IDLE_WAIT", "1"},
+        {"SPU_FLOAT_NATIVE", "1"},
+        {"RSX_PROFILE_LIGHT", "1"},
+    };
+    for (const auto& setting : native_defaults)
+        if (!getenv(setting[0])) _putenv_s(setting[0], setting[1]);
+#endif
     if (!haze_graphics_initialize()) return 2;
 #if defined(_WIN32) && defined(HAZE_REQUIRE_FMA)
     int cpu[4];
