@@ -112,3 +112,14 @@ repeatable 30 FPS result or a revision-to-revision comparison with an older WIP.
 The experiment remains off by default pending independent reversed-order
 validation. The full native regression gate passed in
 `local/native-queue-wait-tests.log`, including the new queue/coherency oracles.
+
+A fresh reverse-order attempt, `local/runs/20261012-071236-939`, verified
+startup and menus with native waits enabled, but scripted held menu input
+repeated a selection and entered chapter selection. It produced no measured
+gameplay windows and is excluded from the comparison. The owned process exited
+normally with code 0 at 07:21:07 UTC. No chapter overwrite was confirmed.
+Reverse-order gameplay validation remains outstanding. Short menu pulses and
+visual checks at each transition are required for the next attempt; poll
+counts must not be treated as elapsed time. The final profiling build also
+passed its actual compile-rule guard for all six PPU/SPU/queue/RSX sources in
+`local/squad-native-queue-final-build.log`.
