@@ -74,6 +74,18 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU SIMD byte-operation test compilation failed.' }
     & $bytesTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU SIMD byte-operation oracle test failed.' }
+    $fiTest = Join-Path $root 'local/test_fi_scaling.exe'
+    $fiFlags = @('/clang:-msse4.1')
+    if ($SpuFma) { $fiFlags += @('/clang:-mavx', '/clang:-mfma') }
+    & $clang /nologo /W0 /O2 @fiFlags "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$fiTest" "/Fo$root/local/test_fi_scaling.obj" "$sdk/runtime/spu/tests/test_fi_scaling.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU FI scaling oracle compilation failed.' }
+    & $fiTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU FI scaling rounding/denormal oracle failed.' }
+    $numericTest = Join-Path $root 'local/test_spu_numeric_semantics.exe'
+    & $clang /nologo /W0 /O2 @fiFlags "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$numericTest" "/Fo$root/local/test_spu_numeric_semantics.obj" "$sdk/runtime/spu/tests/test_spu_numeric_semantics.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU numeric semantics test compilation failed.' }
+    & $numericTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU numeric/estimate-refinement test failed.' }
     $coherencyTest = Join-Path $root 'local/test_coherency_lifetime.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$coherencyTest" "/Fo$root/local/" "$sdk/runtime/spu/tests/test_coherency_lifetime.c" "$sdk/runtime/spu/spu_coherency.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime test compilation failed.' }
