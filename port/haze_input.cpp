@@ -25,8 +25,8 @@ bool enabled = true;
 double sensitivity = 0.10;
 bool invert_y;
 HazeStartupSkip startup_skip;
-std::atomic<bool> message_keys[256];
-std::atomic<ULONGLONG> key_until[256];
+enum { KEY_HELD=1, KEY_PENDING=2 };
+std::atomic<unsigned> message_keys[256];
 std::atomic<bool> capture_click;
 struct Binding { const char* name; const char* fallback; u16 button; int vk=0; };
 Binding bindings[] = {
@@ -55,18 +55,25 @@ int key_code(const char* name) {
     fprintf(stderr,"[input] Unknown key '%s'; binding disabled\n",name);
     return 0;
 }
-bool down(int vk, ULONGLONG now) {
-    return vk > 0 && vk < 256 && ((GetAsyncKeyState(vk) & 0x8000) ||
-        message_keys[vk].load() || now < key_until[vk].load());
+bool down(int vk) {
+    if (vk <= 0 || vk >= 256) return false;
+    // Buffer an otherwise missed tap for one host report, rather than holding
+    // released buttons for 120ms. The SDK caches that report between pad reads.
+    const unsigned state=message_keys[vk].fetch_and(~unsigned(KEY_PENDING));
+    return (state & (KEY_HELD|KEY_PENDING)) || (GetAsyncKeyState(vk) & 0x8000);
 }
 void clear_keys() {
-    for (int i=0;i<256;i++) { message_keys[i]=false; key_until[i]=0; }
+    for (auto& key : message_keys) key=0;
     capture_click=false;
 }
-void record_key(int vk, bool held, ULONGLONG now) {
+void record_key(int vk, bool held, ULONGLONG) {
     if (vk <= 0 || vk >= 256 || vk == VK_F1) return;
-    if (held && !message_keys[vk].exchange(true)) key_until[vk]=now+120;
-    if (!held) message_keys[vk]=false;
+    unsigned previous=message_keys[vk].load();
+    unsigned next;
+    do {
+        next=held ? previous | KEY_HELD | ((previous & KEY_HELD) ? 0u : KEY_PENDING)
+                  : previous & ~unsigned(KEY_HELD);
+    } while (!message_keys[vk].compare_exchange_weak(previous,next));
 }
 void update_title() {
     SetWindowTextA(window, captured ? "Haze | Mouse captured | Esc: Pause | F1: Release mouse"
@@ -175,15 +182,23 @@ int poll(u32 port, CellPadHostInput* input, void*) {
         clear_keys();
         return 1; // All controls neutral immediately on focus loss.
     }
+    // A rebound key may drive several buttons or movement. Consume its pending
+    // tap once, then share the same snapshot across all bindings in this report.
+    bool sampled[256]={}, states[256]={};
+    auto key_down=[&](int vk) {
+        if (vk <= 0 || vk >= 256) return false;
+        if (!sampled[vk]) { states[vk]=down(vk); sampled[vk]=true; }
+        return states[vk];
+    };
     for (const auto& b : bindings) {
         if (b.vk >= VK_LBUTTON && b.vk <= VK_XBUTTON2 && !captured) continue;
         if (b.vk == VK_LBUTTON && capture_click) continue;
-        if (down(b.vk,now)) input->buttons |= b.button;
+        if (key_down(b.vk)) input->buttons |= b.button;
     }
     // Escape always pauses and releases mouse capture, even with Start rebound.
-    if (down(VK_ESCAPE,now)) input->buttons |= CELL_PAD_CTRL_START;
-    input->lx = (u8)(128 + 127*((int)down(movement[3],now)-(int)down(movement[2],now)));
-    input->ly = (u8)(128 + 127*((int)down(movement[1],now)-(int)down(movement[0],now)));
+    if (key_down(VK_ESCAPE)) input->buttons |= CELL_PAD_CTRL_START;
+    input->lx = (u8)(128 + 127*((int)key_down(movement[3])-(int)key_down(movement[2])));
+    input->ly = (u8)(128 + 127*((int)key_down(movement[1])-(int)key_down(movement[0])));
     if (captured) {
         if (InterlockedExchange(&wheel,0)) input->buttons |= CELL_PAD_CTRL_CIRCLE;
     }

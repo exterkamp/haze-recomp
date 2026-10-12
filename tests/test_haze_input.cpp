@@ -42,6 +42,8 @@ static CellPadHostInput sample() {
     return input;
 }
 int main() {
+    _set_error_mode(_OUT_TO_STDERR);
+    _set_abort_behavior(0,_CALL_REPORTFAULT);
     window=(HWND)1;
     for (auto& b : bindings) b.vk=key_code(b.fallback);
     assert(key_code("w")=='W'); assert(key_code("Mouse2")==VK_RBUTTON);
@@ -83,12 +85,38 @@ int main() {
     assert(haze_input_take_mouse(dx,dy,speed,inverse) && dy==8 && inverse);
     CellPadHostInput other{}; assert(poll(1,&other,nullptr)==0);
     captured=0; invert_y=false;
-    // A quick tap between pad polls survives repeated reads for 120ms.
+    // A quick tap between pad polls reaches one report, without stretching
+    // a released confirm across subsequent menus.
     window_proc(window,WM_KEYDOWN,VK_SPACE,0);
     window_proc(window,WM_KEYUP,VK_SPACE,0);
     assert(sample().buttons&CELL_PAD_CTRL_CROSS);
+    assert(!(sample().buttons&CELL_PAD_CTRL_CROSS));
+    // Rebinding one key to multiple actions shares a single tap snapshot.
+    const int circle_key=bindings[1].vk;
+    bindings[1].vk=VK_SPACE;
+    window_proc(window,WM_KEYDOWN,VK_SPACE,0);
+    window_proc(window,WM_KEYUP,VK_SPACE,0);
+    p=sample();
+    assert((p.buttons & (CELL_PAD_CTRL_CROSS|CELL_PAD_CTRL_CIRCLE)) ==
+           (CELL_PAD_CTRL_CROSS|CELL_PAD_CTRL_CIRCLE));
+    assert(!(sample().buttons & (CELL_PAD_CTRL_CROSS|CELL_PAD_CTRL_CIRCLE)));
+    bindings[1].vk=circle_key;
+    // Long holds stay held; the release is not followed by a buffered echo.
+    window_proc(window,WM_KEYDOWN,VK_SPACE,0);
+    for (int i=0;i<80;++i) assert(sample().buttons&CELL_PAD_CTRL_CROSS);
+    window_proc(window,WM_KEYUP,VK_SPACE,0);
+    assert(!(sample().buttons&CELL_PAD_CTRL_CROSS));
+    // A press sampled while held releases immediately, including an OS repeat.
+    window_proc(window,WM_KEYDOWN,VK_SPACE,0);
     assert(sample().buttons&CELL_PAD_CTRL_CROSS);
-    ticks+=121;
+    window_proc(window,WM_KEYDOWN,VK_SPACE,1ll<<30);
+    assert(sample().buttons&CELL_PAD_CTRL_CROSS);
+    window_proc(window,WM_KEYUP,VK_SPACE,0);
+    assert(!(sample().buttons&CELL_PAD_CTRL_CROSS));
+    // Separate quick taps still each produce a new press.
+    window_proc(window,WM_KEYDOWN,VK_SPACE,0);
+    window_proc(window,WM_KEYUP,VK_SPACE,0);
+    assert(sample().buttons&CELL_PAD_CTRL_CROSS);
     assert(!(sample().buttons&CELL_PAD_CTRL_CROSS));
     window_proc(window,WM_KEYDOWN,'W',0);
     window_proc(window,WM_KILLFOCUS,0,0);
