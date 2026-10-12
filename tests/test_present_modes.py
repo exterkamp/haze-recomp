@@ -128,6 +128,14 @@ class PresentWindows(unittest.TestCase):
                 cursor_good.replace('enabled=1','enabled=0'),
                 cursor_good+'[haze-native-cursor-mode] enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['mode_column'] = 'spu_float_native'
+            args.windows.write_text(json.dumps(windows))
+            float_good=cursor_good.replace('haze-native-cursor-mode','spu-float-native-mode')
+            run(float_good)
+            for invalid in ['', cursor_good, float_good.replace('qpc=80','qpc=101'),
+                float_good.replace('enabled=1','enabled=0'),
+                float_good+'[spu-float-native-mode] enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:

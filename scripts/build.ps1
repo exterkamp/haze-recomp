@@ -6,6 +6,7 @@ param(
     [switch]$ProfileRenderer,
     [switch]$CompareSpuByteOps,
     [switch]$SpuFma,
+    [switch]$NativeSpuFloat,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
     [string]$OutputDirectory,
     [int]$Jobs = 8
@@ -47,7 +48,7 @@ if ($RuntimeOnly) {
 }
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
 $exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory) } else { $build }
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)"
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)" "-DPS3RECOMP_NATIVE_FLOAT_RUNTIME=$([int][bool]$NativeSpuFloat)"
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 if (-not $RuntimeOnly) {
     & $python "$root/tests/check_profile_configuration.py" $build --enabled $([int][bool]$ProfileRenderer)
@@ -91,6 +92,13 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU numeric semantics test compilation failed.' }
     & $numericTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU numeric/estimate-refinement test failed.' }
+    if ($NativeSpuFloat) {
+        $nativeFloatTest = Join-Path $root 'local/test_spu_float_native.exe'
+        & $clang /nologo /W0 /O2 /clang:-msse4.1 /DSPU_FLOAT_NATIVE_RUNTIME=1 "/I$sdk/runtime/spu" "/Fe$nativeFloatTest" "/Fo$root/local/test_spu_float_native.obj" "$sdk/runtime/spu/tests/test_spu_float_native.c"
+        if ($LASTEXITCODE -ne 0) { throw 'Native SPU floating-point oracle compilation failed.' }
+        & $nativeFloatTest
+        if ($LASTEXITCODE -ne 0) { throw 'Native SPU hardware arithmetic/FP state/fallback oracle failed.' }
+    }
     $coherencyTest = Join-Path $root 'local/test_coherency_lifetime.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$coherencyTest" "/Fo$root/local/" "$sdk/runtime/spu/tests/test_coherency_lifetime.c" "$sdk/runtime/spu/spu_coherency.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime test compilation failed.' }

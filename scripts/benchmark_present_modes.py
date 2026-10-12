@@ -18,6 +18,8 @@ The native_cursor variant similarly uses HAZE_NATIVE_CURSOR_FILE and its own
 process-wide events for the experimental paired PC cursor kernel.
 The fifo_recycle_wait variant uses GCM_FIFO_WAIT_CONTROL and requires mode
 events for each explicitly selected producer host TID.
+The spu_float_native variant uses SPU_FLOAT_NATIVE_FILE and process-wide
+mode events; its hardware arithmetic must be built and supported by the CPU/OS.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -161,12 +163,14 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spu_triplet_copy', 'native_cursor'):
+    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native'):
         if not args.queue_mode_log:
             raise ValueError('Native copy mode requires its process-wide mode-event log')
         worker_modes = {'process': []}
         for line in args.queue_mode_log.read_text(errors='replace').splitlines():
-            name = 'haze-spu-triplet-mode' if mode_column == 'spu_triplet_copy' else 'haze-native-cursor-mode'
+            name = {'spu_triplet_copy':'haze-spu-triplet-mode',
+                    'native_cursor':'haze-native-cursor-mode',
+                    'spu_float_native':'spu-float-native-mode'}[mode_column]
             match = re.fullmatch(r'\[' + name + r'\] enabled=([01]) qpc=(\d+)', line)
             if match: worker_modes['process'].append((int(match[2]), int(match[1])))
         worker_modes['process'].sort()
@@ -240,7 +244,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','spu_float_native'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
