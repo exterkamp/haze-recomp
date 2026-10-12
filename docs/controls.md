@@ -35,23 +35,31 @@ held controller buttons, and sub-deadzone noise do not repeatedly take over.
 The in-game controls/rebinding menu is tracked in
 [issue #23](https://github.com/zdiemer/haze-recomp/issues/23).
 
-## Verification checkpoint
+## Verification
 
 - `scripts/test-input.ps1 -SharedRoot E:\Code\haze-recomp -SDL3Root external/SDL3-3.4.18`:
   keyboard/raw-mouse/camera regressions; focus and coexistence; actual INI reload;
   real SDL virtual-device hotplug/reconnect, positional buttons, stick deadzones,
   analog triggers, controller rebinds/inversion, and a previously unrecognized
   flight-stick device enabled by a user mapping file all passed.
-- Native build with main's pinned SDK completed at one compiler job. Six parallel
+- Native build with SDK `8660186` (branch `feat/haze-input-prompts`, published
+  to the SDK origin) completed at one compiler job. Six parallel
   jobs exhausted memory in the existing large generated PPU translation units.
-- A 45-second native boot smoke run initialized SDL and presented over 1,280
-  frames (`local/runs/20261012-220727-650`). Captured early frames show the title
-  splash. This is boot evidence, not completed interactive gameplay validation.
+- The 85-second native probe at **2560x1440**
+  (`local/runs/20261012-230151-250`) captured the Select legend changing
+  Space -> E after a live INI save, E -> Z after a PNG replacement preserving
+  its timestamp, original PS3 Cross after disabling replacements, and Z after
+  re-enabling. A real E key press in the owned window advanced the menu with
+  the new binding. Frame headers confirm 2560x1440; the preview window was
+  1280x720. `local/native-prompts-report.json` maps each stage to its frame;
+  `local/prompts-verification.png` contains crops at their captured pixel size.
+  This verifies menu behavior and GPU hot reload; full campaign play and real
+  controller hardware have not been exercised in this worktree.
 - The SDK replacement API passed WARP GPU readback for RGBA/alpha, cache reuse,
   same-frame revision refresh, original-BC3 fallback and descriptor eligibility.
   Existing texture, depth, decal, resolution and postprocess checks also passed.
 
-## Prompt rendering work still required
+## Prompt rendering
 
 The Kenney Input Prompts archive in Downloads contains version 1.5A. The 363
 default keyboard/mouse, Xbox, PlayStation and Switch PNGs are copied unchanged
@@ -69,11 +77,31 @@ Row 1: left horizontal, Select, Start, right horizontal, L1, R1.
 Row 2: Cross, Square, Circle, Triangle, L3, R3.
 Row 3: Left, Right, Up, Down, system button, D-pad.
 
-The isolated SDK now exposes a bounded RGBA replacement callback plus a cheap
-revision callback, preserving original dimensions and channel remapping. It
-reuses ordinary texture uploads and retires replaced resources safely.
-Next: compose this atlas from the current bindings and Kenney PNGs, identify
-the original by complete content plus format/dimensions, invalidate its cached
-resource on input-family/config/icon-file changes, and verify the rendered
-keyboard and controller prompts and hot reload in the native game. The current
-game executable still shows original prompts; the goal is not complete.
+`port/haze_prompts.cpp` uses Windows Imaging Component to decode the PNGs and
+compose a replacement at the original extent. Keyboard/mouse glyphs use the
+current `[Bindings]`; controller glyphs use `[ControllerBindings]` and the
+selected family's physical labels (Nintendo south is B). Movement uses the
+four current keyboard movement keys. Unknown/None bindings have empty glyphs.
+The exact original compressed-pixel fingerprint, dimensions and BC3 format
+identify the target; unrelated textures retain their original decoder.
+
+`[Prompts] Enabled=0` restores original game prompts. `Directory` defaults to
+`../assets/input-prompts`, resolved relative to the INI. Family changes rebuild
+immediately; the INI and all PNGs used by the active family are checked every
+500 ms, including content checks for copies that preserve timestamps.
+Missing or malformed used PNGs restore the whole original atlas until
+the pack is repaired. WIC decoding stays on the window thread; immutable atlas
+snapshots are shared safely with the renderer. Alpha-aware bilinear resizing
+keeps transparent icon edges clean without nearest-neighbor jaggies.
+
+The isolated SDK exposes a bounded RGBA replacement callback plus a cheap
+revision callback, preserving original dimensions and channel remapping.
+Changing a revision refreshes an already cached GPU texture, even within the
+same frame. Normal texture uploads and safe resource retirement are reused.
+Installation includes the INI and CC0 icons beside the executable.
+
+The prompt tests cover real PNG decoding for all families, binding changes,
+unchanged cache revisions, icon-file edits, disabled prompts, malformed-pack
+fallback and recovery. An optional untracked retail fixture verifies that a
+one-byte change prevents replacement. Physical controller hardware has not
+been exercised; the SDL tests use its real virtual joystick driver.

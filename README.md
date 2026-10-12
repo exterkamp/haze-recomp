@@ -331,8 +331,10 @@ before the game builds its aim and camera matrices. Mouse motion does not drive
 the right stick, so it has no stick deadzone, acceleration, smoothing or
 turn-speed cap. Sensitivity is degrees per count (default `0.10`), and `InvertY`
 reverses vertical motion. Camera pitch still respects the game's limits.
-The game still displays controller prompts. `HAZE_INPUT_CONFIG` selects another
-configuration file. SDL supports hotplug and custom device mappings; controller
+Kenney prompts follow the last active keyboard/mouse or controller family and
+the current bindings. PNG edits and INI saves reload within half a second.
+`[Prompts]` selects the icon directory or restores original prompts.
+`HAZE_INPUT_CONFIG` selects another configuration file. SDL supports hotplug and custom device mappings; controller
 buttons, axes, deadzones, trigger threshold and look inversion also live in the
 INI. See [controls implementation and verification](docs/controls.md).
 Closing the game window now ends its native process.
@@ -344,6 +346,7 @@ keeping build products and run logs in the worktree:
 .\scripts\build.ps1 -SharedRoot E:\Code\haze-recomp
 .\scripts\test-input.ps1 -SharedRoot E:\Code\haze-recomp
 .\scripts\run.ps1 -SharedRoot E:\Code\haze-recomp -Seconds 600
+.\scripts\play.ps1 -SharedRoot E:\Code\haze-recomp
 ```
 
 For renderer changes, `build.ps1 -SdkRoot .\external\ps3recomp` selects an

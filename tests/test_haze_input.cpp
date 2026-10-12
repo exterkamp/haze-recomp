@@ -42,6 +42,8 @@ bool haze_gamepad_initialize(const char*) { return true; }
 void haze_gamepad_configure(const char*) {}
 HazeGamepadState haze_gamepad_update() { return fake_pad; }
 void haze_gamepad_shutdown() {}
+void haze_prompts_initialize(const char*) {}
+void haze_prompts_update(HazeInputFamily) {}
 static CellPadHostInput sample() {
     CellPadHostInput input{0,128,128,128,128,0,0};
     assert(poll(0,&input,nullptr)==1);
@@ -134,7 +136,7 @@ int main() {
     assert(!(sample().buttons&CELL_PAD_CTRL_START));
     window_proc(window,WM_SETTEXT,0,(LPARAM)"Haze | FPS: 30.00");
     assert(forwarded_caption.find("FPS: 30.00")!=std::string::npos &&
-           forwarded_caption.find("Space: Confirm")!=std::string::npos);
+           forwarded_caption.find("F1: Capture mouse")!=std::string::npos);
     keys[VK_LBUTTON]=true; captured=1; capture_click=true;
     assert(!(sample().buttons&CELL_PAD_CTRL_R1));
     capture_click=false;

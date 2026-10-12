@@ -1,4 +1,5 @@
 param(
+    [string]$SharedRoot,
     [ValidateSet('Auto','KeyboardMouse','Controller')][string]$InputMode = 'Auto',
     [string]$ExecutablePath,
     [string]$GraphicsConfig,
@@ -8,8 +9,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$assets = if ($SharedRoot) { (Resolve-Path -LiteralPath $SharedRoot).Path } else { $root }
 $exe = if ($ExecutablePath) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExecutablePath) } else { Join-Path $root 'build\haze\HazeRecomp.exe' }
-$elf = Join-Path $root 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
+$elf = Join-Path $assets 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable first with scripts/build.ps1.' }
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The local decrypted Haze executable is missing.' }
 $session = Join-Path $root ('local\sessions\' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss-fff'))
@@ -17,8 +19,8 @@ New-Item -ItemType Directory -Path $session -Force | Out-Null
 $shaderCache = Join-Path $root 'local\cache\rsx-shaders'
 New-Item -ItemType Directory -Path $shaderCache -Force | Out-Null
 $settings = @{
-    PS3_VFS_ROOT = (Join-Path $root 'game\disc')
-    PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $root 'local\tools\rpcs3\dev_flash' })
+    PS3_VFS_ROOT = (Join-Path $assets 'game\disc')
+    PS3_DEV_FLASH = $(if ($env:PS3_DEV_FLASH) { $env:PS3_DEV_FLASH } else { Join-Path $assets 'local\tools\rpcs3\dev_flash' })
     PS3_NET_ONLINE = '1'
     YDKJ_NO_CRI_CTX = '1'
     PS3_SAVEDATA_ROOT = $(if ($env:PS3_SAVEDATA_ROOT) { $env:PS3_SAVEDATA_ROOT } else { Join-Path $root 'local\state\savedata' })

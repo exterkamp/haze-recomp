@@ -309,8 +309,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 if(WIN32)
     include(controller-dependency.cmake)
-    target_sources(${PROJECT_NAME} PRIVATE haze_gamepad.cpp)
-    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)
+    target_sources(${PROJECT_NAME} PRIVATE haze_gamepad.cpp haze_prompts.cpp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3 windowscodecs ole32)
     if(TARGET SDL3::SDL3-shared)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -443,3 +443,7 @@ if(EMSCRIPTEN)
     target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=_Z13func_00C07818P11ppu_context)
 endif()
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+if(WIN32)
+    install(FILES ../config/input.ini DESTINATION bin/config)
+    install(DIRECTORY ../assets/input-prompts DESTINATION bin/assets)
+endif()

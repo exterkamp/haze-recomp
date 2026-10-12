@@ -1,6 +1,7 @@
 #include "haze_input.h"
 #include "haze_mouse.h"
 #ifdef _WIN32
+#include "haze_prompts.h"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -87,7 +88,7 @@ void record_key(int vk, bool held, ULONGLONG) {
 }
 void update_title() {
     SetWindowTextA(window, captured ? "Haze | Mouse captured | Esc: Pause | F1: Release mouse"
-        : "Haze | Space: Confirm | Enter: Start | Click/F1: Capture mouse | Esc: Pause");
+        : enabled ? "Haze | Click/F1: Capture mouse | Esc: Pause" : "Haze | Controller");
 }
 void clip_cursor() {
     RECT rect;
@@ -121,7 +122,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             char caption[512];
             snprintf(caption,sizeof(caption),"%s | %s",(const char*)lp,
                 captured ? "Esc: Pause | F1: Release mouse"
-                         : "Space: Confirm | Enter: Start | Click/F1: Mouse | Esc: Pause");
+                         : enabled ? "Click/F1: Capture mouse | Esc: Pause" : "Controller");
             return CallWindowProc(original_proc,hwnd,msg,wp,(LPARAM)caption);
         }
         break;
@@ -268,6 +269,13 @@ void haze_input_initialize() {
     cellPad_set_host_input_callback(poll,nullptr);
     const char* config=getenv("HAZE_INPUT_CONFIG");
     GetFullPathNameA(config && *config ? config : "config/input.ini",MAX_PATH,config_path,nullptr);
+    if ((!config || !*config) && GetFileAttributesA(config_path)==INVALID_FILE_ATTRIBUTES) {
+        char executable[MAX_PATH]{};
+        GetModuleFileNameA(nullptr,executable,MAX_PATH);
+        if (const char* slash=std::strrchr(executable,'\\'))
+            snprintf(config_path,sizeof(config_path),"%.*s\\config\\input.ini",int(slash-executable),executable);
+    }
+    haze_prompts_initialize(config_path);
     std::lock_guard<std::mutex> lock(settings_mutex);
     load_keyboard_config();
     WIN32_FILE_ATTRIBUTE_DATA attributes{};
@@ -318,6 +326,7 @@ void haze_input_update() {
         std::lock_guard<std::mutex> lock(settings_mutex);
         controller_state=focused ? state : HazeGamepadState{};
     }
+    haze_prompts_update(last_family.load());
 }
 HazeInputFamily haze_input_family() { return last_family.load(); }
 void haze_input_shutdown() {
