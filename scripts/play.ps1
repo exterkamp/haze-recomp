@@ -1,6 +1,9 @@
 param(
     [ValidateSet('KeyboardMouse','Controller')][string]$InputMode = 'KeyboardMouse',
-    [string]$ExecutablePath
+    [string]$ExecutablePath,
+    [ValidatePattern('^[1-9][0-9]{0,3}x[1-9][0-9]{0,3}$')]
+    [ValidateScript({ $dimensions = $_ -split 'x'; [int]$dimensions[0] -le 8192 -and [int]$dimensions[1] -le 8192 })]
+    [string]$RenderResolution
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -21,6 +24,7 @@ $settings = @{
     PS3_HLE_UNRESOLVED = 'fail'
     PS3_VERBOSE = '0'
     RSX_LIVE_DRAW = '1'
+    RSX_RENDER_RESOLUTION = $(if ($RenderResolution) { $RenderResolution } else { $env:RSX_RENDER_RESOLUTION })
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     HAZE_INPUT = $(if ($InputMode -eq 'Controller') { 'controller' } else { 'keyboard' })
     HAZE_INPUT_CONFIG = $(if ($env:HAZE_INPUT_CONFIG) { $env:HAZE_INPUT_CONFIG } else { Join-Path $root 'config\input.ini' })

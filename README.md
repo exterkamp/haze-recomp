@@ -17,6 +17,7 @@ application version **01.00**. Other regions and updates are not validated.
 | Full keyboard and mouse controls | Configurable keyboard and raw mouse prototype added; mouse currently drives the game's camera stick, retaining its speed limits |
 | PC key prompts | Planned; requires UI/asset work |
 | Higher frame rates | Duplicate presentations fixed; native simulation and frame pacing optimization in progress |
+| Custom rendering resolution | Live D3D12 renderer accepts explicit scene/output dimensions; native sizes remain the default |
 | Ultrawide | Research after baseline rendering works; projection and HUD must both be addressed |
 
 The runtime building successfully does not establish that Haze works. Haze's
@@ -218,6 +219,32 @@ shorter than 1/30 second across 9,575 consecutive presents. A lighter carrier
 view reached 29.41 FPS, while the busy deck remained at 20.70 FPS in that run.
 
 ## Local development
+
+Select a custom internal resolution in the live renderer:
+
+```powershell
+.\scripts\play.ps1 -RenderResolution 1920x1080
+.\scripts\play.ps1 -RenderResolution 2560x1440
+.\scripts\run.ps1 -Seconds 120 -RenderResolution 1777x997 -CaptureFrames 2
+```
+
+`RSX_RENDER_RESOLUTION=WIDTHxHEIGHT` also works with either launcher or the
+executable directly. The launcher parameter takes precedence. Omit both to
+retain the original render sizes. Width and height accept integers from 1 to
+8192, subject to GPU memory and texture-size limits. Restart to change them.
+This option requires the Live renderer.
+
+Haze's observed main scene is 1024x576, followed by a 1280x720 output pass.
+Custom mode renders both at the selected dimensions and scales intermediate
+color/depth targets relative to the scene. For example, 1920x1080 gives a
+1920x1080 scene, 960x540 half-size effects, and a 1920x1080 output. This also
+increases shadow-target sizes and GPU memory use. Guest memory, texture assets,
+camera projection and HUD proportions retain their original conventions;
+selecting a different aspect ratio stretches the picture. Ultrawide projection
+and HUD adaptation remain separate work.
+
+See [custom resolution implementation and validation](docs/custom-render-resolution.md)
+for the rendering changes and native evidence.
 
 Requirements: Windows x64, Visual Studio C++ tools and Windows SDK, Clang,
 CMake, Ninja, Python 3.11+, Git, and 7-Zip. The build script discovers the
