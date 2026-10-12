@@ -71,6 +71,11 @@ used as evidence of a sky-facing performance result.
 
 ## Opt-in experiment
 
+This section describes the original experiment. The subsequent
+[VSync and settings validation](performance-vsync-pacer-2026-10-12.md) makes
+the bypass automatic when the PC FPS setting explicitly selects unlimited or
+a cap above 30; the normal 30 FPS default still retains the original wait.
+
 `HAZE_NATIVE_FRAME_PACER=1`, or a 0/1 file named by `HAZE_FRAME_PACER_FILE`,
 bypasses only the final guest sleep/spin branch. The original update, renderer
 submission, final clock sampling and frame bookkeeping remain. Existing PC
@@ -130,5 +135,6 @@ alone cannot establish FPS and are excluded. Future benchmark commands should
 schedule normal close directly after their final measurement/observer bracket
 instead of depending on a later agent turn before the launcher timeout.
 
-Consistent frame pacing, correct simulation above 30, and VSync-on verification
-remain outstanding; the full goal is active.
+Consistent frame pacing and correct simulation above 30 remain outstanding.
+The subsequent VSync-on functional validation is documented in the linked
+report above; the full goal is active.

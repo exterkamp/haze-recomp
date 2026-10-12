@@ -37,7 +37,7 @@ Missing keys use built-in defaults; an empty `[graphics]` section is sufficient.
 | `sharpening` | 0..1, default 0 | Final-image sharpening constrained to local color bounds to limit halos. Strong values can emphasize noise. |
 | `exposure` | -2..2 stops, default 0 | Final-image brightness multiplier, including HUD. +1 doubles displayed RGB, -1 halves it. This operates on the game's display colors, rather than physically based HDR lighting. |
 | `vsync` | `auto` (default), `on`, `off` | `auto` retains the existing behavior: Present interval 0 when capped, 1 when uncapped. `on` requests interval 1; `off` requests 0. Desktop composition/driver behavior can still govern tearing. |
-| `frame_limit` | 0..240, default 30 | Presentation ceiling; 0 disables the port limiter. Higher caps do not solve CPU bottlenecks. Game timing above 30 FPS needs separate validation. |
+| `frame_limit` | 0..240, default 30 | Presentation ceiling. Selecting 0 (unlimited) or 31..240 also bypasses Haze's original 30 FPS wait. Higher caps do not solve CPU bottlenecks; gameplay timing above 30 FPS remains experimental. |
 
 A quality-oriented starting point is 1920x1080, FXAA, 16x filtering, native or
 4096 shadows, mip bias 0, and sharpening 0.15. Keep exposure 0 unless you want a

@@ -64,6 +64,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test compilation failed.' }
     & $graphicsTest
     if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test failed.' }
+    $pacerSettingsTest = Join-Path $root 'local/test_frame_pacer_settings.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/Fe$pacerSettingsTest" "/Fo$root/local/test_frame_pacer_settings.obj" "$root/tests/test_frame_pacer_settings.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native frame-pacer selection test compilation failed.' }
+    & $pacerSettingsTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native frame-pacer selection test failed.' }
     $displayTest = Join-Path $root 'local/test_haze_display.exe'
     & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$displayTest" "/Fo$root/local/test_haze_display.obj" "$root/tests/test_haze_display.cpp" /link user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Display-window test compilation failed.' }

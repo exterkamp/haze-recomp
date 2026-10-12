@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <map>
 #include <string>
+#include "../port/haze_frame_pacer_settings.h"
 #include "../port/haze_display.cpp"
 #include "../port/haze_graphics.cpp"
 static void clear_options() {
@@ -16,8 +17,17 @@ int main() {
     config("\xef\xbb\xbf[graphics]\r\nrender_resolution=1777x997\nanti_aliasing=fxaa\nanisotropic_filtering=16\nshadow_resolution=4096\nmip_lod_bias=-0.5\nsharpening=0.3\nexposure=0.5\nvsync=on\nframe_limit=60\n");
     _putenv_s("RSX_MAX_FPS","0"); assert(haze_graphics_initialize());
     assert(!std::strcmp(std::getenv("RSX_MAX_FPS"),"0"));
+    assert(haze_native_pacer_selected(nullptr,std::getenv("RSX_MAX_FPS")));
     assert(!std::strcmp(std::getenv("RSX_RENDER_RESOLUTION"),"1777x997"));
     assert(!std::strcmp(std::getenv("RSX_ANISOTROPY"),"16"));
+    // Exercise the actual INI -> runtime environment -> pacing selection path.
+    clear_options(); config("[graphics]\nframe_limit=60\nvsync=off\n");
+    assert(haze_graphics_initialize());
+    assert(haze_native_pacer_selected(nullptr,std::getenv("RSX_MAX_FPS")));
+    assert(!haze_native_pacer_selected("0",std::getenv("RSX_MAX_FPS")));
+    clear_options(); config("[graphics]\nframe_limit=30\nvsync=on\n");
+    assert(haze_graphics_initialize());
+    assert(!haze_native_pacer_selected(nullptr,std::getenv("RSX_MAX_FPS")));
     const char* bad[]={"[graphics]\nframe_limit=60\nsharpening=nan\n",
         "[graphics]\nframe_limit=60\nframe_limit=30\n", "[unknown]\nframe_limit=60\n",
         "[graphics]\ndraw_distance=100\n", "[graphics]\nanti_aliasing=msaa\n",
@@ -65,6 +75,7 @@ int main() {
     clear_options(); _putenv_s("HAZE_GRAPHICS_CONFIG","");
     char cwd[MAX_PATH]; assert(GetCurrentDirectoryA(sizeof(cwd),cwd));
     assert(SetCurrentDirectoryA("local")); assert(haze_graphics_initialize()); check_defaults();
+    assert(!haze_native_pacer_selected(nullptr,std::getenv("RSX_MAX_FPS")));
     assert(SetCurrentDirectoryA(cwd));
     clear_options(); _putenv_s("HAZE_GRAPHICS_CONFIG","local/nonexistent-graphics.ini");
     assert(!haze_graphics_initialize());

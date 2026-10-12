@@ -1,4 +1,5 @@
 #include "ppu_recomp.h"
+#include "haze_frame_pacer_settings.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -6,8 +7,8 @@
 #include <windows.h>
 #endif
 
-// Opt-in while higher-rate simulation and native VSync are being validated.
-// The existing renderer limiter owns the selected PC cap when this is enabled.
+// Selecting an unlimited or >30 PC cap opts into the native pacing path.
+// The renderer limiter and VSync own presentation timing when this is enabled.
 int haze_guest_pacer_bypass()
 {
 #ifdef _WIN32
@@ -16,8 +17,8 @@ int haze_guest_pacer_bypass()
         vm_read32(0xE35AE0-0x7F90)==0x1028B90;
     static const char* control=std::getenv("HAZE_FRAME_PACER_FILE");
     static int enabled=[] {
-        const char* value=std::getenv("HAZE_NATIVE_FRAME_PACER");
-        return value && std::strcmp(value,"1")==0 ? 1 : 0;
+        return haze_native_pacer_selected(std::getenv("HAZE_NATIVE_FRAME_PACER"),
+            std::getenv("RSX_MAX_FPS")) ? 1 : 0;
     }();
     static ULONGLONG next_check=0;
     static int reported=-1;
