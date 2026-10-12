@@ -96,6 +96,18 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait test compilation failed.' }
     & $idleTest
     if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait predicate/publication test failed.' }
+    if (-not $RuntimeOnly) {
+        $tripletOracle = Join-Path $root 'local/triplet_oracle.c'
+        & $python "$root/scripts/prepare_triplet_oracle.py" "$assets/generated/spu/spu_0041_at_00F2E380/spu_recomp.c" $tripletOracle
+        if ($LASTEXITCODE -ne 0) { throw 'Audited triplet-copy oracle extraction failed.' }
+        $tripletTest = Join-Path $root 'local/test_spu_triplet_copy.exe'
+        & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/runtime/spu" "/I$root/port" "/Fe$tripletTest" "/Fo$root/local/" "$root/tests/test_spu_triplet_copy.c" $tripletOracle
+        if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy oracle compilation failed.' }
+        & $tripletTest
+        if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy full-state oracle failed.' }
+        & $python "$root/tests/test_spu_triplet_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Native triplet-copy patch guards failed.' }
+    }
     $abiStorageTest = Join-Path $root 'local/test_abi_storage.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$abiStorageTest" "/Fo$root/local/test_abi_storage.obj" "$sdk/runtime/spu/tests/test_abi_storage.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU ABI storage test compilation failed.' }

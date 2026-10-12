@@ -101,6 +101,16 @@ class PresentWindows(unittest.TestCase):
                     settled.replace(f'timer={flag // 8}', f'timer={1 - flag // 8}'),
                     settled + f'[usleep-mode] tid=37 guest_tid=8 timer={1 - flag // 8} qpc=150\n']:
                     with self.subTest(flag=flag, log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['mode_column'] = 'spu_triplet_copy'
+            windows['blocks'][0]['flags'] = 1
+            args.windows.write_text(json.dumps(windows))
+            args.queue_wait_tid = []  # This selector is shared across job threads.
+            global_good = '[haze-spu-triplet-mode] enabled=1 qpc=80\n'
+            run(global_good)
+            for invalid in ['', pacer_good, global_good.replace('qpc=80', 'qpc=101'),
+                global_good.replace('enabled=1', 'enabled=0'),
+                global_good+'[haze-spu-triplet-mode] enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:

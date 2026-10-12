@@ -183,6 +183,22 @@ if(PORT_ENABLE_SPU)
             set_property(SOURCE "${HAZE_IDLE_PATCHED}" APPEND PROPERTY
                 INCLUDE_DIRECTORIES "${SPU_DIR}/spu_0028_at_00EC7980")
         endif()
+        set(HAZE_TRIPLET_SOURCE "${SPU_DIR}/spu_0041_at_00F2E380/spu_recomp.c")
+        if(EXISTS "${HAZE_TRIPLET_SOURCE}")
+            find_package(Python3 COMPONENTS Interpreter REQUIRED)
+            set(HAZE_TRIPLET_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_spu_triplet/spu_recomp.c")
+            add_custom_command(OUTPUT "${HAZE_TRIPLET_PATCHED}"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_spu_triplet_copy.py"
+                    "${HAZE_TRIPLET_SOURCE}" "${HAZE_TRIPLET_PATCHED}"
+                    --registration "${SPU_DIR}/spu_workloads.c"
+                DEPENDS "${HAZE_TRIPLET_SOURCE}" "${SPU_DIR}/spu_workloads.c"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_spu_triplet_copy.py"
+                VERBATIM)
+            list(REMOVE_ITEM SPU_LIFTED "${HAZE_TRIPLET_SOURCE}")
+            list(APPEND SPU_LIFTED "${HAZE_TRIPLET_PATCHED}")
+            set_property(SOURCE "${HAZE_TRIPLET_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES
+                "${SPU_DIR}/spu_0041_at_00F2E380" "${CMAKE_CURRENT_SOURCE_DIR}")
+        endif()
         list(LENGTH SPU_LIFTED SPU_IMAGE_COUNT)
         message(STATUS "Lifted SPU:      ${SPU_IMAGE_COUNT} image(s)")
         # The musttail indirect-branch fast path. Excluded from the runtime
@@ -212,6 +228,7 @@ add_executable(${PROJECT_NAME}
     haze_input.cpp
     haze_camera.cpp
     haze_guest_pacer.cpp
+    haze_spu_triplet_copy.cpp
     haze_graphics.cpp
     haze_display.cpp
     haze_spu_idle.c

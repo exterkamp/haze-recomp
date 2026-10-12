@@ -12,6 +12,8 @@ The usleep variant uses PS3_USLEEP_MODE_FILE with flags 0/8 and explicitly
 selected hot PPU workers; native mode events must cover each measured block.
 The frame_pacer variant uses HAZE_FRAME_PACER_FILE and the guest main-loop
 thread's native mode events to compare the legacy wait with its opt-in bypass.
+The spu_triplet_copy variant uses HAZE_TRIPLET_COPY_FILE and process-wide native
+mode events; an explicitly selected host TID is unnecessary for that variant.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -155,7 +157,15 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer'):
+    if mode_column == 'spu_triplet_copy':
+        if not args.queue_mode_log:
+            raise ValueError('Native copy mode requires its process-wide mode-event log')
+        worker_modes = {'process': []}
+        for line in args.queue_mode_log.read_text(errors='replace').splitlines():
+            match = re.fullmatch(r'\[haze-spu-triplet-mode\] enabled=([01]) qpc=(\d+)', line)
+            if match: worker_modes['process'].append((int(match[2]), int(match[1])))
+        worker_modes['process'].sort()
+    elif mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer'):
         if not args.queue_mode_log or not args.queue_wait_tid:
             raise ValueError('Native mode requires its log and explicitly selected critical host TIDs')
         worker_modes = {tid: [] for tid in args.queue_wait_tid}
@@ -182,9 +192,9 @@ def report(args):
             for tid, events in worker_modes.items():
                 before = [mode for qpc, mode in events if qpc <= block['start_qpc']]
                 if not before or before[-1] != block['flags']:
-                    raise ValueError(f'Queue wait mode did not settle on critical host thread {tid}')
+                    raise ValueError(f'Native mode did not settle for {tid}')
                 if any(block['start_qpc'] < qpc <= block['end_qpc'] for qpc, _ in events):
-                    raise ValueError(f'Queue wait mode changed inside the measured block on host thread {tid}')
+                    raise ValueError(f'Native mode changed inside the measured block for {tid}')
         selected = [(prev, cur) for prev, cur in zip(rows, rows[1:])
                     if prev['qpc'] >= block['start_qpc'] and cur['qpc'] <= block['end_qpc']]
         if len(selected) < args.min_frames:
@@ -223,7 +233,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
