@@ -10,13 +10,13 @@ is `investigate/haze-model-visibility`, based on `9058dc4`. This preserves the
 previous shadow clear correction. No model visibility fix is established yet.
 The first-conversation recording now contains an externally observed
 visible / missing / visible soldier sequence, also reproduced in native
-readbacks. A matching draw trace now identifies two candidate mesh batches
-whose submission tracks the soldier's visibility. Their model identity and
-the cause of their omission still require a causal comparison.
-Live suppression now confirms that these batches can be skipped and restored,
-but a later comparison leaves three nearby helmeted soldiers visible while
-both batches are skipped. The matching fingerprints do not yet identify the
-particular disappearing soldier or establish a submission-culling cause.
+readbacks. A matching draw trace identifies mesh batches whose submission
+tracks the soldier's visibility. Projected vertex captures now place the
+initially selected 4,596-vertex batch inside the yellow helmet, explaining why
+suppressing it leaves the opaque body visible. Two body-material batches share
+that part's exact vertex-program constant fingerprint within a frame and
+disappear alongside it in the clearest missing intervals. The reason these
+submissions stop remains unresolved; no culling or renderer fix is established.
 
 ## Initial native evidence
 
@@ -722,15 +722,89 @@ capture for the candidate and the other character draws, so their projected
 positions can be compared with the missing body's screen region. Suppressing
 a material without locating its instance is insufficient to diagnose culling.
 
+## Projected geometry and body submission evidence
+
+Run `20261012-174837-480` uses an isolated diagnostic executable, SHA256
+`BB43C23CAA5717D26B344BFC3BF774147B691A517DE95BB25E7D8B556A0DD4C3`,
+with 1440p rendering, follow shadows and the baseline 30 FPS controls. It exits
+normally with 13,083 successful presents. All 40 native captures and their
+following present counters retain CPU-work mask 1283, shadow compare off,
+depth export off, window-position correction on and depth-clear correction on.
+
+The new opt-in `LD_TRACE_SOURCE_VERTS=4596` selector uses the existing geometry
+dump and gate, capturing three matching draws at counters 8489, 8490 and 8491.
+No matching dump occurs before the gate opens. Each dump contains 937 compact
+vertices, the vertex program and its constants. Source occurrence count and
+compact unique-vertex count differ because repeated indices are compacted.
+The candidate's position path divides attribute 0's xyz by w and applies
+constants 0 through 3, followed by the dumped viewport adjustment. Projecting
+trace 2 onto native image 8490 produces a facial point cloud inside the opaque
+yellow helmet. Its screen bounds are approximately (592,69) to (843,458) in
+the 1280x720 image; all 937 points lie inside the clip volume. This identifies
+a small concealed head/face part, not the complete body. The 336-vertex partner
+has not independently been spatially identified.
+
+Five off/on/off/on/off phases capture native frames 8490 through 8530 with one
+gap at 8514. The filter suppresses exactly 22 groups across two on phases;
+its selected unit-0 texture remains `0x05421900`, 512x512, throughout this
+window. The renderer ledger balances with zero recorded rejection counters.
+The second on phase, 8515 through 8522, skips both candidate parts while three
+helmeted bodies remain opaque. This agrees with the projected head geometry.
+Early on-phase frames 8498 through 8502 have no candidate submission, so their
+missing soldier cannot be attributed to the filter.
+
+The initial off phase provides another natural disappearance: native frames
+8490 through 8492 show the close speaker, 8493 through 8496 show the background
+in his place, and 8497 shows him again. All eight images have been inspected
+together. In the missing interval the following four mesh fingerprints have
+no submissions; before and after it they execute:
+
+| Source occurrences | Attribute-8 fingerprint | Role supported by evidence |
+| ---: | --- | --- |
+| 11,691 | `de6c73babf52be53` | Body-material candidate |
+| 2,628 | `aadd5d83165013c6` | Body-material candidate |
+| 4,596 | `ab7c74af214e9569` | Projected concealed head/face part |
+| 336 | `bf3cd8c23d609017` | Partner sharing head material |
+
+At frame 8490 all four share constant fingerprint `52161b78a546eca4`.
+The body pair uses live PSO `4be66c83713805c5`; the head pair uses
+`25ae28ab4252aa73`. Another instance of the body mesh has different constants.
+Revisiting baseline run `20261012-163003-500` finds the same four fingerprints
+sharing constants `1c3a9d6bb0cb2876` at visible frame 7599, with all four absent
+at missing frames 7600 through 7603. Other soldiers reuse the body meshes,
+which explains why asset-wide counts alone previously missed this lead.
+Constant equality is a within-frame association, not a stable actor ID across
+frames. Causal suppression or spatial capture of the body remains useful.
+
+The player input remains neutral through this run's initial off phase, but
+the conversation controls the camera. A later movement route overlaps the
+second on and final off phases; do not describe the full comparison as having
+a stationary camera or neutral input. Native readback and tracing also perturb
+timing. Local evidence is under prefix `visibility-conversation-close5`,
+including `natural-context.png`, `geometry-overlay.png`, `validation.json`,
+`close-probe.json`, the geometry folder and draw/present CSVs.
+
+Static analysis supplies a more specific upstream lead. The string
+`noocclude` at guest VA `0x00C6F7D8` is referenced through table word
+`0x00E1E900`. Resolving the small TOC correctly identifies property parser
+`func_0052A4E0`: its call at return address `0x0052A720` parses the boolean
+into stack byte +0x73 and packs it into bit `0x400` of the model's +0x4C flags.
+`func_00526B48` transfers that bit to runtime flags +0x5C as `0x00800000`
+when its object-creation condition holds. `func_006ABD38` tests that runtime
+bit while building a bounds-related list, and has an initial enable-byte test
+at guest `0x0169F608`. These are static leads, not proof that the missing
+speaker traverses that path or that this byte controls all visibility culling.
+The earlier guessed functions `0058AB70` and `005FCA28` do not resolve to this
+property table and must not be used as noocclude references.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
 main checkout's changing performance candidates. The scene phase is now known:
 approaching the soldiers and starting the first conversation. The next useful
-comparison can now target the externally recorded soldier sequence during
-the first conversation. Native images now reproduce it; the remaining evidence
-is causal identification of the two matching mesh candidates, then the reason
-their submissions disappear. A confirmed cause and comparison are required
+comparison can now target the body-material batches and upstream bounds/visibility
+path during the first conversation. Native images reproduce it; the remaining
+evidence is the reason the associated model submissions disappear. A confirmed cause and comparison are required
 before any fix or completion claim. The separate whole-scene black intervals are not a substitute for that
 model-specific comparison.
