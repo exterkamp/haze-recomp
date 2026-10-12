@@ -130,12 +130,73 @@ Private evidence: `local/gpu-pull-profile-{windows,summary,present-report}.json`
 `local/gpu-pull-profile-renderer.csv` and its `.geometry.csv` companion, run
 logs/captures, and `local/gpu-vertex-pull-profile-build.log`.
 
+## Audited camera sweep follow-up
+
+Run `20261012-234803-235` uses the same 1440p configuration above and ordinary
+candidate SHA256
+`17567E736782D4F089BA17C1D7666105A67B226B954750CA845A4223EF728CF6`.
+The game remains muted with real audio processing. A diagnostic at the existing
+local-player mouse boundary anchors world yaw and pitch, then applies a
+plus/minus 30-degree sine sweep with a four-second period. Each mode gets five
+warmup seconds and 24 measured seconds (six cycles). Actual post-update game
+angles, owner, phase and QPC are recorded independently of present intervals.
+This is scripted camera motion with live NPC/world state, not a deterministic
+whole-game replay. Normal launches do not activate this diagnostic.
+
+An earlier alternating pad-input attempt also accumulated yaw drift. Its private
+`gpu-pull-sweep` records are retained but do not establish matched-camera gains.
+
+The first absolute-angle CPU/GPU/GPU/CPU comparison passes complete present,
+mode-event, camera and sampled Haze-process coverage checks. All 16 phase bins
+are covered per block; maximum actual yaw error is 1.2e-7 radians, pitch error
+is zero and the motor/center remain constant. No other Haze was observed,
+with observation gaps at most 2.12 seconds; other workloads are not excluded.
+
+| Mode | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| CPU | 728 | 30.40 | 32.890 | 46.341 | 50.293 | 57.719 |
+| GPU | 804 | 33.52 | 29.836 | 41.672 | 46.068 | 66.999 |
+| GPU | 772 | 32.21 | 31.051 | 43.241 | 49.147 | 78.870 |
+| CPU | 782 | 32.62 | 30.658 | 42.910 | 45.946 | 51.307 |
+
+Pooling all measured intervals by mode gives CPU 31.51 FPS / 31.734 ms and
+GPU 32.86 FPS / 30.431 ms: about 4.3% more throughput or 1.30 ms less mean
+frame time in this comparison. The block distributions overlap and GPU maximum
+stalls are larger. This is modest scene-specific evidence, not proof of a
+repeatable pacing fix or a universal speedup.
+
+The reverse-order run is **not a validated comparison**: its camera CSV ends
+0.329 seconds before the final measured window ends. The reporter rejects it.
+The stream had been flushed only every 64 samples; a final partial batch did
+not survive shutdown. The diagnostic now flushes on token changes, including
+disable. That correction builds and the focused evidence tests pass; a new
+game run is still required to validate the shutdown correction end to end.
+The rebuilt candidate hash is
+`471B8CA9FA29818516CE3D09E9978B945DF85FDB1621E8A67138729F9AB2110F`,
+which must not be substituted for the measured candidate hash above.
+
+For transparency, the rejected reverse run's untrimmed raw GPU/CPU/CPU/GPU
+mean intervals are 31.706/33.340/33.151/31.138 ms, with maxima
+62.897/901.738/54.890/60.184 ms. The user reported moving the game window
+during this run. The acknowledgment timestamp is not the movement timestamp,
+so the 901.738 ms interval is a plausible interruption, not a confirmed causal
+match. It remains in the raw measurements; no convenient outlier was removed.
+This interruption and incomplete audit prevent using the reverse run to
+confirm tail-latency improvement.
+
+Private evidence: `local/gpu-pull-absolute-{windows,report}.json`,
+`local/gpu-pull-absolute-reverse-windows.json`, the shared presents CSV,
+camera CSV and process JSONL, and `local/gpu-pull-absolute-window-move-note.json`.
+The owned game closed normally with exit 0. The recording helper requires
+actual-angle evidence whenever camera control is used. Focused camera and
+present-mode tests pass; the camera diagnostic builds successfully.
+
 ## Remaining work
 
 - Reference gathering and remapping still consume about 3.3 ms per frame;
   use #34 to investigate eliminating those operations and repeated uploads.
-- Replace one-direction camera input with a verified alternating sweep, and
-  repeat the ordinary comparison. Do not promote based only on the static view.
+- Repeat the reverse-order absolute-angle comparison after the final audit
+  flush correction. Keep interruption annotations and validate complete coverage.
 - Validate more of the campaign and squad conversation and coordinate visual
   coverage with #22 before making this the automatic release path.
 - Use measured remaining costs to select persistent GPU geometry (#34),

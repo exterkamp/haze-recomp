@@ -1,7 +1,9 @@
 """Measure renderer/queue variants in an ordinary, nonprofiling native build.
 
 Record timed blocks in a visually verified scene with a documented input trajectory.
-The caller supplies input; --scenario records it and does not drive or verify it.
+With --camera-control, the audited native hook supplies a repeating absolute-yaw
+trajectory. Its actual-angle CSV is mandatory when reporting. Otherwise the
+caller supplies input; --scenario only describes it.
 The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set before
 launch. Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
@@ -38,6 +40,7 @@ import re
 
 from benchmark_cpu_work import process_clock
 from summarize_presents import percentile
+from validate_camera_sweep import validate_camera_sweep
 
 
 def verify_process_observation(path, windows, max_gap_s):
@@ -125,7 +128,10 @@ def record(args):
                 raise ValueError('Observed process must differ from the benchmark process')
             clock, release = process_clock(pid)
             observers.append((pid, clock, release))
-        for flags in args.flags:
+        for block_index, flags in enumerate(args.flags):
+            camera_token = args.camera_token_base + block_index if args.camera_control else None
+            if args.camera_control:
+                args.camera_control.write_text(f'{camera_token}\n')
             args.control.write_text(f'{flags}\n')
             wait(args.warmup)
             start = qpc()
@@ -138,18 +144,25 @@ def record(args):
                               (end - start) / 1000
                               for (pid, clock, _), initial in zip(observers, observed_start)}
             block = dict(flags=flags, start_qpc=start, end_qpc=end,
+                         camera_token=camera_token,
                          process_cpu_ms=cpu_ms,
                          observed_mean_cores=observed_cores,
                          mean_cores=cpu_ms * frequency.value / (end - start) / 1000)
             result['blocks'].append(block)
             args.output.write_text(json.dumps(result, indent=2) + '\n')
             print(json.dumps(block), flush=True)
+        if args.camera_control:
+            # Keep the audit alive beyond the final window before disabling it.
+            # This settling time is outside every measured interval.
+            wait(.5)
         result['complete'] = True
     finally:
         for _, _, release in observers:
             release()
         close()
         args.control.write_text(f'{args.flags[0]}\n')
+        if args.camera_control:
+            args.camera_control.write_text('0\n')
         args.output.write_text(json.dumps(result, indent=2) + '\n')
 
 
@@ -232,6 +245,10 @@ def report(args):
             frames_over_50_ms=sum(value > 50 for value in intervals)))
     result = dict(source=str(args.csv), windows=str(args.windows), blocks=summaries,
                   scenario=windows.get('scenario', 'stationary, no injected input'), note=__doc__)
+    if any(block.get('camera_token') is not None for block in windows['blocks']):
+        if not getattr(args, 'camera_log', None):
+            raise ValueError('Absolute camera benchmark requires its actual-angle audit')
+        result['camera_audit'] = validate_camera_sweep(args.camera_log, windows)
     if getattr(args, 'process_log', None):
         result['process_observation'] = verify_process_observation(
             args.process_log, windows, getattr(args, 'max_process_gap', 4))
@@ -256,6 +273,10 @@ if __name__ == '__main__':
     runner.add_argument('--output', type=Path, required=True)
     runner.add_argument('--scenario', default='stationary, no injected input',
                         help='Describe the externally driven scene/input trajectory and its limitations')
+    runner.add_argument('--camera-control', type=Path,
+                        help='HAZE_BENCHMARK_CAMERA_FILE: reset the absolute angle trajectory for every block')
+    runner.add_argument('--camera-token-base', type=int, default=100,
+                        help='First unique camera trajectory token for this recording')
     reader = actions.add_parser('report')
     reader.add_argument('csv', type=Path)
     reader.add_argument('windows', type=Path)
@@ -263,6 +284,8 @@ if __name__ == '__main__':
     reader.add_argument('--queue-mode-log', '--mode-event-log', dest='queue_mode_log', type=Path)
     reader.add_argument('--queue-wait-tid', '--mode-tid', dest='queue_wait_tid', type=int, action='append', default=[])
     reader.add_argument('--output', type=Path, required=True)
+    reader.add_argument('--camera-log', type=Path,
+                        help='Actual-angle CSV emitted beside HAZE_BENCHMARK_CAMERA_FILE')
     reader.add_argument('--process-log', type=Path,
                         help='JSONL from observe_haze_processes.ps1; reject observed Haze contention or incomplete coverage')
     reader.add_argument('--max-process-gap', type=float, default=4,
@@ -271,6 +294,8 @@ if __name__ == '__main__':
     if args.action == 'record':
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 8191 for f in args.flags):
             parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..8191')
+        if not 0 < args.camera_token_base <= 1000000-len(args.flags):
+            parser.error('Camera trajectory tokens must fit the range 1..1000000')
         allowed_modes = ((0,1,2,3) if args.mode_column == 'vertex_workers' else
                          (0,1,2) if args.mode_column == 'window_position' else
                          (0,8) if args.mode_column == 'usleep' else (0,1))
