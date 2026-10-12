@@ -176,6 +176,9 @@ The
 [vertex-program cache experiment](docs/performance-vp-cache-2026-10-11.md)
 reduces shader preparation time, but remains disabled because its profiling
 comparison did not establish a reliable FPS gain.
+The [triangle-index upload investigation](docs/performance-triangle-indices-2026-10-11.md)
+measured a repeated 0.85–0.88 ms/frame saving from copying validated triangle
+remaps in bulk. This is now enabled by default; overall pacing still varies.
 
 For reproducible diagnostic captures:
 
