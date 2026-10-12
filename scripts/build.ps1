@@ -342,6 +342,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }
     & $textureTest
     if ($LASTEXITCODE -ne 0) { throw 'Live texture cache and D3D12 upload test failed.' }
+    $watchTest = Join-Path $root 'local/test_native_write_watch.exe'
+    & $clang /nologo /W3 /O2 /MD /EHsc /std:c++17 "/I$sdk/libs/video" "/Fe$watchTest" "/Fo$root/local/test_native_write_watch.obj" "$root/tests/benchmark_write_watch.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native write-watch test compilation failed.' }
+    & $watchTest --test-only
+    if ($LASTEXITCODE -ne 0) { throw 'Native write-watch mutation oracle failed.' }
     $saveTest = Join-Path $root 'local/test_savedata_persistence.exe'
     & $clang /nologo /W0 /O1 /Gy /Gw "/I$sdk/include" "/Fe$saveTest" "/Fo$root/local/test_savedata_persistence.obj" "$sdk/libs/system/tests/test_savedata_persistence.c" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Save persistence test compilation failed.' }

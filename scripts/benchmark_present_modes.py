@@ -258,8 +258,8 @@ if __name__ == '__main__':
                         help='Maximum allowed seconds between observations, default 4')
     args = parser.parse_args()
     if args.action == 'record':
-        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 4095 for f in args.flags):
-            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..4095')
+        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 8191 for f in args.flags):
+            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..8191')
         allowed_modes = ((0,1,2) if args.mode_column == 'window_position' else
                          (0,8) if args.mode_column == 'usleep' else (0,1))
         if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):

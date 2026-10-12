@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <vector>
 #include "rsx_texture_hash.h"
+#include "rsx_texture_write_watch.h"
 
 static void require(bool ok, const char* message) {
     if (!ok) { std::fprintf(stderr, "write-watch probe: %s (error %lu)\n", message, GetLastError()); std::exit(1); }
@@ -28,7 +29,11 @@ struct Watch {
     bool regional;
     std::vector<void*> dirty;
     std::vector<uint64_t> generations;
-    Watch(unsigned char* b, size_t n, size_t p, bool r = false) : base(b), size(n), page(p), regional(r), dirty(n/p), generations(n/p) {}
+    rsx_texture_write_watch native{};
+    Watch(unsigned char* b, size_t n, size_t p, bool r = false) : base(b), size(n), page(p), regional(r), dirty(n/p), generations(n/p) {
+        require(rsx_texture_write_watch_init(&native,b,n)!=0,"native tracker initialization");
+    }
+    ~Watch() { rsx_texture_write_watch_destroy(&native); }
     bool begin() {
         if (regional) return healthy;
         ULONG_PTR count = dirty.size(); DWORD granularity = 0;
@@ -48,6 +53,11 @@ struct Watch {
     }
     bool content_stamp(size_t offset, size_t length, uint64_t& stamp) {
         if (!healthy || !length || offset >= size || length > size-offset) return false;
+        if (regional) {
+            const bool ok = rsx_texture_write_watch_stamp(&native,base+offset,length,&stamp,nullptr)!=0;
+            healthy = native.healthy!=0; epoch = native.epoch;
+            return ok;
+        }
         const size_t first = offset/page, last = (offset+length-1)/page;
         ULONG_PTR count = last-first+1; DWORD granularity = 0;
         if (GetWriteWatch(regional ? WRITE_WATCH_FLAG_RESET : 0, base+first*page, count*page, dirty.data(), &count, &granularity)
@@ -195,7 +205,9 @@ static void benchmark(unsigned char* base, Watch* watch, unsigned percent, unsig
         reset_ms/frames,writes_ms/frames,checks_ms/frames,(reset_ms+writes_ms+checks_ms)/frames,hashes,skipped,double(cycles_end-cycles_begin)/frames);
 }
 
-int main() {
+int main(int argc, char** argv) {
+    const bool test_only=argc==2 && std::strcmp(argv[1],"--test-only")==0;
+    require(argc==1 || test_only,"usage: benchmark_write_watch [--test-only]");
     SYSTEM_INFO info; GetSystemInfo(&info);
     const size_t size = size_t(1)<<32;
     auto* tracked = static_cast<unsigned char*>(VirtualAlloc(nullptr,size,MEM_RESERVE|MEM_WRITE_WATCH,PAGE_READWRITE));
@@ -207,8 +219,21 @@ int main() {
     }
     Watch watch(tracked,size,info.dwPageSize);
     correctness(watch);
+    rsx_texture_write_watch invalid{};
+    uint64_t stamp=0;
+    require(rsx_texture_write_watch_init(&invalid,plain,size)!=0,"untracked query fixture");
+    require(!rsx_texture_write_watch_stamp(&invalid,plain,1,&stamp,nullptr) && !invalid.healthy,"native query failure must disable tracking");
+    rsx_texture_write_watch_destroy(&invalid);
+    require(rsx_texture_write_watch_init(&invalid,tracked,size)!=0,"overflow fixture");
+    invalid.epoch=UINT64_MAX;
+    require(!rsx_texture_write_watch_stamp(&invalid,tracked,1,&stamp,nullptr) && !invalid.healthy,"generation overflow must disable tracking");
+    rsx_texture_write_watch_destroy(&invalid);
     watch.regional = true;
     correctness(watch);
+    if (test_only) {
+        VirtualFree(tracked,0,MEM_RELEASE); VirtualFree(plain,0,MEM_RELEASE);
+        return 0;
+    }
     std::printf("round,tracked,texture_dirty_percent,background_write_mb,reset_ms,writes_ms,checks_ms,total_ms,hashes,skipped,thread_cycles_per_frame\n");
     for (unsigned round=0;round<4;++round)
         for (unsigned background : {0u,16u})
