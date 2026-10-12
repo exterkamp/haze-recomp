@@ -8,6 +8,8 @@ during these blocks. Menus/loading do not establish gameplay performance.
 Queue variants require SPURS_QUEUE_WAIT_CONTROL and native mode-event evidence
 for each explicitly selected critical worker host TID when reporting.
 The SPU idle variant uses HAZE_SPU_IDLE_CONTROL and its persistent worker TID.
+The usleep variant uses PS3_USLEEP_MODE_FILE with flags 0/8 and explicitly
+selected hot PPU workers; native mode events must cover each measured block.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -151,17 +153,20 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spurs_queue_wait', 'spu_idle_wait'):
+    if mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep'):
         if not args.queue_mode_log or not args.queue_wait_tid:
             raise ValueError('Queue mode requires its native log and explicitly selected critical worker host TIDs')
         worker_modes = {tid: [] for tid in args.queue_wait_tid}
         pattern = (r'\[spurs-queue-wait-mode\] tid=(\d+) native=([01]) qpc=(\d+)'
                    if mode_column == 'spurs_queue_wait' else
-                   r'\[haze-spu-idle-mode\] tid=(\d+) enabled=([01]) qpc=(\d+)')
+                   r'\[haze-spu-idle-mode\] tid=(\d+) enabled=([01]) qpc=(\d+)'
+                   if mode_column == 'spu_idle_wait' else
+                   r'\[usleep-mode\] tid=(\d+) guest_tid=\d+ timer=([01]) qpc=(\d+)')
         for line in args.queue_mode_log.read_text(errors='replace').splitlines():
             match = re.fullmatch(pattern, line)
             if match and int(match[1]) in worker_modes:
-                worker_modes[int(match[1])].append((int(match[3]), int(match[2])))
+                mode = int(match[2]) * (8 if mode_column == 'usleep' else 1)
+                worker_modes[int(match[1])].append((int(match[3]), mode))
         for events in worker_modes.values():
             events.sort()
     elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear'):
@@ -212,7 +217,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
@@ -232,9 +237,10 @@ if __name__ == '__main__':
     if args.action == 'record':
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 2047 for f in args.flags):
             parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..2047')
-        allowed_modes = (0,1,2) if args.mode_column == 'window_position' else (0,1)
+        allowed_modes = ((0,1,2) if args.mode_column == 'window_position' else
+                         (0,8) if args.mode_column == 'usleep' else (0,1))
         if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):
-            parser.error('Use shadow/depth flags 0/1 or window-position flags 0/1/2')
+            parser.error('Use shadow/depth/queue flags 0/1, window-position flags 0/1/2, or usleep flags 0/8')
         record(args)
     else:
         if not 0 < args.max_process_gap <= 10:

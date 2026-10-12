@@ -79,6 +79,19 @@ class PresentWindows(unittest.TestCase):
                 idle_good.replace('qpc=80', 'qpc=101'),
                 idle_good+'[haze-spu-idle-mode] tid=37 enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['mode_column'] = 'usleep'
+            sleep_good = good.replace('spurs-queue-wait-mode', 'usleep-mode').replace(
+                ' native=', ' guest_tid=8 timer=')
+            for flag in (0, 8):
+                windows['blocks'][0]['flags'] = flag
+                args.windows.write_text(json.dumps(windows))
+                settled = sleep_good.replace('timer=1', f'timer={flag // 8}')
+                run(settled)
+                for invalid in [good, settled.replace('tid=37 ', 'tid=38 '),
+                    settled.replace('qpc=80', 'qpc=101'),
+                    settled.replace(f'timer={flag // 8}', f'timer={1 - flag // 8}'),
+                    settled + f'[usleep-mode] tid=37 guest_tid=8 timer={1 - flag // 8} qpc=150\n']:
+                    with self.subTest(flag=flag, log=invalid), self.assertRaises(ValueError): run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
