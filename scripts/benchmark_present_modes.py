@@ -1,10 +1,12 @@
-"""Measure renderer variants in an ordinary, nonprofiling native build.
+"""Measure renderer/queue variants in an ordinary, nonprofiling native build.
 
 Record timed blocks while a visually verified gameplay scene stays still.
 The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set before
 launch. Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
 during these blocks. Menus/loading do not establish gameplay performance.
+Queue variants require SPURS_QUEUE_WAIT_CONTROL and native mode-event evidence
+for each explicitly selected critical worker host TID when reporting.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -16,6 +18,7 @@ import json
 from pathlib import Path
 import statistics
 import time
+import re
 
 from benchmark_cpu_work import process_clock
 from summarize_presents import percentile
@@ -110,9 +113,27 @@ def report(args):
                 for row in csv.DictReader(stream)]
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
-    if mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position'):
+    queue_modes = None
+    if mode_column == 'spurs_queue_wait':
+        if not args.queue_mode_log or not args.queue_wait_tid:
+            raise ValueError('Queue mode requires its native log and explicitly selected critical worker host TIDs')
+        queue_modes = {tid: [] for tid in args.queue_wait_tid}
+        for line in args.queue_mode_log.read_text(errors='replace').splitlines():
+            match = re.fullmatch(r'\[spurs-queue-wait-mode\] tid=(\d+) native=([01]) qpc=(\d+)', line)
+            if match and int(match[1]) in queue_modes:
+                queue_modes[int(match[1])].append((int(match[3]), int(match[2])))
+        for events in queue_modes.values():
+            events.sort()
+    elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
+        if queue_modes is not None:
+            for tid, events in queue_modes.items():
+                before = [mode for qpc, mode in events if qpc <= block['start_qpc']]
+                if not before or before[-1] != block['flags']:
+                    raise ValueError(f'Queue wait mode did not settle on critical host thread {tid}')
+                if any(block['start_qpc'] < qpc <= block['end_qpc'] for qpc, _ in events):
+                    raise ValueError(f'Queue wait mode changed inside the measured block on host thread {tid}')
         selected = [(prev, cur) for prev, cur in zip(rows, rows[1:])
                     if prev['qpc'] >= block['start_qpc'] and cur['qpc'] <= block['end_qpc']]
         if len(selected) < args.min_frames:
@@ -120,7 +141,7 @@ def report(args):
         for prev, cur in selected:
             if cur['present_id'] != prev['present_id'] + 1:
                 raise ValueError('Missing present inside a recorded block')
-            if prev[mode_column] != block['flags'] or cur[mode_column] != block['flags']:
+            if queue_modes is None and (prev[mode_column] != block['flags'] or cur[mode_column] != block['flags']):
                 raise ValueError('Mode did not settle before the measured block; increase warmup')
             if cur['qpc'] <= prev['qpc']:
                 raise ValueError('Nonpositive present interval')
@@ -148,7 +169,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','spurs_queue_wait'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
@@ -157,6 +178,8 @@ if __name__ == '__main__':
     reader.add_argument('csv', type=Path)
     reader.add_argument('windows', type=Path)
     reader.add_argument('--min-frames', type=int, default=180)
+    reader.add_argument('--queue-mode-log', type=Path)
+    reader.add_argument('--queue-wait-tid', type=int, action='append', default=[])
     reader.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if args.action == 'record':

@@ -15,6 +15,30 @@ from benchmark_present_modes import report
 
 
 class PresentWindows(unittest.TestCase):
+    def test_native_queue_mode_evidence(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
+            root = Path(folder)
+            args = SimpleNamespace(csv=root/'p.csv', windows=root/'w.json',
+                output=root/'r.json', min_frames=60, queue_mode_log=root/'native.log',
+                queue_wait_tid=[37, 1])
+            args.windows.write_text(json.dumps(dict(complete=True, qpc_frequency=1000,
+                mode_column='spurs_queue_wait', blocks=[dict(flags=1,start_qpc=100,end_qpc=3000)])))
+            with args.csv.open('w', newline='') as file:
+                file.write('# qpc_frequency=1000\npresent_id,guest_frame,qpc\n')
+                for frame in range(101): file.write(f'{frame+1},{frame},{frame*40}\n')
+            good = ('[spurs-queue-wait-mode] tid=37 native=1 qpc=80\n'
+                    '[spurs-queue-wait-mode] tid=1 native=1 qpc=90\n')
+            def run(log):
+                args.queue_mode_log.write_text(log)
+                with contextlib.redirect_stdout(io.StringIO()): report(args)
+            run(good)
+            self.assertGreaterEqual(json.loads(args.output.read_text())['blocks'][0]['frames'],60)
+            for invalid in ['', good.replace('tid=37','tid=38'),
+                good.replace('qpc=80','qpc=101'), good.replace('native=1','native=0'),
+                good+'[spurs-queue-wait-mode] tid=37 native=0 qpc=150\n'
+                     '[spurs-queue-wait-mode] tid=37 native=1 qpc=160\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
             root = Path(folder)

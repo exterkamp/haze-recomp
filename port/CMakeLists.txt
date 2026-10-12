@@ -86,6 +86,7 @@ if(HAZE_RSX_PROFILE)
     # PPU sources belong to HazeRecomp in this directory; the SPU and RSX
     # sources belong to the SDK target. Source properties are directory scoped.
     set_property(SOURCE "${PS3RECOMP_DIR}/runtime/spu/spu_workload.c"
+        "${PS3RECOMP_DIR}/libs/spurs/cellSpursQueue.c"
         DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)
     set_property(SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c"

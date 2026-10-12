@@ -163,6 +163,26 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPURS queue query test compilation failed.' }
     & $queueTest
     if ($LASTEXITCODE -ne 0) { throw 'SPURS queue query contract test failed.' }
+    $queueProfileTest = Join-Path $root 'local/test_queue_profile.exe'
+    & $clang /nologo /W0 /O2 "/I$sdk/include" "/I$sdk/runtime/spu" "/Fe$queueProfileTest" "/Fo$root/local/test_queue_profile.obj" "$sdk/libs/spurs/tests/test_queue_profile.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPURS queue timing test compilation failed.' }
+    $oldQueueProfile = $env:SPURS_QUEUE_PROFILE
+    $oldQueueControl = $env:SPURS_QUEUE_PROFILE_CONTROL
+    try {
+        $env:SPURS_QUEUE_PROFILE = Join-Path $root 'local/queue-profile-test'
+        $env:SPURS_QUEUE_PROFILE_CONTROL = $null
+        New-Item -ItemType Directory -Force $env:SPURS_QUEUE_PROFILE | Out-Null
+        & $queueProfileTest
+        if ($LASTEXITCODE -ne 0) { throw 'SPURS queue timing attribution test failed.' }
+    } finally {
+        $env:SPURS_QUEUE_PROFILE = $oldQueueProfile
+        $env:SPURS_QUEUE_PROFILE_CONTROL = $oldQueueControl
+    }
+    $nativeQueueTest = Join-Path $root 'local/test_native_queue_wait.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$nativeQueueTest" "/Fo$root/local/" "$sdk/libs/spurs/tests/test_native_queue_wait.c" "$sdk/runtime/spu/spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Native queue wake test compilation failed.' }
+    & $nativeQueueTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native queue publication/wake/lifetime test failed.' }
     $gameDataTest = Join-Path $root 'local/test_gamedata_callback.exe'
     & $clang /nologo /W0 "/I$sdk/include" "/Fe$gameDataTest" "/Fo$root/local/test_gamedata_callback.obj" "$sdk/libs/system/tests/test_gamedata_callback.c"
     if ($LASTEXITCODE -ne 0) { throw 'Game-data callback test compilation failed.' }
