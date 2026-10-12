@@ -197,6 +197,7 @@ extern "C" {
 int rsx_live_draw_enabled(void);
 void rsx_live_draw_set_render_reference(uint32_t, uint32_t);
 void rsx_live_draw_set_shadow_reference(uint32_t);
+int rsx_live_draw_set_texture_write_watch(void*, size_t);
 int rsx_live_draw_init(void*, uint32_t, uint32_t,
     const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
 void rsx_live_draw_present(uint32_t);
@@ -453,7 +454,17 @@ static bool alloc_guest_vm(void)
             (unsigned long long)(uintptr_t)vm_base, (unsigned long long)(uintptr_t)sbrk(0));
 #elif defined(_WIN32)
     AddVectoredExceptionHandler(1, vm_commit_veh);
-    vm_base = (uint8_t*)VirtualAlloc(NULL, VM_SIZE, MEM_RESERVE, PAGE_READWRITE);
+    const char* watch_option = getenv("HAZE_TEXTURE_WRITE_WATCH");
+    const bool watch = watch_option && *watch_option == '1';
+    vm_base = (uint8_t*)VirtualAlloc(NULL, VM_SIZE,
+        MEM_RESERVE | (watch ? MEM_WRITE_WATCH : 0), PAGE_READWRITE);
+    if (!vm_base && watch) {
+        fprintf(stderr,"[texture-write-watch] reservation failed; using ordinary memory\n");
+        vm_base = (uint8_t*)VirtualAlloc(NULL, VM_SIZE, MEM_RESERVE, PAGE_READWRITE);
+    } else if (vm_base && watch) {
+        const int registered = rsx_live_draw_set_texture_write_watch(vm_base, VM_SIZE);
+        fprintf(stderr,"[texture-write-watch] reservation tracked=1 registered=%d bytes=%zu\n",registered,(size_t)VM_SIZE);
+    }
     ppu_vm_size = 0;              /* the whole space is backed; no OOB guard needed */
 #else
     /* No vectored exception handlers off Windows, so the arena is committed up
