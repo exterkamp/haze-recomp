@@ -20,7 +20,7 @@ class PresentWindows(unittest.TestCase):
             root = Path(folder)
             args = SimpleNamespace(csv=root/'p.csv', windows=root/'w.json',
                                    output=root/'r.json', min_frames=60)
-            for column, modes in [('cpu_work', (259,771)), ('shadow_compare',(0,1)), ('depth_export',(0,1)), ('window_position',(0,2))]:
+            for column, modes in [('cpu_work', (259,1283)), ('shadow_compare',(0,1)), ('depth_export',(0,1)), ('window_position',(0,2))]:
                 with self.subTest(column=column):
                     rows, ticks = [], 0
                     for i in range(202):

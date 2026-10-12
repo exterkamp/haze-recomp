@@ -160,8 +160,8 @@ if __name__ == '__main__':
     reader.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     if args.action == 'record':
-        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 1023 for f in args.flags):
-            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..1023')
+        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 2047 for f in args.flags):
+            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..2047')
         allowed_modes = (0,1,2) if args.mode_column == 'window_position' else (0,1)
         if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):
             parser.error('Use shadow/depth flags 0/1 or window-position flags 0/1/2')
