@@ -190,7 +190,7 @@ def report(args):
                 worker_modes[int(match[1])].append((int(match[3]), mode))
         for events in worker_modes.values():
             events.sort()
-    elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear'):
+    elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear', 'vertex_cache', 'geometry_cache'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
         if not rows or rows[0]['qpc'] > block['start_qpc'] or rows[-1]['qpc'] < block['end_qpc']:
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
