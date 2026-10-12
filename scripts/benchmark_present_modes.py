@@ -10,6 +10,8 @@ for each explicitly selected critical worker host TID when reporting.
 The SPU idle variant uses HAZE_SPU_IDLE_CONTROL and its persistent worker TID.
 The usleep variant uses PS3_USLEEP_MODE_FILE with flags 0/8 and explicitly
 selected hot PPU workers; native mode events must cover each measured block.
+The frame_pacer variant uses HAZE_FRAME_PACER_FILE and the guest main-loop
+thread's native mode events to compare the legacy wait with its opt-in bypass.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -153,14 +155,16 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep'):
+    if mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer'):
         if not args.queue_mode_log or not args.queue_wait_tid:
-            raise ValueError('Queue mode requires its native log and explicitly selected critical worker host TIDs')
+            raise ValueError('Native mode requires its log and explicitly selected critical host TIDs')
         worker_modes = {tid: [] for tid in args.queue_wait_tid}
         pattern = (r'\[spurs-queue-wait-mode\] tid=(\d+) native=([01]) qpc=(\d+)'
                    if mode_column == 'spurs_queue_wait' else
                    r'\[haze-spu-idle-mode\] tid=(\d+) enabled=([01]) qpc=(\d+)'
                    if mode_column == 'spu_idle_wait' else
+                   r'\[haze-frame-pacer-mode\] tid=(\d+) enabled=([01]) qpc=(\d+)'
+                   if mode_column == 'frame_pacer' else
                    r'\[usleep-mode\] tid=(\d+) guest_tid=\d+ timer=([01]) qpc=(\d+)')
         for line in args.queue_mode_log.read_text(errors='replace').splitlines():
             match = re.fullmatch(pattern, line)
@@ -172,6 +176,8 @@ def report(args):
     elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
+        if not rows or rows[0]['qpc'] > block['start_qpc'] or rows[-1]['qpc'] < block['end_qpc']:
+            raise ValueError('Present CSV does not cover the entire measured block; its fixed ring may have wrapped')
         if worker_modes is not None:
             for tid, events in worker_modes.items():
                 before = [mode for qpc, mode in events if qpc <= block['start_qpc']]
@@ -217,7 +223,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)

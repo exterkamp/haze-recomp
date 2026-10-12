@@ -145,6 +145,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Firmware ELF relocation tests failed.' }
     & $python "$root/tests/test_present_modes.py"
     if ($LASTEXITCODE -ne 0) { throw 'Present-window benchmark validation failed.' }
+    & $python "$root/tests/test_guest_pacer_patch.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }

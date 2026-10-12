@@ -79,6 +79,15 @@ class PresentWindows(unittest.TestCase):
                 idle_good.replace('qpc=80', 'qpc=101'),
                 idle_good+'[haze-spu-idle-mode] tid=37 enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['mode_column'] = 'frame_pacer'
+            args.windows.write_text(json.dumps(windows))
+            pacer_good = idle_good.replace('haze-spu-idle-mode', 'haze-frame-pacer-mode')
+            run(pacer_good)
+            for invalid in [idle_good, pacer_good.replace('tid=37', 'tid=38'),
+                pacer_good.replace('qpc=80', 'qpc=101'),
+                pacer_good.replace('enabled=1', 'enabled=0'),
+                pacer_good+'[haze-frame-pacer-mode] tid=37 enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
             windows['mode_column'] = 'usleep'
             sleep_good = good.replace('spurs-queue-wait-mode', 'usleep-mode').replace(
                 ' native=', ' guest_tid=8 timer=')
@@ -125,6 +134,12 @@ class PresentWindows(unittest.TestCase):
                     self.assertEqual([b['frames'] for b in blocks],[100,100])
                     self.assertEqual(blocks[0]['frame_ms']['max'],120)
                     self.assertEqual(blocks[0]['frames_over_50_ms'],1)
+                    complete_rows = rows
+                    # Enough frames must not hide a truncated ring or early close.
+                    for truncated in (complete_rows[1:], complete_rows[:-1]):
+                        rows = truncated
+                        with self.assertRaisesRegex(ValueError, 'entire measured block'): run()
+                    rows = complete_rows
                     rows[50][column]=modes[1]
                     with self.assertRaises(ValueError):run()
                     rows[50][column]=modes[0];rows[50]['present_id']=999

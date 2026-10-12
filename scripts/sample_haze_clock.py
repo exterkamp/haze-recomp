@@ -83,6 +83,18 @@ def main():
             raise RuntimeError('Unsupported or uninitialized Haze frame-clock layout')
         constants = {hex(offset):read(vm+base+offset,size).hex()
                      for offset,size in [(-0x7FB0,8),(-0x7FD4,4),(-0x7FA8,8)]}
+        # 00680FA0 has a separate end-of-frame wait, outside 0068ECD8.
+        # Record its live selectors before attributing an apparent FPS ceiling
+        # to GCM callbacks or assuming that the clock routine's minimum is it.
+        pacer_base = word(0x00E94EE0-0x7D70)
+        if pacer_base != 0x00E35AE0:
+            raise RuntimeError('Unsupported BLUS30094 frame-pacer TOC layout')
+        pacer_object = word(pacer_base-0x7FFC)
+        pacer_clock = word(pacer_base-0x7F90)
+        if (pacer_object,pacer_clock) != (0x0169F484,0x01028B90):
+            raise RuntimeError('Unsupported BLUS30094 frame-pacer globals')
+        pacer_constants = {hex(offset):struct.unpack('>f',read(vm+pacer_base+offset,4))[0]
+                           for offset in (-0x7F8C,-0x7F84,-0x7F7C,-0x7F74)}
         rows = []; start = time.perf_counter()
         while time.perf_counter()-start < args.seconds:
             exit_code = w.DWORD()
@@ -94,6 +106,10 @@ def main():
             for name,(_,fmt) in fields.items():
                 row[name] = struct.unpack('>'+fmt,read(vm+pointers[name],struct.calcsize(fmt)))[0]
             row['counter_stable'] = before == word(pointers['frame_counter'])
+            row['pacer_bypass_byte'] = read(vm+pacer_object+0x18D,1)[0]
+            row['pacer_mode_byte'] = read(vm+pacer_object+0x1C4,1)[0]
+            row['pacer_wait_byte'] = read(vm+pacer_object+0x1C5,1)[0]
+            row['pacer_last_clock'] = struct.unpack('>d',read(vm+pacer_clock,8))[0]
             rows.append(row)
             time.sleep(.02)
         frequency = c.c_longlong(); kernel.QueryPerformanceFrequency(c.byref(frequency))
@@ -101,6 +117,8 @@ def main():
                       exe_sha256=hashlib.sha256(args.exe.read_bytes()).hexdigest(),
                       qpc_frequency=frequency.value,base=hex(base),
                       pointers={k:hex(v) for k,v in pointers.items()},constants_hex=constants,
+                      pacer_object=hex(pacer_object),pacer_clock=hex(pacer_clock),
+                      pacer_constants=pacer_constants,
                       samples=rows,note=__doc__)
         args.output.write_text(json.dumps(result,indent=2)+'\n')
         print(json.dumps({k:v for k,v in result.items() if k != 'samples'},indent=2))

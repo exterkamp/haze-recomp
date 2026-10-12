@@ -66,6 +66,21 @@ endif()
 list(LENGTH RECOMP_SOURCES RECOMP_SOURCE_COUNT)
 message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
 
+# Keep the game-derived input untouched; fail closed on an unaudited main loop.
+set(HAZE_PACER_SOURCE "${RECOMP_DIR}/ppu_recomp_003.cpp")
+if(EXISTS "${HAZE_PACER_SOURCE}")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_PACER_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_guest_pacer/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_PACER_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_guest_pacer.py"
+            "${HAZE_PACER_SOURCE}" "${HAZE_PACER_PATCHED}"
+        DEPENDS "${HAZE_PACER_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_guest_pacer.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PACER_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_PACER_PATCHED}")
+    set_property(SOURCE "${HAZE_PACER_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+
 # ---------------------------------------------------------------------------
 # ps3recomp runtime library
 # ---------------------------------------------------------------------------
@@ -196,6 +211,7 @@ add_executable(${PROJECT_NAME}
     stubs.cpp
     haze_input.cpp
     haze_camera.cpp
+    haze_guest_pacer.cpp
     haze_graphics.cpp
     haze_display.cpp
     haze_spu_idle.c
