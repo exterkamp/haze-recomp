@@ -83,8 +83,8 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--pid',type=int,help='Optional native process CPU accounting, including warmup/propagation.')
     a = p.parse_args()
-    if any(f < 0 or f > 2047 for f in a.flags) or a.frames < 60 or a.warmup < 60:
-        p.error('Flags must be 0..2047; use at least 60 warmup and measured frames.')
+    if any(f < 0 or f > 4095 for f in a.flags) or a.frames < 60 or a.warmup < 60:
+        p.error('Flags must be 0..4095; use at least 60 warmup and measured frames.')
     blocks = []
     cpu_clock,close_clock=process_clock(a.pid) if a.pid else (None,None)
     try:
