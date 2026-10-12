@@ -179,6 +179,60 @@ and gated CSV logging perturb timing; these capture intervals are not valid
 performance measurements. No renderer defaults or model-visibility behavior
 were changed by this investigation.
 
+## External window capture comparison
+
+Two further runs test the concern that native readbacks and per-draw logging
+mask a timing-sensitive failure. Both use the preserved executable at 1440p
+with native shadows. An experimental local recorder targets the test process's
+Haze window using `PrintWindow`, writes an MJPEG video, and records host QPC
+timestamps. This avoids the game's native screenshot path, but Windows message
+handling and video encoding still add overhead. Screen samples can repeat,
+skip presentations, or fail to contain valid game pixels. They are not guest
+frame IDs or performance measurements.
+
+Run `20261012-083842-069` disables native capture and draw CSV logging. It exits
+normally with code 0 and saves 5,570 successful presents. An attempted nearby
+mechanic recording contains 1,351 screen samples. Its first 276 samples show
+the scene; the remaining 1,075 decode as a near-black image. The transition
+is bracketed by present timestamps around counters 4925 through 4927. The
+renderer also changes from roughly 880 executed groups per frame to roughly
+70, measured from its cumulative counters. This cannot be dismissed solely
+as a Windows capture failure, but no native image of the black state exists.
+The camera was still moving during the early recording because a queued stick
+command had not finished. This is neither a stationary comparison nor a
+confirmed model-specific disappearance/reappearance. The whole-screen black
+transition remains an unresolved observation.
+
+Run `20261012-084835-356` repeats the fixed pad-poll route, with native capture
+available but unused until after the external recordings. The route reaches
+a different position and camera angle, despite matching poll counts. Pad polls
+do not reliably specify movement distance or rotation; future reproduction
+must verify the view and input completion rather than reuse waits alone.
+
+The repeat run exits normally with code 0 and saves 8,332 successful presents.
+All present rows retain CPU flags 1283, depth clear 1, window position 1,
+shadow comparison 0 and depth export 0. Draw logging remains gated off.
+
+| External recording | Samples reviewed after input completion | Elapsed time | Largest capture gap |
+| --- | ---: | ---: | ---: |
+| Near squad, samples 360 through 2999 | 2,640 | 86.43 s | 1.65 s across the full recording |
+| Closer squad, samples 0 through 1349 | 1,350 | 44.98 s | 0.103 s |
+
+Each selected sample's QPC timestamp has both a preceding and following
+successful-present record. Contact sheets and the eight largest adjacent
+changes within the selected soldier regions were inspected for each recording.
+They retain opaque soldiers and the parked aircraft; animation, flyovers,
+foliage and bright deck patches account for the inspected changes. These
+samples do not rule out a missing model in an uninspected or uncaptured image.
+Native capture `requested_007984.ppm`, taken after both recordings, also shows
+the opaque nearby squad and aircraft. The whole-screen black transition did
+not recur in the inspected repeat-run evidence. No visibility fix is established.
+
+Raw videos, screenshots, timestamps, validators and experimental capture
+helpers remain ignored in `local/`; they contain game-derived pixels. The
+correlations are saved in `visibility-external-correlation.json` and
+`visibility-probe-validation.json` alongside the local recording metadata.
+
 ## Scoped source findings
 
 The SDK source below is from the investigation's preserved `9058dc4` base.
@@ -200,18 +254,18 @@ These checks narrow hypotheses; none establishes the reported failure.
 - **Display selection:** `libs/video/rsx_live_draw.c:3530` associates a
   display buffer with its resolved render surface. Presentation first tries
   an exact registered surface, then that resolve association, then a logged
-  current-surface fallback. All five investigation runs' `boot.stderr.log`
+  current-surface fallback. The first five investigation runs' `boot.stderr.log`
   files contain no scanout-fallback or no-color-surface present-skip messages.
   This does not prove every selected surface is correct.
 - **GPU upload lifetime:** `ld_flush` in `rsx_live_draw.c:1922` submits the
   command list, signals a fence and waits for completion before resetting
   the allocator. The vertex/index capacity branch at line 7373 calls this
   before rewinding transient ring cursors. There is no demonstrated overwrite
-  of an in-flight vertex upload in this path. All five stderr logs also lack
+  of an in-flight vertex upload in this path. Those five stderr logs also lack
   the renderer's `[d3d-fail]` messages; only the first run enabled D3D debug.
 - **SPU terminology:** `SPU_DEPTH_RING_FILE` and `spu_depth_guard` in
   `runtime/spu/spu_drain.c:343` concern host call recursion and diagnostic PC
-  history, not graphics depth or occlusion history. None of the five stderr
+  history, not graphics depth or occlusion history. None of those five stderr
   logs contains the `[spu-depth]` recursion-limit halt message. These controls
   are not a graphics-depth comparison.
 
