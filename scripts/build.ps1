@@ -1,5 +1,6 @@
 param(
     [string]$SharedRoot,
+    [string]$SdkRoot,
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
@@ -33,7 +34,7 @@ $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\c
 $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 $clang = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
 $python = Join-Path $assets '.venv\Scripts\python.exe'
-$sdk = Join-Path $assets 'external\ps3recomp'
+$sdk = if ($SdkRoot) { (Resolve-Path -LiteralPath $SdkRoot).Path } else { Join-Path $assets 'external\ps3recomp' }
 if ($RuntimeOnly) {
     $source = $sdk
     $build = Join-Path $root 'build\runtime'
