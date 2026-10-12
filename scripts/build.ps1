@@ -79,6 +79,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime test compilation failed.' }
     & $coherencyTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime/holder-capacity test failed.' }
+    $idleTest = Join-Path $root 'local/test_spu_idle_wait.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/runtime/spu" "/Fe$idleTest" "/Fo$root/local/" "$root/tests/test_spu_idle_wait.c" "$sdk/runtime/spu/spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait test compilation failed.' }
+    & $idleTest
+    if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait predicate/publication test failed.' }
     $abiStorageTest = Join-Path $root 'local/test_abi_storage.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$abiStorageTest" "/Fo$root/local/test_abi_storage.obj" "$sdk/runtime/spu/tests/test_abi_storage.c"
     if ($LASTEXITCODE -ne 0) { throw 'SPU ABI storage test compilation failed.' }

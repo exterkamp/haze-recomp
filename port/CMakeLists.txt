@@ -151,6 +151,23 @@ set(SPU_SOURCES "")
 if(PORT_ENABLE_SPU)
     file(GLOB SPU_LIFTED CONFIGURE_DEPENDS "${SPU_DIR}/*/spu_recomp.c")
     if(SPU_LIFTED)
+        # Patch a build-local copy, never the shared generated/game sources.
+        set(HAZE_IDLE_SOURCE "${SPU_DIR}/spu_0028_at_00EC7980/spu_recomp.c")
+        if(EXISTS "${HAZE_IDLE_SOURCE}")
+            find_package(Python3 COMPONENTS Interpreter REQUIRED)
+            set(HAZE_IDLE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_spu_idle/spu_recomp.c")
+            add_custom_command(OUTPUT "${HAZE_IDLE_PATCHED}"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_spu_idle.py"
+                    "${HAZE_IDLE_SOURCE}" "${HAZE_IDLE_PATCHED}"
+                    --registration "${SPU_DIR}/spu_workloads.c"
+                DEPENDS "${HAZE_IDLE_SOURCE}" "${SPU_DIR}/spu_workloads.c"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_spu_idle.py"
+                VERBATIM)
+            list(REMOVE_ITEM SPU_LIFTED "${HAZE_IDLE_SOURCE}")
+            list(APPEND SPU_LIFTED "${HAZE_IDLE_PATCHED}")
+            set_property(SOURCE "${HAZE_IDLE_PATCHED}" APPEND PROPERTY
+                INCLUDE_DIRECTORIES "${SPU_DIR}/spu_0028_at_00EC7980")
+        endif()
         list(LENGTH SPU_LIFTED SPU_IMAGE_COUNT)
         message(STATUS "Lifted SPU:      ${SPU_IMAGE_COUNT} image(s)")
         # The musttail indirect-branch fast path. Excluded from the runtime
@@ -181,11 +198,14 @@ add_executable(${PROJECT_NAME}
     haze_camera.cpp
     haze_graphics.cpp
     haze_display.cpp
+    haze_spu_idle.c
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
     ${SPU_SOURCES}
 )
+set_property(SOURCE haze_spu_idle.c APPEND PROPERTY
+    INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")
 
 # The lifted SPU sources use bare #include "spu_context.h". Scope that include
 # directory (and their flags) to those TUs alone: adding it to the whole target
@@ -198,8 +218,9 @@ add_executable(${PROJECT_NAME}
 option(HAZE_SPU_FMA "Use AVX/FMA3 for lifted SPU arithmetic (requires CPU support)" OFF)
 option(HAZE_SPU_BYTE_COMPARE "Compile live scalar/SIMD SPU byte-operation comparisons" OFF)
 if(SPU_SOURCES)
+    set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY
+        INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
-        INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
     if(HAZE_SPU_BYTE_COMPARE)
         # Explicit experiment: these extra branches can change inlining.

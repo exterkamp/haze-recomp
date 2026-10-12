@@ -38,6 +38,18 @@ class PresentWindows(unittest.TestCase):
                 good+'[spurs-queue-wait-mode] tid=37 native=0 qpc=150\n'
                      '[spurs-queue-wait-mode] tid=37 native=1 qpc=160\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            # The independent persistent-SPU wait needs its own mode events;
+            # a PPU queue event is insufficient evidence even with matching TIDs.
+            windows = json.loads(args.windows.read_text())
+            windows['mode_column'] = 'spu_idle_wait'
+            args.windows.write_text(json.dumps(windows))
+            with self.assertRaises(ValueError): run(good)
+            idle_good = good.replace('spurs-queue-wait-mode', 'haze-spu-idle-mode').replace('native=', 'enabled=')
+            run(idle_good)
+            for invalid in [idle_good.replace('tid=37', 'tid=38'),
+                idle_good.replace('qpc=80', 'qpc=101'),
+                idle_good+'[haze-spu-idle-mode] tid=37 enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
