@@ -6,7 +6,8 @@ param(
     [ValidateRange(1,1000000)][int]$FrameEvery = 1,
     [ValidateSet('Live','Legacy')][string]$Renderer = 'Live',
     [switch]$Audio,
-    [switch]$CaptureAudio
+    [switch]$CaptureAudio,
+    [switch]$Uncapped
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -36,6 +37,7 @@ $settings = @{
     AUDIO_WAV = $(if ($CaptureAudio) { Join-Path $runDir 'audio.f32le' } else { $null })
     PS3_VERBOSE = $(if ($null -ne $env:PS3_VERBOSE) { $env:PS3_VERBOSE } else { '0' })
     RSX_LIVE_DRAW = $(if ($Renderer -eq 'Live') { '1' } else { '0' })
+    RSX_MAX_FPS = $(if ($Uncapped) { '0' } elseif ($env:RSX_MAX_FPS) { $env:RSX_MAX_FPS } else { '30' })
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     PS3_MILESTONE_OUT = (Join-Path $runDir 'boot-milestones.log')
     CELLMARK_DUMP = $(if ($CaptureFrames -gt 0) { [string]$CaptureFrames } else { $null })
@@ -82,6 +84,7 @@ try {
         renderer = $Renderer
         audio_muted = -not $Audio
         audio_capture = [bool]$CaptureAudio
+        max_fps = $settings.RSX_MAX_FPS
     }
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'local\boot-result.json') -Encoding UTF8
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runDir 'boot-result.json') -Encoding UTF8

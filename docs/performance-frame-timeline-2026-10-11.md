@@ -1,5 +1,8 @@
 # Frame timeline and representative profiling builds — 2026-10-11
 
+These measurements predate the 30 FPS limiter. Use `scripts/run.ps1 -Uncapped`
+for comparable current-build throughput diagnostics.
+
 Stable 30 FPS remains unverified. These measurements identify work to investigate;
 they do not establish another optimization win.
 

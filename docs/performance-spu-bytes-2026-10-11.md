@@ -59,6 +59,9 @@ Normal builds use SIMD without the comparison TLS reads or branches.
 
 ## Reproduction
 
+For current builds, launch diagnostics with `scripts/run.ps1 -Uncapped` so
+the later 30 FPS limiter does not hide remaining throughput.
+
 Build with `scripts/build.ps1 -SpuFma -ProfileRenderer -CompareSpuByteOps -Test`. Set
 `RSX_PROFILE_LIGHT=1` and `RSX_PROFILE_CSV=renderer.csv`. Point
 `RSX_CPU_WORK_FILE` and `SPU_EXECUTION_MODE_FILE` to the same ignored control

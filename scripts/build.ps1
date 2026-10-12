@@ -200,6 +200,11 @@ if ($Test) {
     & $clearTest
     if ($LASTEXITCODE -ne 0) { throw 'D3D12 channel/scissor clear execution failed.' }
     $textureTest = Join-Path $root 'local/test_live_textures.exe'
+    $frameLimitTest = Join-Path $root 'local/test_frame_limiter.exe'
+    & $clang /nologo /W0 /O2 "/Fe$frameLimitTest" "/Fo$root/local/test_frame_limiter.obj" "$sdk/libs/video/tests/test_frame_limiter.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Frame limiter test compilation failed.' }
+    & $frameLimitTest
+    if ($LASTEXITCODE -ne 0) { throw 'Frame limiter deadline/wait test failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
     & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }

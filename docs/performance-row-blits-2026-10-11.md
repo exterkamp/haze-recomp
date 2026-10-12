@@ -66,6 +66,9 @@ normally with exit code 0.
 
 ## Reproduction
 
+For current builds, launch diagnostics with `scripts/run.ps1 -Uncapped` so
+the later 30 FPS limiter does not hide remaining throughput.
+
 The recorded comparison included the live SPU comparison code. Reproduce it
 with `scripts/build.ps1 -SpuFma -ProfileRenderer -CompareSpuByteOps -Test`. Set
 `RSX_PROFILE_LIGHT=1` and `RSX_PROFILE_CSV=renderer.csv`. Point

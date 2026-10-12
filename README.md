@@ -153,7 +153,11 @@ an additional carrier run without job logging. Its 19.55 FPS result shows why
 the earlier 23.55-24.50 FPS windows are not a stable performance guarantee.
 A fresh ordinary-build baseline measured 20.68 FPS over 600 consecutive
 successful presents, with p95 frame time 63.90 ms.
-**The 30 FPS target remains open.**
+The [specialized vertex-loop comparison](docs/performance-vertex-loops-2026-10-11.md)
+then saved another 1.15–1.28 ms/frame of decoding, with specialized blocks at
+23.16–25.22 FPS. Those loops are now enabled by default.
+**The revised target is a 30 FPS ceiling with dips acceptable.** Reaching
+that ceiling during gameplay and avoiding unnecessary stalls remain open.
 
 For reproducible diagnostic captures:
 
@@ -163,7 +167,7 @@ $env:RSX_PROFILE_LIGHT = '1'  # Omit the legacy shader-variant tracking overhead
 $env:RSX_PROFILE_CSV = 'renderer.csv'
 $env:RSX_PRESENT_CSV = 'presents.csv'
 $env:HAZE_PUMP_PROFILE = '1'
-.\scripts\run.ps1 -Seconds 600
+.\scripts\run.ps1 -Seconds 600 -Uncapped
 # Load the carrier; verify the scene before selecting a frame interval.
 .venv\Scripts\python.exe scripts/summarize_profile.py local/runs/<run>/renderer.csv --last 600
 .venv\Scripts\python.exe scripts/profile_native_cpu.py <HazePID> 20
@@ -187,6 +191,13 @@ device-clock pacing and game audio events. Add `-CaptureAudio` to save the origi
 mix as `audio.f32le` (48 kHz stereo float32), or explicitly `-Audio` to hear a test.
 The ordinary gameplay launcher retains sound. All captures stay under ignored
 `local/runs`. Rebuild without `-ProfileRenderer` for ordinary play.
+Native play defaults to a **30 FPS maximum**. Slow frames present when ready;
+the limiter does not try to catch up with bursts of faster frames. Diagnostics
+use `-Uncapped` to measure remaining capacity. `RSX_MAX_FPS=0` is the equivalent
+direct-executable override; normal capped runs record their limit in the run report.
+The [limiter verification](docs/frame-limit-2026-10-11.md) found no interval
+shorter than 1/30 second across 9,575 consecutive presents. A lighter carrier
+view reached 29.41 FPS, while the busy deck remained at 20.70 FPS in that run.
 
 ## Local development
 

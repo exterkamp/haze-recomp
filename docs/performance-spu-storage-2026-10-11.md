@@ -70,6 +70,9 @@ well short of consistent 33.3 ms frames.
 
 ## Reproduction
 
+For current builds, launch diagnostics with `scripts/run.ps1 -Uncapped` so
+the later 30 FPS limiter does not hide remaining throughput.
+
 Build with `scripts/build.ps1 -SpuFma -ProfileRenderer -Test`. Set
 `RSX_PROFILE_LIGHT=1`, `RSX_PROFILE_CSV=renderer.csv`, and point both
 `RSX_CPU_WORK_FILE` and `SPU_EXECUTION_MODE_FILE` at an ignored control file

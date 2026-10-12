@@ -492,6 +492,9 @@ int main(int argc, char** argv)
     /* Haze's full frame pipeline renders its splash screens through this
      * native D3D12 path. RSX_LIVE_DRAW=0 retains the legacy renderer for probes. */
     if (!getenv("RSX_LIVE_DRAW")) _putenv_s("RSX_LIVE_DRAW", "1");
+    /* Match the requested 30 FPS ceiling. Zero is an explicit profiling
+     * override; the SDK itself remains unrestricted for other titles. */
+    if (!getenv("RSX_MAX_FPS")) _putenv_s("RSX_MAX_FPS", "30");
     /* High-volume SDK logging contends on FILE locks across guest threads. */
     if (!getenv("PS3_VERBOSE")) _putenv_s("PS3_VERBOSE", "0");
     static char stdout_buffer[64 * 1024], stderr_buffer[64 * 1024];
