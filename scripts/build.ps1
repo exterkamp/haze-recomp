@@ -57,7 +57,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     $graphicsTest = Join-Path $root 'local/test_haze_graphics.exe'
-    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$graphicsTest" "/Fo$root/local/test_haze_graphics.obj" "$root/tests/test_haze_graphics.cpp"
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$graphicsTest" "/Fo$root/local/test_haze_graphics.obj" "$root/tests/test_haze_graphics.cpp" /link user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test compilation failed.' }
     & $graphicsTest
     if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test failed.' }

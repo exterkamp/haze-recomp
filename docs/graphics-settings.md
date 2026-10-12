@@ -1,8 +1,9 @@
 # Graphics settings
 
-Implemented on `feat/graphics-settings` in `.worktrees/custom-render-resolution`
-and its SDK worktree. This includes the custom-resolution work and the current
-native mouse controls and triangle-index performance fixes from main.
+INI loading and graphics controls are available on main. Automatic monitor
+defaults are added on `feat/graphics-auto-defaults` in
+`.worktrees/custom-render-resolution`, based on main's graphics, native input
+and renderer improvements. No SDK changes are required for automatic defaults.
 
 Edit `config/graphics.ini`, then restart the game. The launchers resolve its path
 before starting the executable in a session directory. Use another file with
@@ -10,6 +11,9 @@ before starting the executable in a session directory. Use another file with
 file path. Without an explicit config path, the executable looks for
 `config/graphics.ini` relative to its working directory and uses defaults if
 absent. An explicitly requested missing file fails startup.
+The launchers also use defaults when the repository's default INI is absent;
+an explicit `-GraphicsConfig` or `HAZE_GRAPHICS_CONFIG` still must exist.
+Missing keys use built-in defaults; an empty `[graphics]` section is sufficient.
 
 ```powershell
 .\scripts\play.ps1
@@ -23,12 +27,12 @@ absent. An explicitly requested missing file fails startup.
 | Setting | Values / default | Effect and cost |
 | --- | --- | --- |
 | `display_mode` | `windowed` (default), `fullscreen`, `borderless` | Windowed has a title bar and resize frame. Borderless fills the selected monitor without a frame or always-on-top behavior. Fullscreen additionally requests DXGI fullscreen state; Windows may use fullscreen optimizations. If Windows refuses it, a diagnostic reports the borderless fallback. |
-| `window_size` | `WIDTHxHEIGHT`, default `1280x720`, axes 1..8192 | Windowed client size in physical pixels, centered in the selected monitor's work area. Independent of internal render resolution. Fullscreen/borderless use the monitor's desktop size instead. |
+| `window_size` | `auto` (default), `WIDTHxHEIGHT`, axes 1..8192 | `auto` selects a 16:9 client up to 1280x720 that fits the selected monitor's work area, accounting for DPI, decorations and taskbar space. Explicit sizes set exact client pixels. Independent of internal render resolution. Fullscreen/borderless use the monitor's desktop size instead. |
 | `monitor` | `primary` (default), 1..16 | Selects the primary monitor or a 1-based number from the boot log. Unavailable monitors fail startup instead of silently selecting another screen. |
-| `render_resolution` | `native` (default), `WIDTHxHEIGHT`, each axis 1..8192 | Raises raster resolution, including intermediate targets. The 1024x576 scene and 1280x720 scanout both reach the selected size. More GPU work and memory; aspect ratio changes stretch the original projection and HUD. |
+| `render_resolution` | `auto` (default), `native`, `WIDTHxHEIGHT`, each axis 1..8192 | `auto` uses the selected monitor's current desktop resolution in physical pixels, limited to 8192 per axis. `native` retains the game's original sizes. Custom/automatic sizes raise raster resolution, including intermediate targets: the 1024x576 scene and 1280x720 scanout both reach the selected size. More GPU work and memory; aspect ratio changes stretch the original projection and HUD. |
 | `anti_aliasing` | `off` (default), `fxaa` | Directional edge AA on the final image. Inexpensive compared with supersampling, but can soften text and fine details. Does not provide MSAA or temporal AA. |
 | `anisotropic_filtering` | `1` (default), `2`, `4`, `8`, `16` | Improves oblique filtered, mipmapped color textures. Preserves point sampling, single-level/linear textures, texel-coordinate reads and depth comparisons. `1` retains the existing game filter. |
-| `shadow_resolution` | `follow` (default), `native`, `1024`, `2048`, `4096`, `8192` | Sets the known 2048x2048 shadow atlas independently. `follow` retains render scaling; `native` retains 2048. A 4096 atlas has four times the native pixels, 8192 sixteen times. Existing shadow artifacts may remain. |
+| `shadow_resolution` | `native` (default), `follow`, `1024`, `2048`, `4096`, `8192` | Sets the known 2048x2048 shadow atlas independently. `native` retains 2048 to avoid multiplying shadow memory with automatic desktop rendering. `follow` uses render scaling. A 4096 atlas has four times the native pixels, 8192 sixteen times. Existing shadow artifacts may remain. |
 | `mip_lod_bias` | -2..2, default 0 | Adds a bias to eligible color samplers. Negative values request sharper available mip levels and may shimmer; positive values soften them. Cannot create additional texture detail. |
 | `sharpening` | 0..1, default 0 | Final-image sharpening constrained to local color bounds to limit halos. Strong values can emphasize noise. |
 | `exposure` | -2..2 stops, default 0 | Final-image brightness multiplier, including HUD. +1 doubles displayed RGB, -1 halves it. This operates on the game's display colors, rather than physically based HDR lighting. |
@@ -46,11 +50,16 @@ a file/line or variable diagnostic. The complete file is validated before
 settings are applied. Environment overrides take precedence over the file;
 launcher `-RenderResolution` and `-Uncapped` take precedence over environment
 values for their respective settings. Configured values are logged as
-`[graphics]` at boot. The settings target the native Live D3D12 renderer; the
+`[graphics]` at boot, with `auto` sizes resolved to concrete dimensions before
+the renderer starts. `[display] auto` reports the monitor and detected sizes;
+`[graphics] Loaded` identifies the INI, or a defaults diagnostic identifies an
+absent optional file. Automatic sizing is recalculated on each launch, including
+after changing the selected monitor or its desktop resolution. The settings target the native Live D3D12 renderer; the
 Legacy diagnostic backend does not implement these quality controls.
 
 For example, `display_mode = borderless` and `monitor = primary` fills the
-primary desktop, while `render_resolution = 1920x1080` still renders at 1080p.
+primary desktop; `render_resolution = auto` renders at that desktop's resolution,
+while `render_resolution = 1920x1080` renders at 1080p regardless of desktop size.
 Use `display_mode = windowed` and `window_size = 960x540` for a smaller window
 without changing the rendering resolution. Window resizing scales the fixed
 internal image; focus loss releases captured mouse input. Mode changes require
@@ -128,10 +137,19 @@ alpha preservation, and unchanged source images. Non-multiple dispatch sizes
 exercise compute bounds. Existing window-position, masked-clear, depth and
 shadow-comparison tests remain part of the gate.
 
+Automatic sizing uses a hidden per-monitor-aware window with
+[GetDpiForWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdpiforwindow)
+to determine the selected monitor's effective DPI, then restores the caller's
+DPI context. The probe is never shown. Explicit dimensions remain unchanged.
+
 The Win32 display test creates real windows and checks exact client pixels,
 borderless rectangles on each connected monitor, restored windowed frames,
 fullscreen placement and invalid-monitor rejection. This machine exposed four
-monitors (three 2560x1440 and one 1920x1080).
+monitors (three 2560x1440 and one 1920x1080). Automatic-default checks also compare
+resolved rendering dimensions to each monitor and ensure the entire automatic
+window, including decorations, stays inside that monitor's work area.
+Configuration tests cover omitted keys, an absent optional INI, automatic and
+explicit sizes, environment precedence, and failure before applying values.
 
 Local gate logs: `local/graphics-final-build-tests.log`,
 `local/graphics-display-build-tests.log`, and `local/graphics-focused-tests-final.log`.
@@ -164,9 +182,28 @@ remain. The complete final regression gate is
 change was rebuilt in `local/graphics-display-candidate-build.log` and verified
 by its native rejection run.
 
-Final SDK source: `9cff4eb`. The candidate is
+Original graphics feature SDK source: `9cff4eb`. Its candidate is
 `local/candidates/graphics-settings-final/HazeRecomp.exe`, SHA-256
 `B7AED4331346E0EC9D87F019EC8A79ECC42B8CA2797C5237E5B0A24BFED48BB7`.
 Its adjacent `Play-Haze.cmd` launches the candidate using this worktree's
 `config/graphics.ini`. The worktree's default `build/haze/HazeRecomp.exe` and
-PDB were updated to the same final build. The main checkout is separate.
+PDB were updated to the same final build at that time. The main checkout is separate.
+
+The automatic-default branch uses main's merged SDK `45faa42` without SDK edits.
+Its final full build/test log is `local/graphics-auto-final-tests.log`, and the candidate is
+`local/candidates/graphics-auto-defaults/HazeRecomp.exe`. Use
+`scripts/play.ps1 -ExecutablePath local/candidates/graphics-auto-defaults/HazeRecomp.exe`
+from this worktree, or the adjacent `Play-Haze.cmd`, to launch with its
+`config/graphics.ini`. The default worktree build executable is also updated.
+Candidate SHA-256: `7030EA56CE39E4C2C77392E487B4488DC193E6382B9B6A439EF344AB72CDE59E`.
+
+Automatic-resolution native checks:
+
+| Run | Check |
+| --- | --- |
+| `20261012-053917-975` | Default INI selected primary monitor 2, rendered at 2560x1440 with a 1280x720 client and native 2048-square shadows; title capture inspected. This preceded the hidden-window DPI probe refinement. |
+| `20261012-054153-212` | Final candidate, partial INI specifying borderless and monitor 4 only: defaults resolved to 1920x1080, matching both the client and captured title image. |
+
+These bounded runs ended at their 50/45-second limits, with no D3D12
+error/corruption or resource/presentation failures. They verify startup and
+presentation; they do not measure campaign performance.

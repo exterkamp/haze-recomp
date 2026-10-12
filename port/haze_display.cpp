@@ -16,6 +16,33 @@ BOOL CALLBACK collect_monitor(HMONITOR monitor,HDC,LPRECT,LPARAM data) {
         reinterpret_cast<std::vector<MONITORINFOEXA>*>(data)->push_back(info);
     return TRUE;
 }
+bool select_monitor(const char* choice, std::vector<MONITORINFOEXA>& monitors, size_t& selected) {
+    if (!EnumDisplayMonitors(nullptr,nullptr,collect_monitor,reinterpret_cast<LPARAM>(&monitors)) || monitors.empty()) {
+        std::fprintf(stderr,"[display] Cannot enumerate monitors\n"); return false;
+    }
+    std::sort(monitors.begin(),monitors.end(),[](const auto& a,const auto& b){return std::strcmp(a.szDevice,b.szDevice)<0;});
+    selected=0;
+    if (!choice || !std::strcmp(choice,"primary")) {
+        for(size_t i=0;i<monitors.size();++i) if(monitors[i].dwFlags&MONITORINFOF_PRIMARY) selected=i;
+    } else {
+        char* end=nullptr;
+        const long number=std::strtol(choice,&end,10);
+        if(*end || number<1 || static_cast<size_t>(number)>monitors.size()) {
+            std::fprintf(stderr,"[display] Monitor %s unavailable (%zu connected)\n",choice,monitors.size()); return false;
+        }
+        selected=number-1;
+    }
+    return true;
+}
+void fit_window(LONG work_width, LONG work_height, LONG frame_width, LONG frame_height,
+                unsigned& width, unsigned& height) {
+    // Reserve space for decorations and retain the game's 16:9 aspect ratio.
+    const LONG available_width=(std::max)(1L,work_width-frame_width);
+    const LONG available_height=(std::max)(1L,work_height-frame_height);
+    width=static_cast<unsigned>((std::min)({1280L,available_width,available_height*16/9}));
+    width=(std::max)(1u,width);
+    height=(std::max)(1u,width*9/16);
+}
 }
 void haze_display_prepare() {
     // The renderer/window thread must use physical monitor pixels, including
@@ -24,25 +51,55 @@ void haze_display_prepare() {
     auto set_context=reinterpret_cast<SetContext>(GetProcAddress(GetModuleHandleA("user32.dll"),"SetThreadDpiAwarenessContext"));
     if (set_context) set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 }
+bool haze_display_detect(const char* choice, haze_display_defaults& defaults) {
+    // Restore the caller's DPI context after querying physical desktop bounds.
+    using SetContext=DPI_AWARENESS_CONTEXT (WINAPI*)(DPI_AWARENESS_CONTEXT);
+    auto user=GetModuleHandleA("user32.dll");
+    auto set_context=reinterpret_cast<SetContext>(GetProcAddress(user,"SetThreadDpiAwarenessContext"));
+    const auto previous=set_context ? set_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) : nullptr;
+    std::vector<MONITORINFOEXA> monitors;
+    size_t selected=0;
+    const bool found=select_monitor(choice,monitors,selected);
+    if(found) {
+        const auto& monitor=monitors[selected];
+        defaults.render_width=static_cast<unsigned>((std::min)(8192L,monitor.rcMonitor.right-monitor.rcMonitor.left));
+        defaults.render_height=static_cast<unsigned>((std::min)(8192L,monitor.rcMonitor.bottom-monitor.rcMonitor.top));
+        // A hidden per-monitor-aware window provides the selected display's
+        // effective DPI even when the process itself has no DPI manifest.
+        using GetDpi=UINT (WINAPI*)(HWND);
+        auto get_dpi=reinterpret_cast<GetDpi>(GetProcAddress(user,"GetDpiForWindow"));
+        UINT dpi=96;
+        if(get_dpi) {
+            auto probe=CreateWindowExA(0,"STATIC","",WS_OVERLAPPEDWINDOW,
+                monitor.rcMonitor.left,monitor.rcMonitor.top,1,1,nullptr,nullptr,GetModuleHandleA(nullptr),nullptr);
+            if(!probe) {
+                std::fprintf(stderr,"[display] Cannot query monitor DPI\n");
+                if(previous) set_context(previous);
+                return false;
+            }
+            dpi=get_dpi(probe);
+            DestroyWindow(probe);
+        }
+        using AdjustDpi=BOOL (WINAPI*)(LPRECT,DWORD,BOOL,DWORD,UINT);
+        auto adjust_dpi=reinterpret_cast<AdjustDpi>(GetProcAddress(user,"AdjustWindowRectExForDpi"));
+        RECT frame{};
+        const bool adjusted=adjust_dpi ? adjust_dpi(&frame,WS_OVERLAPPEDWINDOW,FALSE,0,dpi)!=FALSE :
+            AdjustWindowRectEx(&frame,WS_OVERLAPPEDWINDOW,FALSE,0)!=FALSE;
+        if(!adjusted) { if(previous) set_context(previous); return false; }
+        fit_window(monitor.rcWork.right-monitor.rcWork.left,monitor.rcWork.bottom-monitor.rcWork.top,
+            frame.right-frame.left,frame.bottom-frame.top,defaults.window_width,defaults.window_height);
+        std::fprintf(stderr,"[display] auto monitor=%zu desktop=%ux%u window=%ux%u\n",selected+1,
+            defaults.render_width,defaults.render_height,defaults.window_width,defaults.window_height);
+    }
+    if(previous) set_context(previous);
+    return found;
+}
 bool haze_display_apply(void* window) {
     HWND hwnd=static_cast<HWND>(window);
     if (!IsWindow(hwnd)) return false;
     std::vector<MONITORINFOEXA> monitors;
-    if (!EnumDisplayMonitors(nullptr,nullptr,collect_monitor,reinterpret_cast<LPARAM>(&monitors)) || monitors.empty()) {
-        std::fprintf(stderr,"[display] Cannot enumerate monitors\n"); return false;
-    }
-    std::sort(monitors.begin(),monitors.end(),[](const auto& a,const auto& b){return std::strcmp(a.szDevice,b.szDevice)<0;});
     size_t selected=0;
-    const char* choice=std::getenv("RSX_MONITOR");
-    if (!choice || !std::strcmp(choice,"primary")) {
-        for(size_t i=0;i<monitors.size();++i) if(monitors[i].dwFlags&MONITORINFOF_PRIMARY) selected=i;
-    } else {
-        const int number=std::atoi(choice);
-        if(number<1 || static_cast<size_t>(number)>monitors.size()) {
-            std::fprintf(stderr,"[display] Monitor %s unavailable (%zu connected)\n",choice,monitors.size()); return false;
-        }
-        selected=number-1;
-    }
+    if(!select_monitor(std::getenv("RSX_MONITOR"),monitors,selected)) return false;
     for(size_t i=0;i<monitors.size();++i)
         std::fprintf(stderr,"[display] monitor %zu: %s %ldx%ld%s\n",i+1,monitors[i].szDevice,
             monitors[i].rcMonitor.right-monitors[i].rcMonitor.left,
@@ -86,6 +143,9 @@ bool haze_display_apply(void* window) {
     return true;
 }
 #else
+bool haze_display_detect(const char*, haze_display_defaults& defaults) {
+    defaults={1280,720,1280,720}; return true;
+}
 void haze_display_prepare() {}
 bool haze_display_apply(void*) { return true; }
 #endif
