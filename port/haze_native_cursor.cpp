@@ -31,7 +31,7 @@ struct settings {
 };
 }
 
-// Default off until ordinary gameplay and critical-path timing are compared.
+// Haze initializes the default at startup; explicit zero retains the reference.
 extern "C" int haze_native_cursor_enabled(void)
 {
     static settings mode;

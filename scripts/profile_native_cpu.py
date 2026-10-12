@@ -24,6 +24,8 @@ parser.add_argument('--tid',type=int,action='append',help='Sample only these thr
 parser.add_argument('--interval-ms',type=float,default=9,
     help='Mean randomized interval between sample rounds; use separately from FPS benchmarks.')
 parser.add_argument('--raw-limit',type=int,default=20,help='Maximum individual instruction locations per thread.')
+parser.add_argument('--stack-limit',type=int,
+    help='Maximum recorded call chains per thread; defaults to raw-limit. Increase to retain rare active callers among many waiting chains.')
 parser.add_argument('--symbol-path',type=Path,default=Path(__file__).resolve().parents[1]/'build'/'haze')
 parser.add_argument('--stack-depth',type=int,default=0,
     help='Optional AMD64 unwind depth, 0 disables it. Build scripts/native_stackwalk.c first.')
@@ -35,6 +37,8 @@ if not 1<=args.scan_every<=1000:
     parser.error('scan-every must be 1..1000')
 if not .5<=args.interval_ms<=100 or not 1<=args.raw_limit<=1000:
     parser.error('interval-ms must be .5..100 and raw-limit must be 1..1000')
+if args.stack_limit is not None and not 1<=args.stack_limit<=10000:
+    parser.error('stack-limit must be 1..10000')
 if not 0<=args.stack_depth<=64 or not 1<=args.stack_every<=1000:
     parser.error('stack-depth must be 0..64 and stack-every must be 1..1000')
 if args.stack_depth and not args.stack_library.is_file():
@@ -201,7 +205,7 @@ for tid in sorted(handles,key=lambda t:last[t]-first[t],reverse=True):
         if t==tid: hist[sym(rip).split('+0x')[0]]+=n
     rows.append(dict(tid=tid[0],created_filetime=tid[1],cpu_ms=(last[tid]-first[tid])/10000,rips=hist.most_common(20),raw_rips=[(sym(rip),n) for (t,rip),n in raw.most_common() if t==tid][:args.raw_limit],
                      stacks=[dict(frames=[sym(pc) for pc in addresses],samples=n)
-                             for (t,addresses),n in stacks.most_common() if t==tid][:args.raw_limit],
+                             for (t,addresses),n in stacks.most_common() if t==tid][:(args.stack_limit or args.raw_limit)],
                      sampled_read32_addresses=[(f'0x{addr:08X}',n) for (t,addr),n in memory_reads.most_common() if t==tid][:20]))
 tracked_ms=sum(row['cpu_ms'] for row in rows)
 print(json.dumps(dict(pid=pid,exe=pathbuf.value,elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),

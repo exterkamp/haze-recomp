@@ -98,6 +98,9 @@ its audit-selection branch takes about 52–54 versus 80–90. Constant-coeffici
 fixtures and an earlier fixture consuming only one final lane were also
 retained privately, but do not substitute for the changing-input comparison.
 These are local CPU costs, not an FPS multiplier or critical-path attribution.
+Those initial standalone figures use `/O2` without explicitly matching the
+runtime's `/Ob1`; the [follow-up](performance-native-spu-float-followup-2026-10-12.md)
+checks the actual helper calls and aligns the standalone compiler flags.
 
 The full `-SpuFma -NativeSpuFloat -Test` build passes, including the existing
 numeric, renderer, memory lifetime, DMA and queue checks. The ordinary candidate
