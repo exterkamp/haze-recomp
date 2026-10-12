@@ -24,8 +24,9 @@ disagreement is now reproduced offline by the identified SPU implementation.
 It overflows near-plane depth arithmetic to host infinities and NaNs; a local
 overflow-clamp experiment restores all eight rejected soldier cases. The
 runtime's single-precision helpers do not implement SPU extended-range
-overflow semantics. An architectural correction and live validation remain
-to be done; no permanent fix is established.
+overflow semantics. An isolated extended-range prototype now keeps the
+speaker visible throughout a live capture with normal SPU dispatch and
+occlusion enabled. A permanent arithmetic correction remains to be done.
 
 ## Initial native evidence
 
@@ -1142,6 +1143,63 @@ conversions needs consistent implementation and regression coverage. It has
 not been applied to the game or SDK. The preserved executable's hash remains
 `EF9CF6AB69EB984E6F22805C003608220CD45E78ECA126B2C5BDAFF7F7B06B7B`.
 
+## Extended-range arithmetic prototype
+
+A second, local arithmetic experiment decodes exponent-255 single-precision
+operands as finite SPU values, calculates exceptional arithmetic with double
+intermediates, truncates the packed significand, and saturates overflow at
+the SPU maximum `0x7FFFFFFF`. It also handles extended operands in the
+comparisons, signed conversion, and interpolation used by this program.
+Ordinary host arithmetic retains its existing behavior in this prototype;
+this is not a complete implementation of SPU rounding or underflow semantics.
+
+Replaying all 43 decision13 inputs with this experiment accepts the speaker
+in every case. Complete-list comparisons add `0x4ACE4000` in precisely the
+eight formerly rejected records and add unidentified `0x4ACE4FA0` in record
+25. No formerly accepted identifier is removed. Results are in
+`local/visibility-conversation-decision13-decisions/spu-extended-overflow-comparison.json`.
+
+The isolated live candidate replaces only the compiled occlusion SPU image39
+object and includes the existing read-only PPU decision recorder. The SDK
+and generated game sources remain unchanged. Its executable is
+`local/candidates/visibility-spu-overflow/HazeRecomp.exe`, SHA256
+`6B7E9DC67F64AA0C50B33B0F5DA49B75CAF4DC2A78B787F3C6478B232448C220`.
+The original generated C declarations and definitions retain C linkage in
+the separately compiled C++ prototype translation unit.
+
+Run `20261012-202844-863` tests this candidate with label
+`visibility-conversation-spu16`. Read-only memory checks before the approach
+and after capture verify job11 mode `2`, module `0xF2C100`, and global occlusion
+enable `1`. No job-mode or occlusion-enable writes are made. Final approach
+ends with neutral input at QPC `1349140.4826581`; the conversation subsequently
+runs without further player or camera input. The close-up observer opens the
+gate at `1349151.9817706` and closes it at `1349169.960054`.
+
+All 40 consecutive native images, frames 5006 through 5045, show the speaker
+continuously through the close-up and pullback. The background airship also
+remains visible, which alone does not establish its previously observed
+disappearance's cause. All 40 corresponding model-filter records retain
+speaker `0x4ACE4000`. Other models are still filtered: raw identifier
+`0x4ACE3920` is removed in 26 records, and `0x4ACE3F60` in four.
+
+Replaying these new candidate inputs provides a direct arithmetic control.
+The original helpers reject the speaker in nine decisions (consumer frames
+5009-5012 and 5014-5018). The extended-range prototype accepts it in all 40
+and reproduces every complete recorded accepted identifier list exactly.
+The comparison is
+`local/visibility-conversation-spu16-decisions/spu-live-candidate-replay-comparison.json`.
+This controls for differences in the live camera or captured depth data;
+the same recorded inputs reproduce the failure with the original arithmetic.
+
+The game closes normally with exit code 0 and 6,943 successful presents.
+All four previously associated speaker mesh fingerprints occur in every
+captured frame. The gated draw trace contains 45,568 execute outcomes and
+no rejection outcomes; native frame N and N+1 renderer-mode checks have no
+errors. Renderer packet/group ledgers remain balanced, rejection counters
+remain zero, and `probe_skip_sampling` remains zero. The observer completes
+its 180-second recording (5,401 samples) before the game is closed.
+The preserved baseline executable retains its original SHA256.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
@@ -1151,7 +1209,8 @@ approaching the soldiers and starting the first conversation. The immediate
 speaker-model rejection, live PPU fallback comparison, deterministic SPU
 replay, and arithmetic-overflow mechanism are now established. Next is a
 consistent correction of SPU extended-range arithmetic, appropriate helper
-regressions, and live comparison using the normal SPU job mode. The airship
+regressions, and broader validation. The isolated live arithmetic comparison
+using normal SPU job mode now passes. The airship
 needs an equivalent model association and rejection trace before assuming
 the same cause. No permanent fix or completion is claimed. The separate
 whole-scene black intervals are not a substitute for model-specific evidence.
