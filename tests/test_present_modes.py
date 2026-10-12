@@ -134,7 +134,7 @@ class PresentWindows(unittest.TestCase):
             root = Path(folder)
             args = SimpleNamespace(csv=root/'p.csv', windows=root/'w.json',
                                    output=root/'r.json', min_frames=60)
-            for column, modes in [('cpu_work', (259,1283)), ('cpu_work',(1283,3331)), ('cpu_work',(1283,5379)), ('shadow_compare',(0,1)), ('depth_export',(0,1)), ('window_position',(0,2)), ('depth_clear',(0,1))]:
+            for column, modes in [('cpu_work', (259,1283)), ('cpu_work',(1283,3331)), ('cpu_work',(1283,5379)), ('vertex_cache',(0,1)), ('geometry_cache',(0,1)), ('shadow_compare',(0,1)), ('depth_export',(0,1)), ('window_position',(0,2)), ('depth_clear',(0,1))]:
                 with self.subTest(column=column):
                     rows, ticks = [], 0
                     for i in range(202):

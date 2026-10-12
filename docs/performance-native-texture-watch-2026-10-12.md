@@ -198,6 +198,8 @@ generations, preserve inline/default/frequency/restart behavior, and retain
 buffers until all in-flight GPU users finish. Measure unchanged-source reuse,
 eligibility and invalidation cost before claiming a gain or choosing its size.
 
+Follow-up: [prepared-geometry cache audit and measurements](performance-native-geometry-cache-2026-10-12.md).
+
 Artifacts: `local/native-texture-watch-audit-{run,blocks,summary}.json`, its
 renderer CSV; `local/native-texture-watch-stage-{run,blocks,summary,boundaries}.json`,
 renderer CSV and process observations; `local/native-texture-watch-{run,windows,report}.json`,
