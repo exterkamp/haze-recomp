@@ -16,7 +16,11 @@ initially selected 4,596-vertex batch inside the yellow helmet, explaining why
 suppressing it leaves the opaque body visible. Two body-material batches share
 that part's exact vertex-program constant fingerprint within a frame and
 disappear alongside it in the clearest missing intervals. The reason these
-submissions stop remains unresolved; no culling or renderer fix is established.
+submissions stop is now traced to guest occlusion-result model-list filtering.
+The exact speaker model is removed in eight recorded decisions, matching its
+absence one native frame later. A full PPU fallback replay accepts that model
+in all eight cases. The default job dispatch uses an SPU queue, so this
+disagreement is the next investigation target; no fix is established.
 
 ## Initial native evidence
 
@@ -919,7 +923,8 @@ The preceding reversed comparison did keep input neutral through its captures.
 
 Static follow-up connects this bounds list to guest worker job type 11 through
 `007ED838` -> `00682648`. The job table at `0x00DFBDDC` resolves entry 11 to
-OPD `0x00E6DE30`, code `00682BC8`; the separate mode byte is 2. The worker clears
+OPD `0x00E6DE30`, code `00682BC8`; the separate mode byte is 2. This function is
+the PPU fallback, not proof that the default job executes it. The fallback clears
 a 0x40000-byte buffer through `007ED660`, processes geometry with `007ECDD0`,
 prepares data with `007ED590`, then tests each bounds pair with `007ED6D8` and
 compacts accepted identifiers. This supplies concrete producer/consumer
@@ -927,15 +932,143 @@ functions for further tracing. It does not establish that a particular
 worker result caused a captured disappearance, and the guest job number must
 not be confused with an SPU image number.
 
+## Neutral-input repeat and CPU occlusion buffers
+
+Run `20261012-190500-222` repeats the held-off comparison with the extra
+movement removed. Guest byte `0x0169F608` is set to zero before approaching
+the squad. The final forward command is followed by neutral input starting
+at QPC 1344189.6552457, before the observer's close-helmet trigger at
+1344201.2189819. No further input is sent through the comparison.
+
+The five phases are again 0 / 0 / 0 / 1 / 0, with eight native images per
+phase. Disabled phases cover counters 6993..7000, 7001..7008 and 7010..7017;
+the enabled phase covers 7019..7026, and the final disabled phase covers
+7027..7034. The gaps are not captured frames. The speaker remains visible
+through all 24 images in the initial disabled interval, including the full
+close-up and pullback. All 40 images have matching draw/present records;
+their N and N+1 renderer modes retain the baseline settings. The four
+identified body/head mesh fingerprints submit in every captured frame.
+The draw trace contains 48,640 `execute` outcomes and no other outcomes.
+The process exits normally after 12,792 successful presents. All byte writes
+are read back, and the original enabled state is restored before closing.
+Local evidence uses prefix `visibility-conversation-byte11`. This removes
+the preceding run's input confound, but does not itself identify the exact
+worker decision responsible for a missing speaker.
+
+Read-only memory inspection also locates the live CPU occlusion data.
+`vm_read32(0x00E94EE0 - 0x7D5C)` points to a small TOC whose -0x8000 entry
+points to the 16-entry frame-context pool; context stride is 0x4F0. Context
++0x4C0 points to the 0x89B00-byte worker buffer. Relevant buffer offsets are:
+
+| Offset | Data |
+| --- | --- |
+| 0x00000 | Four-row world view-projection matrix |
+| 0x00040 | Software raster depth buffer, size 0x40000 |
+| 0x7AAD0 | Input min/max bounds, stride 32 bytes |
+| 0x82AD0 | Input identifiers |
+| 0x83AD0 | Accepted identifiers |
+| 0x84AD0 | Input count |
+| 0x84AD4 | Accepted count |
+| 0x84AF8 | Occluder geometry count |
+
+Identifiers include both raw model pointers and encoded submodel IDs; they
+must not all be dereferenced as model pointers. `006ABA30` consumes these
+results after `006ABD38` waits for the worker, then compacts the model array.
+
+Two post-conversation snapshots preserve these buffers under prefixes
+`visibility-byte11-post` and `visibility-byte11-current`. The latter contains
+74 bounds, 42 accepted identifiers and 19 occluder entries. Projecting its
+world bounds using the buffer's matrix produces boxes over the visible
+soldiers. For example, raw model `0x4ACE3F60` projects to approximately
+(365,342)..(478,518) in the 1280x720 external image, surrounding the left
+foreground soldier, and is in the accepted list. This associates the live
+data spatially with the scene. The snapshot and external image are taken
+sequentially and are not synchronized with a native draw counter. Neither
+snapshot captures a known disappearance; neither proves a rejection bug.
+
+## Exact speaker-model rejection and PPU fallback replay
+
+Run `20261012-192914-365` captures 40 consecutive native images, counters
+4270..4309, during the first conversation with neutral player input. The
+final movement ends before the close-up. The speaker is visible in 4270..4273,
+missing in 4274..4276, visible in 4277, missing in 4278..4282, then visible
+from 4283 through the pullback. The nearby airship remains visible in this
+particular sequence. This run does not trace an airship rejection.
+
+A separate diagnostic executable wraps `006ABA30` with a read-only snapshot
+before model-array compaction and another afterward. It captures the frame
+context, software depth buffer, bounds and identifier lists after the caller
+has waited for the worker, plus the actual pre/post model arrays. This
+instrumentation writes local files and changes timing. It does not write
+guest memory or registers; the original function and trampoline are preserved.
+The preserved executable and generated PPU source are unchanged. Diagnostic
+executable SHA256 is
+`8928DDCC30061C4B6BCAF8DC2CB7D939F4C8F368235C6122E6703261B97BB268`.
+
+There are 43 saved filter decisions. Raw model `0x4ACE4000` occurs in every
+input list. It is absent from the accepted list and removed from the actual
+model array at consumer counters 4273..4275 and 4277..4281. It remains in the
+array in the other 35 records, including 4276 and 4282. The one-native-frame
+delay maps these eight removals exactly onto the eight missing native images.
+This establishes the guest filter as the immediate cause of this soldier's
+missing submissions, beyond the earlier mesh correlation.
+
+The model association is spatially verified. Geometry trace 2, from draw
+counter 4269, projects onto the helmet, shoulders and torso in native 4270;
+973 vertices are inside the clip volume. Transforming its original guest MVP
+positions back through the saved world view-projection matrix puts the body
+vertices inside the recorded `0x4ACE4000` bounds. The recovered world range is
+approximately (-55.947,0.991,-15.067)..(-55.122,2.864,-14.510), inside the
+recorded bounds (-56.074,0.983,-15.145)..(-55.097,2.922,-14.421).
+This run's trace 3 is an off-screen instance, unlike the earlier byte9 run.
+Viewport scale/offset is used for the native overlay, but must not be applied
+before inversion of the guest world matrix.
+
+Matching draw CSVs contain 45,568 `execute` outcomes and no other outcomes.
+The native counters and their N+1 present counters retain baseline renderer
+modes. Draw ledgers balance, rejection counters are zero, and texture-sampling
+suppression is off. The process exits normally after 8,226 successful presents.
+Local evidence uses prefix `visibility-conversation-decision13`, including
+the native images, `validation.json`, body overlay, and 43 binary decisions.
+
+An offline executable replays the saved bounds through the original lifted
+PPU functions: face culling, transformation, polygon clipping, projection,
+triangle rasterization and the software-depth comparison callback. It loads
+the original guest constants and captured context/depth buffer. The completed
+replay accepts `0x4ACE4000` in all 43 records, including every recorded
+rejection. It does not substitute an always-visible raster callback. The
+replay comparison is saved as `replay-comparison.json` alongside the records.
+Using the saved older view also accepts the rejected model. The camera is
+outside the bounds in the rejected close-up; a camera-inside explanation is
+not established. Neither a near-plane clipping defect nor an old/new-view
+mismatch has been demonstrated.
+
+Dispatch inspection explains why PPU replay alone cannot identify the faulty
+instruction. `00682648` resolves mode 0 to an inline PPU call through
+`006822D8`, mode 1 to the PPU worker queue, and mode 2 through `0071F788` to
+`cellSpursQueuePushBody` (import NID `92CFF6ED`). The live job-11 mode byte
+`0x00CA23BB` is verified as 2. Its SPU module-table entry points to an SPU ELF
+at guest address `0x00F2C100`, entry 0x3080. The guest job number is not an
+SPU image number. The exact active SPU implementation and its input state
+must be identified before attributing this disagreement to a lifted opcode.
+
+An initial live mode-0 attempt, run `20261012-195614-390`, diverged from the
+intended approach route and did not capture the target conversation. It is
+not evidence that the fallback fixes visibility. Only job 11's mode byte was
+changed, with global occlusion enable verified as 1; mode 2 was restored
+before closing. The next comparison will retain normal dispatch during the
+approach and switch immediately before triggering the conversation.
+
 ## Outstanding evidence
 
 The user has been asked which executable/launch command exhibits the issue.
 This can distinguish the preserved baseline and older default build from the
 main checkout's changing performance candidates. The scene phase is now known:
-approaching the soldiers and starting the first conversation. The next useful
-comparison can now repeat the full disabled interval with neutral input and
-trace the guest worker's bounds result for the identified soldier. Native
-images reproduce it; the remaining
-evidence is the reason the associated model submissions disappear. A confirmed cause and comparison are required
-before any fix or completion claim. The separate whole-scene black intervals are not a substitute for that
-model-specific comparison.
+approaching the soldiers and starting the first conversation. The immediate
+speaker-model rejection is now established, and the clean disabled-occlusion
+comparison preserves him throughout the close-up. Next is a live comparison
+of job 11's PPU fallback with occlusion still enabled, followed by tracing the
+SPU implementation responsible for the differing decisions. The airship needs
+an equivalent model association and rejection trace. A confirmed underlying
+cause and comparison are required before any fix or completion claim. The
+separate whole-scene black intervals are not a substitute for that evidence.
