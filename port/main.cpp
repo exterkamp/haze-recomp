@@ -192,6 +192,8 @@ extern "C" int  rsx_null_backend_pump_messages(void);
  * The ticks are driven off real elapsed time rather than off how long present()
  * took. A hidden or occluded window makes present block hard, and pacing the
  * ticks behind it paces the whole game behind it. */
+extern "C" void spu_float_native_update(void);
+extern "C" void spu_float_native_summary(void);
 #ifdef _WIN32
 extern "C" {
 int rsx_live_draw_enabled(void);
@@ -287,6 +289,7 @@ static void drain_and_present(void)
 
 static DWORD WINAPI frame_clock(LPVOID)
 {
+    spu_float_native_update();
     const char* title = getenv("PS3_TITLE");
     if (!title || !*title) title = "Haze Recomp";
 
@@ -348,6 +351,7 @@ static DWORD WINAPI frame_clock(LPVOID)
         g_pump_profile.wait+=g_pump_profile.now()-wait_begin;
 #endif
         ULONGLONG now = GetTickCount64();
+        spu_float_native_update();
 
         int fired = 0;
         while ((long long)(now - next_tick) >= 0 && fired < 240) {
@@ -376,6 +380,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 haze_input_shutdown();
 #ifdef _WIN32
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
+                spu_float_native_summary();
 #endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.
