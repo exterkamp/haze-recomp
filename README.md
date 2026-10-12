@@ -147,6 +147,12 @@ in three pairs, but showed no repeatable FPS or pacing gain. The
 blit CPU time from about 2.45 to 0.33 ms/frame. Its row-copy blocks measured
 23.55-24.50 FPS; NPC variation prevents assigning the full FPS difference to
 that change. Row copies are now enabled for eligible transfers.
+The [frame timeline follow-up](docs/performance-frame-timeline-2026-10-11.md)
+separates live SPU comparison code from ordinary profiling builds and records
+an additional carrier run without job logging. Its 19.55 FPS result shows why
+the earlier 23.55-24.50 FPS windows are not a stable performance guarantee.
+A fresh ordinary-build baseline measured 20.68 FPS over 600 consecutive
+successful presents, with p95 frame time 63.90 ms.
 **The 30 FPS target remains open.**
 
 For reproducible diagnostic captures:

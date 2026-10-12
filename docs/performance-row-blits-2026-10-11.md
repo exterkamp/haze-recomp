@@ -66,7 +66,8 @@ normally with exit code 0.
 
 ## Reproduction
 
-Build with `scripts/build.ps1 -SpuFma -ProfileRenderer -Test`. Set
+The recorded comparison included the live SPU comparison code. Reproduce it
+with `scripts/build.ps1 -SpuFma -ProfileRenderer -CompareSpuByteOps -Test`. Set
 `RSX_PROFILE_LIGHT=1` and `RSX_PROFILE_CSV=renderer.csv`. Point
 `RSX_CPU_WORK_FILE`, `SPU_EXECUTION_MODE_FILE`, and `GCM_ROW_BLIT_MODE_FILE`
 at the same ignored file, initially containing 99. Verify gameplay, then:

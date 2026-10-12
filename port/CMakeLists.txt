@@ -188,12 +188,13 @@ add_executable(${PROJECT_NAME}
 #                          SPU sources are small and decode-hot, so they get
 #                          full optimization. The last -O on the line wins.
 option(HAZE_SPU_FMA "Use AVX/FMA3 for lifted SPU arithmetic (requires CPU support)" OFF)
+option(HAZE_SPU_BYTE_COMPARE "Compile live scalar/SIMD SPU byte-operation comparisons" OFF)
 if(SPU_SOURCES)
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu"
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
-    if(HAZE_RSX_PROFILE)
-        # Live scalar/SIMD comparison is absent from normal game builds.
+    if(HAZE_SPU_BYTE_COMPARE)
+        # Explicit experiment: these extra branches can change inlining.
         set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS SPU_COMPARE_BYTE_OPS)
     endif()
     if(NOT MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")

@@ -8,7 +8,8 @@ Bit 16 selects private SPU history if SPU_DEPTH_RING_FILE points to it too;
 without that diagnostic control, the corrected private history is always used.
 Zero selects the previous paths.
 Bit 32 selects heap SPU contexts if SPU_EXECUTION_MODE_FILE uses the same file.
-Bit 64 selects SIMD SPU byte operations in a profiling build using that file.
+Bit 64 selects SIMD SPU bytes with -CompareSpuByteOps and that control file;
+otherwise the normal SIMD helpers run without comparison branches.
 Bit 128 selects coherent row blits if GCM_ROW_BLIT_MODE_FILE uses the same file.
 The runner stays muted. Compare individual stage costs as well as FPS: guest
 work and NPC activity can drift even when the camera remains stationary.
