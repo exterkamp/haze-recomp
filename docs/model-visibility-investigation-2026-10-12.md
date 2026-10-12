@@ -13,6 +13,10 @@ visible / missing / visible soldier sequence, also reproduced in native
 readbacks. A matching draw trace now identifies two candidate mesh batches
 whose submission tracks the soldier's visibility. Their model identity and
 the cause of their omission still require a causal comparison.
+Live suppression now confirms that these batches can be skipped and restored,
+but a later comparison leaves three nearby helmeted soldiers visible while
+both batches are skipped. The matching fingerprints do not yet identify the
+particular disappearing soldier or establish a submission-culling cause.
 
 ## Initial native evidence
 
@@ -633,6 +637,90 @@ presentation already fences the GPU. Stable instrumented captures therefore
 cannot rule out a timing-sensitive guest geometry or command-buffer problem.
 The missing-model sequence should first be confirmed with logging and native
 readbacks disabled, then compared with a narrowly gated trace of that failure.
+
+## Live material suppression comparison
+
+The SDK now extends its existing debug-only `LD_SKIP_SAMPLING` filter with
+`LD_SKIP_SAMPLING_FILE`. A file containing a hexadecimal texture offset selects
+draws sampling that offset in any enabled texture unit. `off`, an invalid
+value, or a missing file disables the live filter. It polls every 512 draws,
+so a file change can take effect partway through a frame. CSV outcomes record
+`probe_skip_sampling`; the cumulative heartbeat includes its separate count
+in group accounting. The existing fixed-address filter also gains this
+accounting. Neither environment variable is set by normal launch scripts.
+This is an identification tool, not a model-visibility fix.
+
+The diagnostic executable is isolated at
+`local/candidates/visibility-live-filter/HazeRecomp.exe`, SHA256
+`541137D645B6265B78F5CBC3781F83619C906EB41EB5D75200CE86CB326A2067`.
+It rebuilds the SDK renderer and links the existing game objects. It does not
+recompile the shared, concurrently changing generated game code. The preserved
+baseline executable still has SHA256 `EF9CF6AB...B06B7B`.
+
+Run `20261012-170639-237` reached gameplay but did not reach the conversation
+before its scheduled close. The live control remained `off`, its candidate
+observer timed out without a match, and it exited normally with 14,296
+successful presents. This run supplies no on-mode model-identification result.
+
+Run `20261012-171656-287` initially reached a whole-scene black state during
+navigation. Native frame 5269 confirms the black output. This is separate
+from the individual soldier disappearance. Restarting the checkpoint restored
+the scene. After a shorter approach, the first conversation triggered and
+the observer found the matching 4,596-vertex / `ab7c74af214e9569` batch at frame
+9458. Its unit-0 texture was now `0x04894300`, 128x128, rather than the earlier
+run's 512x512 material address.
+
+Five off/on/off/on/off phases captured 20 native frames, 9458 through 9477.
+The CSV records exactly 18 suppressed groups: nine of the 4,596-vertex batch
+and nine of the 336-vertex batch with UV hash `bf3cd8c23d609017`. The control
+changes are logged at frames 9462, 9466, 9470 and 9474. The first phases overlap
+the conversation's black transition; the later phases overlap its moving
+camera and show two close soldiers. These images do not identify the batches
+as the disappearing soldier. An aircraft also briefly disappears and returns
+within the second on phase, so that transition alone cannot be assigned to
+turning the filter on or off. Group accounting remains balanced; the final
+skip count is 18. The process was closed normally. Evidence is preserved in
+`visibility-conversation-live-identify3-probe.json`, its draw CSV, and
+`visibility-conversation-live-identify3-repeat-context.png`.
+
+Run `20261012-172912-985` repeats the diagnostic at 1440p scene / follow shadows,
+30 FPS cap, baseline depth/shadow/CPU controls. Its first five-phase comparison
+captures 40 native images, 7091 through 7131 with one gap. It again overlaps
+the scripted camera sweep and fade, making visual identification ambiguous.
+The chosen offset `0x0819A600` suppresses 32 groups across the two on phases.
+
+A second comparison in the same run occurs after the conversation. The player
+turns toward three helmeted soldiers and approaches them, then retains neutral
+input throughout the five phases. It captures another 40 native images across
+11355 through 11401. The helper now requires a candidate in the most recent
+two trace counters and refreshes its material address before each on phase.
+This matters even within one run: the first offset, `0x04D29280`, ceases to
+match after two frames; a later on phase selects `0x04CCC300` instead.
+
+The second on phase demonstrably suppresses both matching batches throughout
+frames 11386 through 11393. Native frame 11390 shows all three nearby helmeted
+soldiers still opaque. Frame 11398, after both batches execute again, also
+shows all three. Thus this comparison does not causally identify these two
+batches as any of the three visible bodies. It weakens the inference from
+the earlier temporal correlation; a mesh fingerprint is not an individual
+model-instance identifier. The first on phase's representative image 11370
+is not a valid suppressed-frame comparison because streaming has already
+changed its selected address. There are 22 suppressed groups in this second
+comparison and 54 cumulatively, with balanced renderer ledgers and zero
+recorded rejection counters.
+
+The run reaches its 600-second runner limit and is terminated before the
+attempted manual close. Its present CSV therefore is unavailable; do not claim
+successful-present timing validation for these 80 images. The native frames,
+draw counters, live-filter transitions and effective graphics settings remain
+available. Local evidence includes `visibility-conversation-live-identify4-`
+`post-probe.json`, `post-contact.png`, `validation.json` and the draw CSV.
+Both helpers finished and reset the filter to `off` before the runner ended.
+
+The next useful identification step is a narrowly gated vertex/transform
+capture for the candidate and the other character draws, so their projected
+positions can be compared with the missing body's screen region. Suppressing
+a material without locating its instance is insufficient to diagnose culling.
 
 ## Outstanding evidence
 
