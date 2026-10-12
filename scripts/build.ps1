@@ -196,6 +196,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Fragment predication test compilation failed.' }
     & $predicateTest
     if ($LASTEXITCODE -ne 0) { throw 'Fragment predication shader execution failed.' }
+    $shadowTest = Join-Path $root 'local/test_fp_shadow.exe'
+    & $clang /nologo /EHsc /W0 /O1 "/I$sdk/include" "/Fe$shadowTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_fp_shadow.cpp" "$sdk/libs/video/rsx_fp_decompiler.c" /link d3d11.lib d3dcompiler.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment shadow test compilation failed.' }
+    & $shadowTest
+    if ($LASTEXITCODE -ne 0) { throw 'Fragment shadow comparison GPU test failed.' }
     $clearTest = Join-Path $root 'local/test_color_clear.exe'
     & $clang /nologo /W0 /O1 "/Fe$clearTest" "/Fo$root/local/test_color_clear.obj" "$sdk/libs/video/tests/test_color_clear.c" /link d3d12.lib dxgi.lib d3dcompiler.lib
     if ($LASTEXITCODE -ne 0) { throw 'Color clear test compilation failed.' }

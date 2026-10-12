@@ -7,11 +7,12 @@ param(
     [ValidateSet('Live','Legacy')][string]$Renderer = 'Live',
     [switch]$Audio,
     [switch]$CaptureAudio,
+    [string]$ExecutablePath,
     [switch]$Uncapped
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$exe = Join-Path $root 'build\haze\HazeRecomp.exe'
+$exe = if ($ExecutablePath) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ExecutablePath) } else { Join-Path $root 'build\haze\HazeRecomp.exe' }
 $elf = Join-Path $root 'game\disc\PS3_GAME\USRDIR\EBOOT.ELF'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Build the native executable first.' }
 if (-not (Test-Path -LiteralPath $elf)) { throw 'The decrypted Haze ELF is missing.' }

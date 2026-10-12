@@ -58,7 +58,23 @@ rendered when disabled; valid geometry survives in both modes; negative W is
 rejected in both. It also verifies reset state, guest register changes and PSO
 key separation. All previous coplanar decal/bias readbacks still pass.
 
-The normal candidate is built separately while the user's build-directory
-executable is running. Default-state native gameplay and camera sweeps still
-need verification when that session ends. The shadow investigation remains
-open; depth texture sampling/state and viewport handling are next leads.
+## Default-state native follow-up
+
+Muted normal run `local/runs/20261012-013909-168` exited with code zero and
+preserved 15,921 successful presents. Its carrier trace reports raw control one,
+`control_written=0`, and host clipping enabled: Haze uses the seeded reset state
+without overriding it. Capture `requested_011243` shows an opaque nearby red
+barrel with no floor stripe drawn across it, after walking toward the props.
+This confirms that ordinary gameplay takes the corrected path without a probe.
+
+The stationary carrier window 4000–4599 contains 600 consecutive presents at
+20.68 FPS, with 48.35 ms mean, 65.84 ms p95 and 33.51 ms minimum. This is a
+normal-build observation, not a speedup comparison; no interval exceeds the
+30 FPS ceiling. The surrounding loading/menu intervals are excluded.
+
+The shadow investigation remains open. Actual depth binding at frame 2193 uses
+linear depth16 (`B2`), 2048×2048, wrap `60030303`, filter `02022000`, remap
+`0000AAE4`, and control0 `80000000`. The wrap high nibble requests LEQUAL depth
+comparison, which the renderer's ordinary sampler previously ignored. This is
+a separate, observed shadow lead; soldier visibility and every camera-dependent
+artifact are not yet verified as fixed.

@@ -161,6 +161,9 @@ that ceiling during gameplay and avoiding unnecessary stalls remain open.
 The [depth-clipping investigation](docs/rendering-depth-clip-2026-10-11.md)
 reproduces a close-barrel layering error and adds guest-controlled depth clipping;
 other shadow/model glitches still need validation. The
+[shadow comparison investigation](docs/rendering-shadow-compare-2026-10-11.md)
+tracks Haze's observed projected depth lookups and a GPU-tested comparison
+experiment, currently disabled pending carrier checks. The
 [vertex-program cache experiment](docs/performance-vp-cache-2026-10-11.md)
 reduces shader preparation time, but remains disabled because its profiling
 comparison did not establish a reliable FPS gain.
