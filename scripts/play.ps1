@@ -1,6 +1,7 @@
 param(
     [ValidateSet('KeyboardMouse','Controller')][string]$InputMode = 'KeyboardMouse',
     [string]$ExecutablePath,
+    [string]$GraphicsConfig,
     [ValidatePattern('^[1-9][0-9]{0,3}x[1-9][0-9]{0,3}$')]
     [ValidateScript({ $dimensions = $_ -split 'x'; [int]$dimensions[0] -le 8192 -and [int]$dimensions[1] -le 8192 })]
     [string]$RenderResolution
@@ -28,6 +29,7 @@ $settings = @{
     RSX_SHADER_CACHE_DIR = $(if ($env:RSX_SHADER_CACHE_DIR) { $env:RSX_SHADER_CACHE_DIR } else { $shaderCache })
     HAZE_INPUT = $(if ($InputMode -eq 'Controller') { 'controller' } else { 'keyboard' })
     HAZE_INPUT_CONFIG = $(if ($env:HAZE_INPUT_CONFIG) { $env:HAZE_INPUT_CONFIG } else { Join-Path $root 'config\input.ini' })
+    HAZE_GRAPHICS_CONFIG = $(if ($GraphicsConfig) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($GraphicsConfig) } elseif ($env:HAZE_GRAPHICS_CONFIG) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:HAZE_GRAPHICS_CONFIG) } else { Join-Path $root 'config\graphics.ini' })
 }
 $old = @{}
 foreach ($key in $settings.Keys) {

@@ -305,6 +305,15 @@ translation provenance under ignored local directories. Import coverage is a
 static inventory of symbols and context registrations; it is not an ABI or
 behavioral compatibility test.
 
+Graphics are configured in [config/graphics.ini](config/graphics.ini). Restart
+after changing windowed/fullscreen/borderless mode, window size, monitor,
+render resolution, FXAA, anisotropic filtering (up to 16x),
+independent shadow resolution, mip bias, sharpening, exposure, VSync or the
+frame cap. Defaults preserve the current image. Both launchers accept
+`-GraphicsConfig path/to/settings.ini`; `-RenderResolution 1920x1080` overrides
+the file for that run. See [graphics settings](docs/graphics-settings.md) for
+costs, examples, validation and remaining game-side options.
+
 PC input is configured in `config/input.ini`. WASD moves; arrows navigate;
 Space confirms/skips; Enter starts; Escape pauses and releases the mouse.
 Click inside the game or press F1 to capture the raw mouse; F1 also releases it.
