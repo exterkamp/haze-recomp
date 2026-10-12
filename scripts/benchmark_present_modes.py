@@ -14,6 +14,8 @@ The frame_pacer variant uses HAZE_FRAME_PACER_FILE and the guest main-loop
 thread's native mode events to compare the legacy wait with its opt-in bypass.
 The spu_triplet_copy variant uses HAZE_TRIPLET_COPY_FILE and process-wide native
 mode events; an explicitly selected host TID is unnecessary for that variant.
+The native_cursor variant similarly uses HAZE_NATIVE_CURSOR_FILE and its own
+process-wide events for the experimental paired PC cursor kernel.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -157,12 +159,13 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column == 'spu_triplet_copy':
+    if mode_column in ('spu_triplet_copy', 'native_cursor'):
         if not args.queue_mode_log:
             raise ValueError('Native copy mode requires its process-wide mode-event log')
         worker_modes = {'process': []}
         for line in args.queue_mode_log.read_text(errors='replace').splitlines():
-            match = re.fullmatch(r'\[haze-spu-triplet-mode\] enabled=([01]) qpc=(\d+)', line)
+            name = 'haze-spu-triplet-mode' if mode_column == 'spu_triplet_copy' else 'haze-native-cursor-mode'
+            match = re.fullmatch(r'\[' + name + r'\] enabled=([01]) qpc=(\d+)', line)
             if match: worker_modes['process'].append((int(match[2]), int(match[1])))
         worker_modes['process'].sort()
     elif mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer'):
@@ -233,7 +236,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
