@@ -9,4 +9,5 @@ external/*
 !external/ps3recomp/
 __pycache__/
 *.log
+.vscode/settings.json
 
