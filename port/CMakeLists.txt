@@ -316,6 +316,7 @@ if(EMSCRIPTEN)
         set_property(SOURCE main.cpp APPEND PROPERTY COMPILE_DEFINITIONS HAZE_WASM_WEBGL)
         target_link_options(${PROJECT_NAME} PRIVATE -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2
             -sOFFSCREENCANVAS_SUPPORT=1 --pre-js=${CMAKE_CURRENT_SOURCE_DIR}/wasm/canvas.js)
+        set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/wasm/canvas.js")
     endif()
     add_executable(HazeWasmSmoke ../tests/wasm_smoke.cpp wasm/guest_memory.cpp)
     target_include_directories(HazeWasmSmoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${RECOMP_DIR}"
@@ -336,6 +337,7 @@ if(EMSCRIPTEN)
         -pthread -sMEMORY64=1 -sMAXIMUM_MEMORY=16GB
         -sINITIAL_MEMORY=128MB -sALLOW_MEMORY_GROWTH=1
         -sSTACK_SIZE=4MB -sDEFAULT_PTHREAD_STACK_SIZE=4MB
+        -sSTACK_OVERFLOW_CHECK=2
         -sPTHREAD_POOL_SIZE=32 -sPROXY_TO_PTHREAD=1
         # The SDK's generic HLE bridge calls C firmware functions through an
         # eight-u64 signature. Wasm checks indirect-call types strictly.
@@ -352,6 +354,7 @@ if(EMSCRIPTEN)
         target_link_libraries(HazeWebGLSmoke PRIVATE HazeWasmShaders ps3recomp_runtime)
         get_target_property(HAZE_WASM_LINK_OPTIONS ${PROJECT_NAME} LINK_OPTIONS)
         target_link_options(HazeWebGLSmoke PRIVATE ${HAZE_WASM_LINK_OPTIONS})
+        set_property(TARGET HazeWebGLSmoke APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/wasm/canvas.js")
         set_target_properties(HazeWebGLSmoke PROPERTIES SUFFIX ".js")
     endif()
     target_sources(${PROJECT_NAME} PRIVATE wasm/guest_memory.cpp wasm/audio_bridge.cpp)

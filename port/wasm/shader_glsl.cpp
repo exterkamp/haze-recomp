@@ -103,6 +103,11 @@ bool haze_hlsl_to_glsl(const char* hlsl, bool vertex, std::string& source, std::
     std::vector<unsigned> words;
     glslang::SpvOptions options;
     options.disableOptimizer = false; // Legalize HLSL for SPIRV-Cross.
+    // Scalarize the decompiler's register arrays and remove unused lanes
+    // before handing the shader to the browser's driver compiler.
+    // Keep constant-buffer members: removing an unused leading member would
+    // require explicit member offsets, which GLSL ES 3.0 cannot represent.
+    options.optimizePerformance = true;
     glslang::GlslangToSpv(*program.getIntermediate(stage), words, &options);
     try {
         spirv_cross::CompilerGLSL compiler(std::move(words));

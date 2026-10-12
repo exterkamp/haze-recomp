@@ -1,10 +1,20 @@
 // Register the runtime's OffscreenCanvas for transfer to the render pthread.
 // Send completed ImageBitmaps back to the page explicitly: a DOM placeholder
 // does not reliably update through the runtime's multiple worker transfers.
+addEventListener('error', event => {
+  if (event.error?.stack) postMessage({type:'haze-worker-error', text:event.error.stack});
+});
 Module['preRun'] ??= [];
 Module['preRun'].push(() => {
+  // This hook allocates the canvas handoff record before initRuntime. Set
+  // Binaryen's guard bounds before the first instrumented malloc call.
+  if (typeof setStackLimits === 'function') setStackLimits();
   if (!ENVIRONMENT_IS_PTHREAD) {
     const forward = worker => worker.addEventListener('message', event => {
+      if (event.data.type === 'haze-worker-error') {
+        event.stopImmediatePropagation();
+        postMessage({type:'error', text:event.data.text});
+      }
       if (event.data.type === 'haze-frame') {
         event.stopImmediatePropagation();
         const frame = event.data.frame;

@@ -54,6 +54,7 @@ struct Texture {
 struct Pipeline { rsx_be_render_state state; rsx_vertex_layout_plan layout; std::array<GLint,20> remap_locations; };
 std::unordered_map<GLuint, Texture> textures;
 std::unordered_map<GLuint, Pipeline> pipelines;
+std::unordered_map<std::string, GLuint> vertex_shaders, fragment_shaders;
 GLuint draw_fbo, read_fbo, temp_fbo, vao, vbo, ibo, vs_ubo, ps_ubo, active_pipeline;
 GLuint depth_read_fbo, depth_write_fbo, bound_depth, original_depth;
 std::unordered_map<uint64_t, GLuint> depth_attachments;
@@ -155,7 +156,11 @@ int init(void*,u32 w,u32 h) {
     fprintf(stderr,"[webgl] WebGL2 draw engine initialized: %s\n",glGetString(GL_RENDERER));
     return 0;
 }
-void shutdown(void*) {}
+void shutdown(void*) {
+    for(const auto& entry:vertex_shaders)if(entry.second)glDeleteShader(entry.second);
+    for(const auto& entry:fragment_shaders)if(entry.second)glDeleteShader(entry.second);
+    vertex_shaders.clear();fragment_shaders.clear();
+}
 void submit(void*,u32) { glFinish(); }
 void set_remap(Texture& t,u32 remap,u32 format) {
     u8 lanes[4];rsx_texture_component_remap(remap,format&0x9Fu,lanes);
@@ -246,29 +251,37 @@ u32 snapshot(void* user,u32 depth,u32 w,u32 h) {
     return copy;
 }
 GLuint compile_shader(GLenum stage,const char* hlsl) {
+    auto& cache=stage==GL_VERTEX_SHADER?vertex_shaders:fragment_shaders;
+    auto [cached,inserted]=cache.emplace(hlsl,0);
+    if(!inserted)return cached->second;
     std::string source,error;
+    const char* capture=getenv("HAZE_WASM_GPU_CAPTURE");
+    static unsigned index=0;
+    const unsigned capture_index=index++;
+    const auto save_capture=[&](const char* extension,const char* text,size_t size) {
+        if(!capture || !*capture)return;
+        char path[80];snprintf(path,sizeof path,"/wasm-gpu-%03u-%s.%s",capture_index,
+            stage==GL_VERTEX_SHADER?"vs":"ps",extension);
+        if(FILE* file=fopen(path,"w")){fwrite(text,1,size,file);fclose(file);}
+    };
+    save_capture("hlsl",hlsl,strlen(hlsl));
     if(!haze_hlsl_to_glsl(hlsl,stage==GL_VERTEX_SHADER,source,error)) {
         fprintf(stderr,"[webgl-shader] translation failed: %s\n",error.c_str());return 0;
     }
-    const char* capture=getenv("HAZE_WASM_GPU_CAPTURE");
-    if(capture && *capture) {
-        static unsigned index=0;
-        char path[80];snprintf(path,sizeof path,"/wasm-gpu-%03u-%s.glsl",index++,stage==GL_VERTEX_SHADER?"vs":"ps");
-        if(FILE* file=fopen(path,"w")){fwrite(source.data(),1,source.size(),file);fclose(file);}
-    }
+    save_capture("glsl",source.data(),source.size());
     const char* text=source.c_str();GLuint shader=glCreateShader(stage);
     glShaderSource(shader,1,&text,nullptr);glCompileShader(shader);
     GLint ok;glGetShaderiv(shader,GL_COMPILE_STATUS,&ok);
     if(!ok) {char log[4096];glGetShaderInfoLog(shader,sizeof log,nullptr,log);
         fprintf(stderr,"[webgl-shader] compile failed: %s\n%s\n",log,text);glDeleteShader(shader);return 0;}
-    return shader;
+    cached->second=shader;return shader;
 }
 u32 pipeline_create(void*,const char* vs,const char* ps,const rsx_be_render_state* state,
                     const rsx_vertex_layout_plan* layout,u32,rsx_be_format,u32) {
     GLuint v=compile_shader(GL_VERTEX_SHADER,vs),f=compile_shader(GL_FRAGMENT_SHADER,ps);
-    if(!v || !f){glDeleteShader(v);glDeleteShader(f);return 0;}
+    if(!v || !f)return 0;
     GLuint program=glCreateProgram();glAttachShader(program,v);glAttachShader(program,f);glLinkProgram(program);
-    glDeleteShader(v);glDeleteShader(f);GLint ok;glGetProgramiv(program,GL_LINK_STATUS,&ok);
+    GLint ok;glGetProgramiv(program,GL_LINK_STATUS,&ok);
     if(!ok){char log[4096];glGetProgramInfoLog(program,sizeof log,nullptr,log);
         fprintf(stderr,"[webgl-shader] link failed: %s\n",log);glDeleteProgram(program);return 0;}
     glUseProgram(program);

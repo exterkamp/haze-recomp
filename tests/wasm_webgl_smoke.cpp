@@ -29,7 +29,7 @@ int main()
         struct PSInput { float4 position:SV_POSITION; float4 tc0:TEXCOORD0; };
         Texture2D    rsx_tex[16] : register(t0);
         SamplerState rsx_samp[16] : register(s0);
-        cbuffer PSConstants:register(b1) { float4 color; };
+        cbuffer PSConstants:register(b1) { float4 unused[1]; float4 color; };
         float4 main(PSInput input):SV_TARGET {
             return rsx_tex[0].Sample(rsx_samp[0],input.tc0.xy)*color;
         }
@@ -54,7 +54,8 @@ int main()
     backend->clear_depth_stencil(nullptr,depth,RSX_BE_CLEAR_DEPTH|RSX_BE_CLEAR_STENCIL,1,0);
     backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,program);
     const float one[]={1,1,1,1};
-    backend->bind_vs_constants(nullptr,one,sizeof one);backend->bind_ps_constants(nullptr,one,sizeof one);
+    const float ps_constants[]={0,0,0,0,1,1,1,1};
+    backend->bind_vs_constants(nullptr,one,sizeof one);backend->bind_ps_constants(nullptr,ps_constants,sizeof ps_constants);
     u32 textures[16]={texture};rsx_be_sampler_desc samplers[16]{};
     samplers[0].wrap_s=samplers[0].wrap_t=3;
     backend->bind_textures(nullptr,textures,samplers,1);
@@ -79,12 +80,20 @@ int main()
     backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
     backend->readback(nullptr,target,16,16,1,1,result,4);
     const unsigned char mapped[]={51,51,51,51};assert(memcmp(result,mapped,4)==0);
+    // Releasing a pipeline must leave its shared shader objects usable by a
+    // subsequent pipeline with the same guest programs.
+    glUseProgram(0);
+    backend->pipeline_release(nullptr,program);
+    const auto reused=backend->pipeline_create(nullptr,vs,ps,&state,&layout,32,RSX_BE_FMT_R8G8B8A8,1);
+    assert(reused);
     backend->clear_depth_stencil(nullptr,depth,RSX_BE_CLEAR_DEPTH,1,0);
-    backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,program);
+    backend->bind_targets(nullptr,&target,1,depth);backend->bind_pipeline(nullptr,reused);
     textures[0]=texture;backend->bind_textures(nullptr,textures,samplers,1);
     backend->draw(nullptr,RSX_TOPOLOGY_TRIANGLES,vertices,6,32,nullptr,0);
     backend->present(nullptr,target);
     assert(glGetError()==GL_NO_ERROR);
+    backend->pipeline_release(nullptr,reused);
+    backend->shutdown(nullptr);
     backend->present(nullptr,target);
     assert(glGetError()==GL_NO_ERROR);
     puts("[webgl-smoke] PASS: HLSL translation, varying linkage, vertex layout, UBOs, sampler arrays, textured draw and GPU readback");

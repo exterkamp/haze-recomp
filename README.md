@@ -596,8 +596,11 @@ joins, lazy local disc reads, and HLSL-to-GLSL translation with textured GPU
 rendering, RSX texture channel remapping, depth attachment compatibility, and
 visible canvas pixels. Browser PCM playback passes a shared-memory AudioWorklet
 test at 48 kHz. Haze reaches its title screen with readable text and game audio;
-keyboard Start advances into its menus. Campaign gameplay and save/reload
-behavior are still being validated.
+keyboard Start advances into its menus. Campaign assets load and the opening
+credits run; visible 3D gameplay and save/reload behavior are still being validated.
+Browser SPU jobs use bounded stacks and heap contexts to avoid exhausting linear
+memory. The backend reuses compiled shaders across pipelines and optimizes their
+register arrays while preserving guest constant-buffer layouts.
 
 From that worktree, reuse the generated PPU/SPU sources and local assets in the
 main checkout:

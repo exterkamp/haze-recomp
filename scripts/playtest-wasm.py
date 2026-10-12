@@ -69,7 +69,7 @@ async def run(args):
         browser = context.browser
         page = context.pages[0] if context.pages else await context.new_page()
         page.on('console', lambda message: record(message.text))
-        page.on('pageerror', lambda error: (errors.append(str(error)), record(str(error))))
+        page.on('pageerror', lambda error: (errors.append(str(error)), record(error.stack or str(error))))
         page.on('crash', lambda: (errors.append('Chromium page crashed'), record('Chromium page crashed')))
         query = ('smoke=audio' if args.audio else 'smoke=gl' if args.webgl else 'smoke=1' if args.smoke else '')
         if args.trace:
@@ -87,6 +87,7 @@ async def run(args):
         sound_enabled = False
         profiling = None
         input_stamp = None
+        pending_actions = []
         while time.monotonic() - started < args.seconds:
             if any('smoke] PASS:' in line for line in logs) or errors:
                 break
@@ -103,18 +104,24 @@ async def run(args):
                 if stamp != input_stamp:
                     input_stamp = stamp
                     action = json.loads(args.input_file.read_text(encoding='utf-8-sig'))
-                    if action.get('stop'):
-                        break
-                    if action.get('reload'):
-                        await page.reload(wait_until='domcontentloaded')
-                        sound_enabled = False
-                    keys = action.get('keys', [])
-                    for key in keys:
-                        await page.keyboard.down(key)
-                    await asyncio.sleep(min(3, max(0.05, action.get('hold_ms', 150) / 1000)))
-                    for key in keys:
-                        await page.keyboard.up(key)
-                    record('[test input] ' + json.dumps(action))
+                    pending_actions = [(elapsed + item.get('after', 0), item)
+                                       for item in action.get('actions', [action])]
+            if pending_actions and elapsed >= pending_actions[0][0]:
+                _, action = pending_actions.pop(0)
+                if action.get('stop'):
+                    break
+                if action.get('reload'):
+                    await page.reload(wait_until='domcontentloaded')
+                    sound_enabled = False
+                if action.get('evaluate'):
+                    record('[test evaluate] ' + json.dumps(await page.evaluate(action['evaluate'])))
+                keys = action.get('keys', [])
+                for key in keys:
+                    await page.keyboard.down(key)
+                await asyncio.sleep(min(3, max(0.05, action.get('hold_ms', 150) / 1000)))
+                for key in keys:
+                    await page.keyboard.up(key)
+                record('[test input] ' + json.dumps(action))
             if args.profile_after and elapsed >= args.profile_after and profiling is None:
                 profiling = asyncio.create_task(profile_workers(browser, output, 10))
             if args.capture_interval and elapsed - last_capture >= args.capture_interval:
@@ -163,6 +170,8 @@ async def run(args):
 
 
 def main():
+    sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--python-deps', type=Path)
     parser.add_argument('--chromium')
