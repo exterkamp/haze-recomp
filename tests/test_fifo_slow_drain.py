@@ -19,6 +19,8 @@ DIAG_BEGIN = "/* BEGIN GCM SLOW DRAIN DIAGNOSTIC */"
 DIAG_END = "/* END GCM SLOW DRAIN DIAGNOSTIC */"
 WRAPPER_BEGIN = "/* BEGIN GCM SLOW DRAIN WRAPPER */"
 WRAPPER_END = "/* END GCM SLOW DRAIN WRAPPER */"
+KICK_BEGIN = "/* BEGIN GCM FIFO KICK WAIT RESULT */"
+KICK_END = "/* END GCM FIFO KICK WAIT RESULT */"
 
 
 def extract_marked(source: str, begin: str, end: str) -> str:
@@ -31,7 +33,7 @@ def extract_marked(source: str, begin: str, end: str) -> str:
     return source[start:finish]
 
 
-def fixture_source(diagnostic: str, wrapper: str) -> str:
+def fixture_source(diagnostic: str, wrapper: str, kick_wait: str) -> str:
     return f'''#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
@@ -47,16 +49,32 @@ static SRWLOCK s_gcm_fifo_lock = SRWLOCK_INIT;
 static u32 s_gcm_context_ea;
 static int s_gcm_syscall_mode;
 static u32 s_fifo_getoff = 0x88u;
+static u32 fixture_put = 0x1234u;
 static volatile LONG guest_read_count;
 static volatile LONG frame_query_count;
 static volatile LONG walker_calls;
 static volatile LONG walk_mode;
+static DWORD fixture_wait_result;
+static LONG fixture_wait_calls, fixture_sleep_calls;
+
+static DWORD WINAPI fixture_wait(HANDLE event, DWORD timeout)
+{{
+    if (event != (HANDLE)(uintptr_t)0x1234 || timeout != 37) abort();
+    InterlockedIncrement(&fixture_wait_calls);
+    return fixture_wait_result;
+}}
+static VOID WINAPI fixture_sleep(DWORD ms)
+{{
+    if (ms != 37) abort();
+    InterlockedIncrement(&fixture_sleep_calls);
+}}
+void* cellGcm_fifo_kick_event(void) {{ return (void*)(uintptr_t)0x1234; }}
 
 u32 vm_read32(u64 address)
 {{
     if (address != GCM_CONTROL_GUEST_ADDR) abort();
     InterlockedIncrement(&guest_read_count);
-    return 0x1234u;
+    return fixture_put;
 }}
 
 u32 rsx_live_draw_get_frames(void)
@@ -65,17 +83,45 @@ u32 rsx_live_draw_get_frames(void)
     return 77u;
 }}
 
-static void gcm_rsx_process_fifo_unlocked(void)
-{{
-    InterlockedIncrement(&walker_calls);
-    s_fifo_getoff += 4u;
-    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 1)
-        Sleep(12);
-}}
-
 {diagnostic}
 
+static void gcm_rsx_process_fifo_unlocked(gcm_slow_drain_event* diagnostic)
+{{
+    InterlockedIncrement(&walker_calls);
+    gcm_slow_drain_phase_begin(diagnostic);
+    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 6) {{
+        Sleep(12);
+        gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_SETUP);
+        gcm_slow_drain_set_reason(diagnostic,"no-context");
+        return;
+    }}
+    const LONG mode=InterlockedCompareExchange(&walk_mode, 0, 0);
+    if (mode == 1 || mode == 7) Sleep(12);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_SETUP);
+    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 2) Sleep(12);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_WALKER);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_POSTWALK);
+    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 4) Sleep(12);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_RECYCLE);
+    gcm_slow_drain_set_reason(diagnostic,"caught-up");
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_POST_RECYCLE);
+    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 3) Sleep(12);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_DRAINED_EA_PUBLISH);
+    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 8) Sleep(12);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_GET_WRITE);
+    if (InterlockedCompareExchange(&walk_mode, 0, 0) == 5) Sleep(12);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_REF_LOCK_WAIT);
+    gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_REF_PUBLISH);
+    s_fifo_getoff += 4u;
+}}
+
 {wrapper}
+
+#define WaitForSingleObject fixture_wait
+#define Sleep fixture_sleep
+{kick_wait}
+#undef WaitForSingleObject
+#undef Sleep
 
 static DWORD WINAPI hold_fifo_lock(LPVOID unused)
 {{
@@ -91,11 +137,34 @@ int main(int argc, char** argv)
 {{
     if (argc != 2) return 2;
     const char* mode = argv[1];
+    if (!strncmp(mode, "kick-", 5)) {{
+        if (!strcmp(mode, "kick-signaled")) fixture_wait_result=WAIT_OBJECT_0;
+        else if (!strcmp(mode, "kick-timeout")) fixture_wait_result=WAIT_TIMEOUT;
+        else if (!strcmp(mode, "kick-failed")) fixture_wait_result=WAIT_FAILED;
+        else if (!strcmp(mode, "kick-other")) fixture_wait_result=WAIT_ABANDONED;
+        else if (strcmp(mode, "kick-fallback")) return 16;
+        const unsigned result=cellGcm_fifo_kick_wait_result(37);
+        const unsigned expected=!strcmp(mode,"kick-signaled") ? 0u :
+            !strcmp(mode,"kick-timeout") ? 1u :
+            !strcmp(mode,"kick-fallback") ? 2u : 3u;
+        if (result != expected) return 17;
+        if (expected==2) {{
+            if (fixture_wait_calls || fixture_sleep_calls!=1) return 18;
+        }} else if (fixture_wait_calls!=1 || fixture_sleep_calls) return 19;
+        return 0;
+    }}
     const int enabled = strcmp(mode, "disabled") != 0;
     s_gcm_context_ea = (strcmp(mode, "invalid-context") == 0) ? 0u : 0x4000u;
     s_gcm_syscall_mode = 0;
-    InterlockedExchange(&walk_mode, strcmp(mode, "body") == 0 ||
-                                    strcmp(mode, "invalid-context") == 0 ? 1 : 0);
+    InterlockedExchange(&walk_mode,
+        !strcmp(mode,"body") || !strcmp(mode,"invalid-context") ? 1 :
+        !strcmp(mode,"reference-lock") ? 5 :
+        !strcmp(mode,"drained-ea") ? 3 :
+        !strcmp(mode,"publish") ? 8 :
+        !strcmp(mode,"recycle") ? 4 :
+        !strcmp(mode,"early-return") ? 6 :
+        !strcmp(mode,"get-equals-put") ? 7 : 0);
+    if (!strcmp(mode,"get-equals-put")) fixture_put=0x88u;
 
     if (strcmp(mode, "lock") == 0) {{
         HANDLE ready = CreateEventA(NULL, TRUE, FALSE, NULL);
@@ -116,7 +185,8 @@ int main(int argc, char** argv)
         cellGcm_rsx_process_fifo();
     }}
 
-    if (walker_calls != 1 || s_fifo_getoff != 0x8Cu) return 8;
+    if (walker_calls != 1 ||
+        s_fifo_getoff != (!strcmp(mode,"early-return") ? 0x88u : 0x8Cu)) return 8;
     if (strcmp(mode, "disabled") == 0) {{
         if (guest_read_count || frame_query_count) return 9;
         return 0;
@@ -183,13 +253,17 @@ def run_case(exe: Path, mode: str, csv_path: Path | None) -> None:
     if len(rows) != 1:
         raise AssertionError(f"expected one retained event, got {len(rows)}")
     row = rows[0]
-    if row["renderer_frame"] != "77" or row["get_before"] != "0x00000088" or row["get_after"] != "0x0000008C":
+    if row["renderer_frame"] != "77" or row["get_before"] != "0x00000088":
         raise AssertionError(f"bad FIFO/frame snapshots: {row}")
+    expected_get_after = "0x00000088" if mode == "early-return" else "0x0000008C"
+    if row["get_after"] != expected_get_after:
+        raise AssertionError(f"bad post-drain get snapshot: {row}")
     if mode == "invalid-context":
         if row["context_valid"] != "0" or row["put_before"] != "0x00000000" or row["put_after"] != "0x00000000":
             raise AssertionError(f"invalid context should suppress PUT reads: {row}")
     else:
-        if row["context_valid"] != "1" or row["put_before"] != "0x00001234" or row["put_after"] != "0x00001234":
+        expected_put = "0x00000088" if mode == "get-equals-put" else "0x00001234"
+        if row["context_valid"] != "1" or row["put_before"] != expected_put or row["put_after"] != expected_put:
             raise AssertionError(f"valid context PUT snapshots missing: {row}")
     lock_ms = float(row["lock_wait_ms"])
     body_ms = float(row["body_ms"])
@@ -199,8 +273,42 @@ def run_case(exe: Path, mode: str, csv_path: Path | None) -> None:
         raise AssertionError(f"sleeping walker not separated from lock wait: lock={lock_ms} body={body_ms}")
     if not row["thread_cycles_valid"] in ("0", "1"):
         raise AssertionError(f"invalid cycle-query validity field: {row}")
-    if header[-1] != "put_after":
+    expected_mask = 1 if mode == "early-return" else 511
+    if int(row["phase_mask"]) != expected_mask:
+        raise AssertionError(f"phase instrumentation incomplete: {row}")
+    phase_fields = ("prewalk_setup_ticks", "walker_ticks", "postwalk_ticks",
+                    "recycle_ticks", "post_recycle_ticks", "drained_ea_publish_ticks",
+                    "get_write_ticks",
+                    "reference_lock_wait_ticks", "reference_publish_ticks")
+    body_ticks = int(row["qpc_body_end"]) - int(row["qpc_lock_acquired"])
+    phase_sum = sum(int(row[field]) for field in phase_fields)
+    if int(row["phase_unaccounted_ticks"]) != body_ticks - phase_sum:
+        raise AssertionError(f"inner phases do not reconcile with body: {row}")
+    targeted = {"body": "prewalk_setup_ticks", "publish": "get_write_ticks",
+                "drained-ea": "drained_ea_publish_ticks",
+                "recycle": "recycle_ticks", "reference-lock": "reference_lock_wait_ticks",
+                "early-return": "prewalk_setup_ticks"}
+    if mode in targeted and float(row[targeted[mode]]) < 5.0:
+        raise AssertionError(f"simulated {mode} stall was not attributed: {row}")
+    expected_reason = "no-context" if mode == "early-return" else "caught-up"
+    if row["stopped_reason"] != expected_reason:
+        raise AssertionError(f"unexpected stopped reason: {row}")
+    if header[-1] != "stopped_reason":
         raise AssertionError(f"unexpected CSV schema: {header}")
+
+
+def run_kick_case(exe: Path, mode: str) -> None:
+    env = os.environ.copy()
+    env.pop("GCM_SLOW_DRAIN_CSV", None)
+    if mode == "kick-fallback":
+        env["GCM_FIFO_KICK"] = "0"
+    else:
+        env.pop("GCM_FIFO_KICK", None)
+    result = subprocess.run([str(exe), mode], env=env, capture_output=True, text=True)
+    if result.returncode:
+        raise AssertionError(
+            f"{mode} failed ({result.returncode})\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
 
 
 def main() -> int:
@@ -214,13 +322,37 @@ def main() -> int:
     source = source_bytes.decode("utf-8")
     diagnostic = extract_marked(source, DIAG_BEGIN, DIAG_END)
     wrapper = extract_marked(source, WRAPPER_BEGIN, WRAPPER_END)
+    kick_wait = extract_marked(source, KICK_BEGIN, KICK_END)
+    walker_signature = "static void gcm_rsx_process_fifo_unlocked(gcm_slow_drain_event* diagnostic)"
+    declaration = source.index(walker_signature)
+    walker_start = source.index(walker_signature, declaration + len(walker_signature))
+    walker_end = source.index("/* FIFO command-buffer-full callback body", walker_start)
+    walker = source[walker_start:walker_end]
+    landmarks = (
+        "gcm_slow_drain_phase_begin(diagnostic);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_SETUP);",
+        "while (s_fifo_getoff != put && budget-- > 0)",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_WALKER);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_POSTWALK);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_RECYCLE);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_POST_RECYCLE);",
+        "gcm_fifo_publish_drained_ea(gcm_io2ea(s_fifo_getoff));",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_DRAINED_EA_PUBLISH);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_GET_WRITE);",
+        "AcquireSRWLockExclusive(&s_ref_pub_lock);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_REF_LOCK_WAIT);",
+        "gcm_slow_drain_phase_end(diagnostic,GCM_SLOW_PHASE_REF_PUBLISH);",
+    )
+    positions = [walker.find(landmark) for landmark in landmarks]
+    if any(position < 0 for position in positions) or positions != sorted(positions):
+        raise RuntimeError("slow-drain phase callsites are missing or out of order")
     if "context_valid ? vm_read32(GCM_CONTROL_GUEST_ADDR) : 0" not in wrapper:
         raise RuntimeError("wrapper no longer guards guest PUT reads by context validity")
     if "AcquireSRWLockExclusive(&s_gcm_fifo_lock)" not in wrapper:
         raise RuntimeError("wrapper no longer acquires the production FIFO lock")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     fixture = args.output_dir / "fifo_slow_drain_fixture.c"
-    fixture.write_text(fixture_source(diagnostic, wrapper), encoding="utf-8")
+    fixture.write_text(fixture_source(diagnostic, wrapper, kick_wait), encoding="utf-8")
     exe = args.output_dir / "fifo_slow_drain_fixture.exe"
     completed = subprocess.run(compiler_command(args.compiler, fixture, exe), capture_output=True, text=True)
     if completed.returncode:
@@ -231,11 +363,15 @@ def main() -> int:
         temp_path = Path(temp)
         run_case(exe, "disabled", None)
         print("PASS disabled diagnostic avoids guest/frame reads")
-        for mode in ("invalid-context", "lock", "body"):
+        for mode in ("invalid-context", "lock", "body", "drained-ea", "publish", "recycle",
+                     "reference-lock", "get-equals-put", "early-return"):
             csv_path = temp_path / f"{mode}.csv"
             run_case(exe, mode, csv_path)
             print(f"PASS {mode} attribution and retained/idempotent CSV")
-    print("4 focused FIFO slow-drain cases passed")
+        for mode in ("kick-signaled", "kick-timeout", "kick-failed", "kick-other", "kick-fallback"):
+            run_kick_case(exe, mode)
+            print(f"PASS kick wait result: {mode}")
+    print("15 focused FIFO slow-drain/kick-wait cases passed")
     return 0
 
 

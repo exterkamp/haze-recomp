@@ -16,6 +16,13 @@ FIFO_HEADER = [
     'thread_cycles_valid', 'thread_cycles_delta', 'get_before', 'put_before',
     'get_after', 'put_after',
 ]
+FIFO_PHASE_HEADER = FIFO_HEADER + [
+    'phase_mask', 'prewalk_setup_ticks', 'walker_ticks', 'postwalk_ticks',
+    'recycle_ticks', 'post_recycle_ticks', 'drained_ea_publish_ticks',
+    'get_write_ticks',
+    'reference_lock_wait_ticks', 'reference_publish_ticks',
+    'phase_unaccounted_ticks', 'stopped_reason',
+]
 FLUSH_HEADER = [
     'sequence', 'frame', 'host_tid', 'reason', 'qpc_begin', 'qpc_end',
     'total_ticks', 'thread_cycles_valid', 'thread_cycles_delta', 'fence_value',
@@ -76,6 +83,14 @@ class SlowDrainAnalyzerTests(unittest.TestCase):
         with self.fifo.open('w', newline='') as f:
             f.write(f'#qpc_frequency,{FREQ},recorded,{recorded},overwritten,{overwritten}\n')
             writer = csv.DictWriter(f, fieldnames=FIFO_HEADER)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def write_fifo_with_phases(self, rows=None):
+        rows = self.fifo_rows[:1] if rows is None else rows
+        with self.fifo.open('w', newline='') as f:
+            f.write(f'#qpc_frequency,{FREQ},recorded,{len(rows)},overwritten,0\n')
+            writer = csv.DictWriter(f, fieldnames=FIFO_PHASE_HEADER)
             writer.writeheader()
             writer.writerows(rows)
 
@@ -157,6 +172,39 @@ class SlowDrainAnalyzerTests(unittest.TestCase):
         self.write_pump(frequency=FREQ*2)
         with self.assertRaisesRegex(ValueError, 'frequencies differ'):
             analyzer.analyze(self.fifo, pump_path=self.pump)
+
+    def test_nested_fifo_phases_parse_and_reconcile(self):
+        row = dict(self.fifo_rows[0])
+        row.update(phase_mask=0x1ff, prewalk_setup_ticks=2, walker_ticks=3,
+                   postwalk_ticks=1, recycle_ticks=4, post_recycle_ticks=1,
+                   drained_ea_publish_ticks=1, get_write_ticks=1,
+                   reference_lock_wait_ticks=3, reference_publish_ticks=2,
+                   phase_unaccounted_ticks=2,
+                   stopped_reason='caught-up')
+        self.write_fifo_with_phases([row])
+        result = analyzer.analyze(self.fifo)
+        phases = result['fifo_capture']['nested_phase_ticks']
+        self.assertEqual(phases['walker_ticks']['sum_raw_ticks'], 3)
+        self.assertEqual(phases['recycle_ticks']['sum_raw_ticks'], 4)
+
+    def test_rejects_incomplete_nested_fifo_schema_and_bad_partition(self):
+        row = dict(self.fifo_rows[0])
+        row.update(phase_mask=0x1ff, prewalk_setup_ticks=2, walker_ticks=3,
+                   postwalk_ticks=1, recycle_ticks=4, post_recycle_ticks=1,
+                   drained_ea_publish_ticks=1, get_write_ticks=1,
+                   reference_lock_wait_ticks=3, reference_publish_ticks=2,
+                   phase_unaccounted_ticks=3,
+                   stopped_reason='caught-up')
+        self.write_fifo_with_phases([row])
+        with self.assertRaisesRegex(ValueError, 'nested phases do not partition'):
+            analyzer.analyze(self.fifo)
+        with self.fifo.open('w', newline='') as f:
+            f.write(f'#qpc_frequency,{FREQ},recorded,1,overwritten,0\n')
+            writer = csv.DictWriter(f, fieldnames=FIFO_HEADER + ['phase_mask'])
+            writer.writeheader()
+            writer.writerow({**self.fifo_rows[0], 'phase_mask': 0})
+        with self.assertRaisesRegex(ValueError, 'incomplete nested-phase schema'):
+            analyzer.analyze(self.fifo)
 
     def test_rejects_flush_metadata_or_interval_mismatch(self):
         row = self.flush_row(1, 7, 115, 125)

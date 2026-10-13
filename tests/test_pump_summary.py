@@ -149,6 +149,49 @@ class PumpSummaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "frequency mismatch"):
             self.run_summary(renderer=rows)
 
+    def outcome_rows(self):
+        return [dict(r, signaled_waits=1, timeout_waits=1, sleep_waits=0,
+                     failed_waits=0, signaled_wait_ms=r['wait_ms']*.25,
+                     timeout_wait_ms=r['wait_ms']*.75, sleep_wait_ms=0,
+                     failed_wait_ms=0, max_wait_ms=r['wait_ms']*.75,
+                     queued_after_waits=1, empty_signals=0) for r in self.pump_rows]
+
+    def outcome_summary(self, rows):
+        self.write_csv(self.pump_path,list(rows[0]),rows)
+        return summarize(self.pump_path)
+
+    def test_wait_outcomes_partition_and_summary(self):
+        result=self.outcome_summary(self.outcome_rows())['all']['wait_outcomes']
+        self.assertEqual(result['total_counts']['signaled_waits'],2)
+        self.assertEqual(result['total_counts']['timeout_waits'],2)
+        self.assertAlmostEqual(result['means_ms_per_frame']['signaled_wait_ms'],.875)
+        self.assertAlmostEqual(result['means_ms_per_frame']['timeout_wait_ms'],2.625)
+        self.assertAlmostEqual(result['maximum_individual_wait_ms'],3.75)
+
+    def test_rejects_partial_outcome_schema(self):
+        rows=self.outcome_rows()
+        for row in rows: del row['max_wait_ms']
+        with self.assertRaisesRegex(ValueError,'Incomplete wait outcome'):
+            self.outcome_summary(rows)
+
+    def test_rejects_invalid_outcome_partitions(self):
+        cases=[('signaled_waits',2,'counts do not partition'),
+               ('timeout_wait_ms',.9,'times do not partition'),
+               ('queued_after_waits',3,'post-wait queue'),
+               ('empty_signals',2,'post-wait queue'),
+               ('max_wait_ms',3,'exceeds wait total'),
+               ('max_wait_ms',float('nan'),'Invalid wait outcome'),
+               ('failed_waits',-1,'Negative wait outcome')]
+        for key,value,message in cases:
+            with self.subTest(key=key):
+                rows=self.outcome_rows()
+                rows[0][key]=value
+                with self.assertRaisesRegex(ValueError,message):
+                    self.outcome_summary(rows)
+
+    def test_legacy_csv_remains_supported(self):
+        self.assertNotIn('wait_outcomes',self.run_summary()['all'])
+
 
 if __name__ == "__main__":
     unittest.main()

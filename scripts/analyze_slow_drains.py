@@ -17,6 +17,19 @@ FIFO_FIELDS = {
     'body_ms', 'thread_cycles_valid', 'thread_cycles_delta', 'get_before',
     'put_before', 'get_after', 'put_after',
 }
+FIFO_PHASE_FIELDS = {
+    'phase_mask', 'prewalk_setup_ticks', 'walker_ticks', 'postwalk_ticks',
+    'recycle_ticks', 'post_recycle_ticks', 'drained_ea_publish_ticks',
+    'get_write_ticks',
+    'reference_lock_wait_ticks', 'reference_publish_ticks',
+    'phase_unaccounted_ticks', 'stopped_reason',
+}
+FIFO_PHASE_TICKS = (
+    'prewalk_setup_ticks', 'walker_ticks', 'postwalk_ticks', 'recycle_ticks',
+    'post_recycle_ticks', 'drained_ea_publish_ticks', 'get_write_ticks',
+    'reference_lock_wait_ticks',
+    'reference_publish_ticks',
+)
 FLUSH_STAGES = (
     'close_ticks', 'execute_ticks', 'signal_ticks', 'completed_value_ticks',
     'set_event_ticks', 'wait_ticks', 'info_queue_ticks',
@@ -72,13 +85,19 @@ def _read_capture(path, kind):
     required = FIFO_FIELDS if kind == 'fifo' else FLUSH_FIELDS
     if None in reader.fieldnames or not required.issubset(reader.fieldnames):
         raise ValueError(f'{kind}: missing or malformed CSV columns')
+    if kind == 'fifo':
+        phase_columns = set(reader.fieldnames) & FIFO_PHASE_FIELDS
+        if phase_columns and phase_columns != FIFO_PHASE_FIELDS:
+            raise ValueError('fifo: incomplete nested-phase schema')
     parsed = []
     for raw in rows:
         if None in raw or any(v is None for v in raw.values()):
             raise ValueError(f'{kind}: nonrectangular CSV')
         row = {}
         for key, value in raw.items():
-            if key.endswith('_hr'):
+            if key == 'stopped_reason':
+                row[key] = value
+            elif key.endswith('_hr'):
                 row[key] = int(value, 16)
             else:
                 try:
@@ -137,6 +156,23 @@ def _validate_fifo(metadata, rows):
             raise ValueError('fifo: body duration disagrees with QPC')
         if abs(r['total_ms']-r['lock_wait_ms']-r['body_ms']) > 0.000003:
             raise ValueError('fifo: phases do not partition total')
+        phase_keys = set(r) & FIFO_PHASE_FIELDS
+        if phase_keys:
+            if phase_keys != FIFO_PHASE_FIELDS:
+                raise ValueError('fifo: incomplete nested-phase schema')
+            if r['phase_mask'] & ~0x1ff:
+                raise ValueError('fifo: unknown nested phase-mask bits')
+            phase_total = sum(r[key] for key in FIFO_PHASE_TICKS)
+            body_ticks = end-locked
+            if r['phase_unaccounted_ticks'] < 0 or any(r[key] < 0 for key in FIFO_PHASE_TICKS):
+                raise ValueError('fifo: negative nested phase ticks')
+            if phase_total+r['phase_unaccounted_ticks'] != body_ticks:
+                raise ValueError('fifo: nested phases do not partition body')
+            for bit, key in enumerate(FIFO_PHASE_TICKS):
+                if not r['phase_mask'] & (1 << bit) and r[key] != 0:
+                    raise ValueError('fifo: unvisited nested phase has nonzero ticks')
+            if r['phase_mask'] and not r['stopped_reason']:
+                raise ValueError('fifo: missing stopped reason')
     # Sequence is assigned while holding the FIFO lock, so lock-acquired QPC
     # must increase with sequence, though begin timestamps can reorder.
     ordered = sorted(rows, key=lambda r: r['sequence'])
@@ -223,6 +259,15 @@ def _event_summary(rows, frequency, kind):
               'worst': {label: [{k: v for k, v in r.items() if not k.startswith('_')}
                                 for r in values] for label, values in worst.items()}}
     result['durations'] = {label: _stats(rows, key) for key, label in zip(durations, labels)}
+    if kind == 'fifo' and rows and FIFO_PHASE_FIELDS.issubset(rows[0]):
+        result['nested_phase_ticks'] = {
+            phase: {'sum_raw_ticks': sum(r[phase] for r in rows),
+                    'max_raw_ticks': max(r[phase] for r in rows),
+                    'sum_ms': sum(r[phase] for r in rows)*1000/frequency}
+            for phase in FIFO_PHASE_TICKS}
+        result['nested_phase_mask_counts'] = {
+            str(mask): sum(r['phase_mask'] == mask for r in rows)
+            for mask in sorted({r['phase_mask'] for r in rows})}
     if kind == 'flush':
         result['stage_ticks'] = {
             stage: {'sum_raw_ticks': sum(r[stage] for r in rows),

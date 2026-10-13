@@ -19,6 +19,7 @@ static LONGLONG g_mock_qpc = 0;
 static LONGLONG g_mock_frequency = 1000;
 static std::uint64_t g_mock_cpu_100ns = 0;
 static bool g_mock_thread_times_valid = true;
+static unsigned g_mock_qpc_calls = 0;
 
 static int QueryPerformanceFrequency(LARGE_INTEGER* value)
 {
@@ -28,6 +29,7 @@ static int QueryPerformanceFrequency(LARGE_INTEGER* value)
 
 static int QueryPerformanceCounter(LARGE_INTEGER* value)
 {
+    ++g_mock_qpc_calls;
     value->QuadPart = g_mock_qpc;
     return 1;
 }
@@ -223,12 +225,71 @@ static bool test_ring_wrap_and_dump()
     return true;
 }
 
+static bool test_wait_outcomes_partition_and_reset()
+{
+    auto* p = new HazePumpProfile();
+    p->enabled = true;
+    p->frequency = 1000;
+    p->wait_control = nullptr;
+    p->csv_path = "pump_intervals_unused.csv";
+    p->intervals.previous = 100;
+    // Two real signal returns, one with the queue empty after wake. An empty
+    // snapshot does not establish whether a semaphore/label was published.
+    const unsigned outcomes[] = {0, 0, 1, 2, 3, 99};
+    const LONGLONG durations[] = {2, 3, 10, 7, 1, 4};
+    for (unsigned i=0; i<6; ++i) {
+        p->note_wait(i==0);
+        p->add_wait(durations[i]);
+        p->note_wait_result(outcomes[i],durations[i],i==0 || i==2);
+    }
+    g_mock_qpc = 200;
+    p->finish_present(190,2,2);
+    CHECK(p->recorded==1);
+    const auto& row=p->rows[0];
+    CHECK(row.waits==6 && row.wait==27 && row.queued_waits==1);
+    CHECK(row.signaled_waits==2 && row.signaled_wait==5);
+    CHECK(row.timeout_waits==1 && row.timeout_wait==10);
+    CHECK(row.sleep_waits==1 && row.sleep_wait==7);
+    CHECK(row.failed_waits==2 && row.failed_wait==5);
+    CHECK(row.wait==row.signaled_wait+row.timeout_wait+row.sleep_wait+row.failed_wait);
+    CHECK(row.max_wait==10 && row.queued_after_waits==2 && row.empty_signals==1);
+    CHECK(p->intervals.pending.waits==0 && p->intervals.pending.max_wait==0);
+    CHECK(p->intervals.pending.signaled_waits==0 && p->intervals.pending.empty_signals==0);
+    // Disabled CSV reporting must not accumulate diagnostic outcomes.
+    p->csv_path=nullptr;
+    p->note_wait_result(0,999,true);
+    CHECK(p->intervals.pending.signaled_waits==0 && p->intervals.pending.max_wait==0);
+    delete p;
+    return true;
+}
+
+static bool test_wait_mode_reporting_clocks_only_on_change()
+{
+    auto* p = new HazePumpProfile();
+    p->enabled=false;
+    const auto before=g_mock_qpc_calls;
+    p->report_wait_mode();
+    CHECK(p->reported_wait_ms==-1 && g_mock_qpc_calls==before);
+    p->enabled=true;
+    p->report_wait_mode();
+    CHECK(p->reported_wait_ms==1 && g_mock_qpc_calls==before+1);
+    p->report_wait_mode();
+    CHECK(g_mock_qpc_calls==before+1);
+    p->wait_ms=0;
+    p->report_wait_mode();
+    CHECK(p->reported_wait_ms==0 && g_mock_qpc_calls==before+2);
+    delete p;
+    return true;
+}
+
 int main()
 {
     if (!test_startup_partial_and_consecutive()) return 1;
     if (!test_cpu_validity_and_recovery()) return 1;
     if (!test_report_reset_is_independent()) return 1;
     if (!test_ring_wrap_and_dump()) return 1;
+    if (!test_wait_outcomes_partition_and_reset()) return 1;
+    if (!test_wait_mode_reporting_clocks_only_on_change()) return 1;
     std::puts("pump interval accounting: PASS");
     return 0;
 }

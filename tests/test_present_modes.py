@@ -197,6 +197,43 @@ class PresentWindows(unittest.TestCase):
                 consumer_good+'[rsx-vp-burst-mode] enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid),self.assertRaises(ValueError):run(invalid)
 
+    def test_fifo_idle_wait_mode_covers_each_full_block(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
+            root = Path(folder)
+            args = SimpleNamespace(csv=root/'p.csv', windows=root/'w.json',
+                output=root/'r.json', min_frames=60, queue_mode_log=root/'native.log')
+            windows = dict(complete=True, qpc_frequency=1000,
+                mode_column='fifo_idle_wait', blocks=[
+                    dict(flags=1, start_qpc=400, end_qpc=3000),
+                    dict(flags=0, start_qpc=3200, end_qpc=5800)])
+            args.windows.write_text(json.dumps(windows))
+            with args.csv.open('w', newline='') as stream:
+                stream.write('# qpc_frequency=1000\npresent_id,guest_frame,qpc\n')
+                for frame in range(151):
+                    stream.write(f'{frame+1},{frame},{frame*40}\n')
+
+            good = ('[fifo-idle-wait-mode] timeout_ms=1 qpc=100\n'
+                    '[fifo-idle-wait-mode] timeout_ms=0 qpc=3100\n')
+            def run(log):
+                args.queue_mode_log.write_text(log)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    report(args)
+
+            run(good)
+            self.assertEqual([b['flags'] for b in json.loads(args.output.read_text())['blocks']], [1, 0])
+
+            invalid = [
+                '',  # No startup event covering the first block.
+                good.replace('timeout_ms=1 qpc=100', 'timeout_ms=0 qpc=100'),
+                good.replace('timeout_ms=0 qpc=3100', ''),  # Second block is uncovered.
+                good.replace('qpc=3100', 'qpc=3000'),  # Change at the first block's end.
+                good.replace('qpc=3100', 'qpc=4000'),  # Change inside the second block.
+                good + '[fifo-idle-wait-mode] timeout_ms=1 qpc=4000\n',
+            ]
+            for log in invalid:
+                with self.subTest(log=log), self.assertRaises(ValueError):
+                    run(log)
+
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
             root = Path(folder)

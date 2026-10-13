@@ -27,6 +27,8 @@ The job0_kernel variant uses HAZE_JOB0_NATIVE_FILE and process-wide mode events
 for the two guarded image-30 compute loops; hardware arithmetic must be active.
 The fifo_recycle_wait variant uses GCM_FIFO_WAIT_CONTROL and requires mode
 events for each explicitly selected producer host TID.
+The fifo_idle_wait variant uses HAZE_FIFO_WAIT_FILE with timeout flags 0/1
+and process-wide startup/change events covering each complete measurement block.
 The spu_float_native variant uses SPU_FLOAT_NATIVE_FILE and process-wide
 mode events; its hardware arithmetic must be built and supported by the CPU/OS.
 The gpu_vertex_pull variant uses RSX_GPU_VERTEX_PULL_FILE and process-wide
@@ -196,9 +198,9 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native', 'gpu_vertex_pull', 'job_wait', 'vp_packets', 'vp_consumer', 'job0_kernel', 'spu_worker_reuse'):
+    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native', 'gpu_vertex_pull', 'job_wait', 'vp_packets', 'vp_consumer', 'job0_kernel', 'spu_worker_reuse', 'fifo_idle_wait'):
         if not args.queue_mode_log:
-            raise ValueError('Native copy mode requires its process-wide mode-event log')
+            raise ValueError('Native mode requires its process-wide mode-event log')
         worker_modes = {'process': []}
         for line in args.queue_mode_log.read_text(errors='replace').splitlines():
             name = {'spu_triplet_copy':'haze-spu-triplet-mode',
@@ -209,9 +211,13 @@ def report(args):
                     'gpu_vertex_pull':'gpu-vertex-pull-mode',
                     'job_wait':'haze-job-wait-mode',
                     'vp_packets':'haze-vp-packet-mode',
-                    'vp_consumer':'rsx-vp-burst-mode'}[mode_column]
+                    'vp_consumer':'rsx-vp-burst-mode',
+                    'fifo_idle_wait':'fifo-idle-wait-mode'}[mode_column]
             valid_modes = '[012]' if mode_column == 'gpu_vertex_pull' else '[01]'
-            match = re.fullmatch(r'\[' + name + r'\] enabled=(' + valid_modes + r') qpc=(\d+)', line)
+            pattern = (r'\[' + name + r'\] timeout_ms=(' + valid_modes + r') qpc=(\d+)'
+                       if mode_column == 'fifo_idle_wait' else
+                       r'\[' + name + r'\] enabled=(' + valid_modes + r') qpc=(\d+)')
+            match = re.fullmatch(pattern, line)
             if match: worker_modes['process'].append((int(match[2]), int(match[1])))
         worker_modes['process'].sort()
     elif mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer', 'fifo_recycle_wait'):
@@ -291,7 +297,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','spu_float_native','gpu_vertex_pull','job_wait','vp_packets','vp_consumer','job0_kernel','spu_worker_reuse'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','fifo_idle_wait','spu_float_native','gpu_vertex_pull','job_wait','vp_packets','vp_consumer','job0_kernel','spu_worker_reuse'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)

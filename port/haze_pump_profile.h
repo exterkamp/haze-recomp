@@ -7,6 +7,7 @@ struct HazePumpProfile {
     LONGLONG frequency=0, epoch=0, wait=0, fifo=0, present=0, tick=0;
     unsigned drains=0, presents=0;
     unsigned waits=0, queued_waits=0, wait_ms=1;
+    int reported_wait_ms=-1;
     const char* wait_control=getenv("HAZE_FIFO_WAIT_FILE");
     HazePumpIntervals intervals;
     static constexpr unsigned capacity=16384;
@@ -34,6 +35,26 @@ struct HazePumpProfile {
         ++waits; queued_waits+=queued;
         if(csv_path) { ++intervals.pending.waits; intervals.pending.queued_waits+=queued; }
     }
+    void report_wait_mode() {
+        if (!enabled || reported_wait_ms==(int)wait_ms) return;
+        fprintf(stderr,"[fifo-idle-wait-mode] timeout_ms=%u qpc=%lld\n",wait_ms,now());
+        reported_wait_ms=(int)wait_ms;
+    }
+    // Result categories come from the actual SDK wait, not inferred elapsed
+    // time. A queued FIFO may still be blocked on a semaphore.
+    void note_wait_result(unsigned result, LONGLONG elapsed, bool queued_after) {
+        if (!csv_path) return;
+        auto& p=intervals.pending;
+        if (elapsed>p.max_wait) p.max_wait=elapsed;
+        p.queued_after_waits+=queued_after;
+        switch (result) {
+        case 0: ++p.signaled_waits; p.signaled_wait+=elapsed;
+                p.empty_signals+=!queued_after; break;
+        case 1: ++p.timeout_waits; p.timeout_wait+=elapsed; break;
+        case 2: ++p.sleep_waits; p.sleep_wait+=elapsed; break;
+        default: ++p.failed_waits; p.failed_wait+=elapsed; break;
+        }
+    }
     void finish_present(LONGLONG begin, unsigned frame, unsigned flips) {
         const LONGLONG end=now();
         present+=end-begin; ++presents;
@@ -52,16 +73,19 @@ struct HazePumpProfile {
         if(!csv_path) return;
         FILE* csv=fopen(csv_path,"wb");
         if(!csv) { fprintf(stderr,"[pump-csv] cannot open output\n"); return; }
-        fprintf(csv,"qpc_frequency,frame,flips,begin_qpc,end_qpc,dt_ms,wait_ms,fifo_ms,present_ms,tick_ms,other_ms,thread_cpu_ms,cpu_valid,waits,queued_waits,drains\n");
+        fprintf(csv,"qpc_frequency,frame,flips,begin_qpc,end_qpc,dt_ms,wait_ms,fifo_ms,present_ms,tick_ms,other_ms,thread_cpu_ms,cpu_valid,waits,queued_waits,drains,signaled_waits,timeout_waits,sleep_waits,failed_waits,signaled_wait_ms,timeout_wait_ms,sleep_wait_ms,failed_wait_ms,max_wait_ms,queued_after_waits,empty_signals\n");
         const double scale=1000.0/frequency;
         const uint64_t first=recorded>capacity ? recorded-capacity : 0;
         for(uint64_t i=first;i<recorded;++i) {
             const auto& r=rows[i%capacity];
             const auto other=r.end-r.begin-r.wait-r.fifo-r.present-r.tick;
-            fprintf(csv,"%lld,%u,%u,%lld,%lld,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u\n",
+            fprintf(csv,"%lld,%u,%u,%lld,%lld,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u,%u,%u,%u,%u,%u,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%u\n",
                 frequency,r.frame,r.flips,r.begin,r.end,(r.end-r.begin)*scale,
                 r.wait*scale,r.fifo*scale,r.present*scale,r.tick*scale,other*scale,
-                r.cpu_100ns/10000.0,(unsigned)r.cpu_valid,r.waits,r.queued_waits,r.drains);
+                r.cpu_100ns/10000.0,(unsigned)r.cpu_valid,r.waits,r.queued_waits,r.drains,
+                r.signaled_waits,r.timeout_waits,r.sleep_waits,r.failed_waits,
+                r.signaled_wait*scale,r.timeout_wait*scale,r.sleep_wait*scale,
+                r.failed_wait*scale,r.max_wait*scale,r.queued_after_waits,r.empty_signals);
         }
         fclose(csv);
         fprintf(stderr,"[pump-csv] recorded=%llu retained=%llu\n",
@@ -104,6 +128,8 @@ struct HazePumpProfile {
     void add_fifo(int64_t) {}
     void add_tick(int64_t) {}
     void note_wait(bool) {}
+    void report_wait_mode() {}
+    void note_wait_result(unsigned,int64_t,bool) {}
     void finish_present(int64_t,unsigned,unsigned) {}
     void dump() const {}
 };

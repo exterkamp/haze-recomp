@@ -7,6 +7,10 @@ struct HazePumpInterval {
     int64_t begin=0, end=0, wait=0, fifo=0, present=0, tick=0;
     uint64_t cpu_100ns=0;
     unsigned frame=0, flips=0, waits=0, queued_waits=0, drains=0;
+    int64_t signaled_wait=0, timeout_wait=0, sleep_wait=0, failed_wait=0;
+    int64_t max_wait=0;
+    unsigned signaled_waits=0, timeout_waits=0, sleep_waits=0, failed_waits=0;
+    unsigned queued_after_waits=0, empty_signals=0;
     bool cpu_valid=false;
 };
 struct HazePumpIntervals {

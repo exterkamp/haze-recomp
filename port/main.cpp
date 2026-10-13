@@ -137,6 +137,7 @@ unsigned cellGcm_flip_request_count(void);
 uint32_t cellGcmGetCurrentDisplayBufferId(void);
 void cellGcm_fifo_kick_wait(unsigned ms);
 int cellGcm_fifo_has_queued_work(void);
+unsigned cellGcm_fifo_kick_wait_result(unsigned);
 }
 
 void ps3_sampler_start(void); /* SDK profiler has C++ linkage. */
@@ -365,12 +366,17 @@ static DWORD WINAPI frame_clock(LPVOID)
         /* Haze also waits on RSX labels, which do not signal the REF kick.
          * Keep those render-pass dependencies responsive instead of adding
          * a four-millisecond host delay to every producer/consumer round trip. */
+        g_pump_profile.report_wait_mode();
         const auto wait_begin=g_pump_profile.now();
         if (g_pump_profile.enabled) {
             g_pump_profile.note_wait(cellGcm_fifo_has_queued_work()!=0);
+            const unsigned result=cellGcm_fifo_kick_wait_result(g_pump_profile.wait_ms);
+            const auto elapsed=g_pump_profile.now()-wait_begin;
+            g_pump_profile.add_wait(elapsed);
+            g_pump_profile.note_wait_result(result,elapsed,cellGcm_fifo_has_queued_work()!=0);
+        } else {
+            cellGcm_fifo_kick_wait(g_pump_profile.wait_ms);
         }
-        cellGcm_fifo_kick_wait(g_pump_profile.wait_ms);
-        g_pump_profile.add_wait(g_pump_profile.now()-wait_begin);
 #endif
         ULONGLONG now = GetTickCount64();
         spu_float_native_update();

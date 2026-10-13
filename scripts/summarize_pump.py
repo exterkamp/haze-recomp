@@ -10,6 +10,11 @@ import json
 import math
 from pathlib import Path
 
+WAIT_COUNTS = ('signaled_waits', 'timeout_waits', 'sleep_waits', 'failed_waits')
+WAIT_MS = ('signaled_wait_ms', 'timeout_wait_ms', 'sleep_wait_ms', 'failed_wait_ms')
+WAIT_EXTRA_COUNTS = ('queued_after_waits', 'empty_signals')
+WAIT_FIELDS = (*WAIT_COUNTS, *WAIT_MS, *WAIT_EXTRA_COUNTS, 'max_wait_ms')
+
 
 def percentile(values, p):
     values = sorted(values)
@@ -23,6 +28,9 @@ def read_pump(path):
         rows = list(csv.DictReader(f))
     if not rows:
         raise ValueError('No pump intervals')
+    outcomes = any(k in rows[0] for k in WAIT_FIELDS)
+    if outcomes and not all(k in rows[0] for k in WAIT_FIELDS):
+        raise ValueError('Incomplete wait outcome schema')
     previous = None
     fields = ('dt_ms', 'wait_ms', 'fifo_ms', 'present_ms', 'tick_ms', 'other_ms')
     for row in rows:
@@ -48,6 +56,28 @@ def read_pump(path):
             raise ValueError('Invalid interval accounting')
         if abs(sum(row[k] for k in fields[1:])-row['dt_ms']) > 0.00001:
             raise ValueError('Scope totals do not match interval')
+        if outcomes:
+            for k in (*WAIT_COUNTS, *WAIT_EXTRA_COUNTS):
+                row[k] = int(row[k])
+                if row[k] < 0:
+                    raise ValueError('Negative wait outcome count')
+            for k in (*WAIT_MS, 'max_wait_ms'):
+                row[k] = float(row[k])
+                if not math.isfinite(row[k]) or row[k] < 0:
+                    raise ValueError('Invalid wait outcome elapsed time')
+            if sum(row[k] for k in WAIT_COUNTS) != row['waits']:
+                raise ValueError('Wait outcome counts do not partition waits')
+            if abs(sum(row[k] for k in WAIT_MS)-row['wait_ms']) > 0.000004:
+                raise ValueError('Wait outcome times do not partition wait scope')
+            if row['queued_after_waits'] > row['waits'] or row['empty_signals'] > row['signaled_waits']:
+                raise ValueError('Invalid post-wait queue counts')
+            if row['max_wait_ms'] > row['wait_ms'] + 0.000002:
+                raise ValueError('Maximum individual wait exceeds wait total')
+            if not row['waits'] and row['max_wait_ms']:
+                raise ValueError('Maximum wait without any waits')
+            for count_key, time_key in zip(WAIT_COUNTS, WAIT_MS):
+                if row[count_key] == 0 and row[time_key] != 0:
+                    raise ValueError('Elapsed wait time without matching outcome')
         previous = row
     return rows
 
@@ -102,6 +132,15 @@ def summarize(path, start=None, end=None, renderer=None):
         result['mean_waits'] = sum(r['waits'] for r in items)/len(items)
         result['mean_queued_waits'] = sum(r['queued_waits'] for r in items)/len(items)
         result['mean_drains'] = sum(r['drains'] for r in items)/len(items)
+        if all(k in items[0] for k in WAIT_FIELDS):
+            result['wait_outcomes'] = {
+                'total_counts': {k: sum(r[k] for r in items)
+                                 for k in (*WAIT_COUNTS, *WAIT_EXTRA_COUNTS)},
+                'means_ms_per_frame': {k: sum(r[k] for r in items)/len(items)
+                                      for k in WAIT_MS},
+                'maximum_individual_wait_ms': max(r['max_wait_ms'] for r in items),
+                'note': 'Actual wait returns; elapsed includes scheduler delay. Queue snapshots do not establish executable work or why a signal occurred.',
+            }
         if renderer:
             result['nested_renderer_means_ms'] = {
                 k: sum(r['renderer'][k] for r in items)/len(items) for k in render_fields}
