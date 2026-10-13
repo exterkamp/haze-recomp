@@ -24,8 +24,8 @@ the entire sleep sum into an FPS gain. Prefer a native event after auditing all
 completion producers and publication/wakeup ordering. Generic game delays and
 audio timing are outside this replacement boundary.
 
-The first guarded prototype is now implemented, with performance validation
-pending and the release default unchanged. Keep it on the experimental branch
+The first guarded prototype is implemented; carrier comparisons are mixed and
+the release default remains unchanged. Keep it on the experimental branch
 and use focused commits. Required
 gates include both camera test orders, the squad conversation, scene transitions,
 shutdown and a long-run check for missed completion or lost work. Unlocked
@@ -63,3 +63,67 @@ composes with the pacer patch and rejects changed/repeated inputs. A native
 fixture checks scoped handling, thread/TOC/call/job/duration rejection, syscall
 result and exception cleanup. The full native regression gate passes after
 fixing the unrelated Windows `near` macro collision in the camera test.
+
+## Carrier comparison: no promotion
+
+Root `076dd26`, SDK `6acf5d9`, ordinary candidate
+`local/candidates/native-job-wait/HazeRecomp.exe`, SHA256
+`59810358E489BFBC96FDF9574B845A13187CAA1EBD9137C64438751FB1260B7A`.
+Run `20261013-004637-753`: 1440p, follow-resolution shadows, 1280x720 window,
+AA off, AF 1, VSync on, uncapped; GPU occurrence mode 2, VP cache off
+(CPU flags 5379), vertex/geometry caches and vertex workers off. Real audio
+processing ran muted with private saves/input.
+
+Each ordinary window has five seconds of warmup and 24 measured seconds,
+covering six four-second yaw sweeps of +/-30 degrees. Both mode orders pass
+the complete-present, actual-camera, mode-event and sampled-process checks.
+Only the owned Haze was observed; other applications and activity between
+process samples are not excluded. NPC/world state remains live.
+
+| Order | Policy | Frames | Mean ms | p95 ms | p99 ms | Max ms |
+|---|---|---:|---:|---:|---:|---:|
+| First | Original | 668 | 35.895 | 48.574 | 56.459 | 73.495 |
+| First | Native | 656 | 36.502 | 49.829 | 57.758 | 82.140 |
+| First | Native | 670 | 35.730 | 48.368 | 54.067 | 61.380 |
+| First | Original | 636 | 37.734 | 51.207 | 61.533 | 85.926 |
+| Reverse | Native | 661 | 36.211 | 48.655 | 54.409 | 130.355 |
+| Reverse | Original | 657 | 36.477 | 48.569 | 53.376 | 67.808 |
+| Reverse | Original | 607 | 39.531 | 54.334 | 69.498 | 119.147 |
+| Reverse | Native | 653 | 36.702 | 49.946 | 56.562 | 69.354 |
+
+These results do not establish a consistent per-window improvement. The user
+reported moving the window as a cause of one major dip, without an exact
+benchmark timestamp. No interval has been deleted or attributed to that
+movement without a matching timestamp. Maxima above retain all samples.
+
+A separate, non-suspending thread-counter diagnostic follows the ordinary
+windows: four seconds warmup, eight seconds measurement, original/native/
+native/original. Host TID 14964 maps explicitly to guest main thread 1;
+retained thread handles and creation time protect against TID reuse. Its
+mode/camera/process/present validation also passes. Main-thread consumption
+is 0.775/0.806/0.797/0.738 cores respectively, about 0.757 original versus
+0.802 native on average. Associated mean intervals are 36.627/36.996/35.815/
+36.810 ms. This short CPU diagnostic is separate from ordinary FPS evidence.
+Process-wide CPU consumption in the ordinary windows spans 5.157-5.480 cores.
+
+Mode-change counters indicate approximately two orders of magnitude more
+completion checks under the native policy. They include warmup and setup,
+so they are not exact per-frame counters. More frequent checking and slightly
+greater main-thread CPU use have not demonstrated a sufficient pacing gain.
+
+Both policies also run slower in absolute terms than the earlier GPU-occurrence
+candidate. Cross-session results cannot identify the cause. Inspection confirms
+the relocated generated PPU source still receives `/O2 /Ob1 /DNDEBUG` and the
+generated-source flags; the current build has renderer profiling off and native
+SPU arithmetic/FMA enabled. No lost source optimization flag was found. A
+matched old/current binary comparison remains needed before attributing the
+baseline difference to this patch, scene evolution or host conditions.
+
+Private evidence: `local/native-job-wait-motion-{windows,report}.json`,
+`local/native-job-wait-motion-presents.csv`, camera CSV and process JSONL;
+`local/native-job-wait-thread-cpu.json` retains raw CPU counters, with separate
+`-windows.json` and `-validation.json` derivatives. No game data is committed.
+
+Keep the policy off by default and #39 open. Squad conversation, transitions,
+long runs and completion-producer/publication auditing remain outstanding.
+Do not treat the earlier 5.315 ms service scope as wholly removable time.
