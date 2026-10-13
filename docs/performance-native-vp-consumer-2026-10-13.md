@@ -116,3 +116,28 @@ to attribute the main-thread/job-delivery stalls and remaining renderer work;
 this bounded command upload operation cannot account for most of that gap.
 
 SDK implementation: `8ea7b04` on `experiment/haze-gpu-geometry`.
+
+## Ordinary comparison after the other game closed
+
+The user closed Labyrinthine. CIM checks before launch and after close found
+no other Haze or Labyrinthine instance. Run `20261013-034439-708`, prefix
+`local/native-vp-consumer-isolated`, uses the same ordinary binary/settings
+and reverses the order to native/original/original/native. No detailed
+profiling, build, capture or instruction sampler ran during the windows.
+All four windows pass present, camera, mode and process-bracketing checks.
+Host CPU activity was approximately 61-64%; other background applications
+are not excluded by the Haze process observer.
+
+| Route | Frames | FPS | Mean ms | p95 ms | p99 ms | Max ms |
+|---|---:|---:|---:|---:|---:|---:|
+| Native | 755 | 31.52 | 31.73 | 42.11 | 52.20 | 73.34 |
+| Original | 747 | 31.14 | 32.11 | 42.46 | 47.23 | 97.34 |
+| Original | 743 | 30.98 | 32.28 | 43.31 | 54.08 | 78.24 |
+| Native | 773 | 32.26 | 31.00 | 39.93 | 44.82 | 59.93 |
+
+Pooled frame-weighted means are 32.195 ms original and 31.362 ms native,
+approximately 2.6% lower with batching. This is a modest positive result in
+one cleaner comparison, not stable pacing or full-campaign validation. The
+first native p99 remains worse than the adjacent original block. This binary
+predates the subsequent rebase onto the latest input/prompt changes, so the
+new user WIP still requires its own build and runtime checks.
