@@ -18,7 +18,7 @@ profiled game, which links and runs successfully.
 ## Pressure-related slowdown capture
 
 Run `20261013-060142-028`, candidate `texture-phases`, private snapshot copy,
-muted real audio, 1440p/native shadows/VSync on/cap zero. Binary SHA-256:
+muted real audio, 1440p/8192 shadows/VSync off/cap zero. Binary SHA-256:
 `C4ED9F240AA28E0C12DD9ED6B6DE30AD1960C4D2151399B074BE231E8E87C693`.
 
 The user reports 94% physical memory usage and several simultaneous compiler

@@ -86,6 +86,11 @@ the Continue/OK selection before confirmation and the jungle tutorial after
 45 seconds. No capture occurs within that 45-second interval. Candidate SHA:
 `9EE3F5633FFA63ED7BF175A92E09BD675F64C76B10ECD678ADD3B7DF7D74FC43`.
 
+Configuration audit: this later run's boot log records 1440p, 8192 shadows
+and VSync off. The earlier `052854-871` settled baseline used native shadows
+and VSync on. Both had no frame cap. The shared WIP settings changed between
+these runs; their configuration must not be treated as identical.
+
 The latter run preserves 32,768 consecutive renderer rows with 99 correctly
 aligned columns and zero recorder rejections. All timing columns are finite
 and nonnegative. Across retained rows, shader subphases reconstruct the outer

@@ -51,7 +51,7 @@ The full profiling candidate builds and runs. Binary SHA-256:
 ## First checkpoint capture
 
 Run `20261013-070223-134`, owned PID 50160, uses a fresh private copy of the
-confirmed jungle save, 1440p/native shadows, VSync on, no frame cap, and muted
+confirmed jungle save, 1440p/8192 shadows, VSync off, no frame cap, and muted
 real audio. Screenshots establish the tutorial and its dismissal before two
 24-second camera sweeps. The game closes normally after measurement.
 
@@ -86,6 +86,15 @@ is 14.58/14.75 ms and remains a larger outstanding cost than texture work.
 No build or screenshot from this agent runs during the timed windows.
 
 ## Repeat and remaining work
+
+Configuration audit: boot logs for all six captures from the allocation,
+capacity, identity and content-reuse investigations confirm 2560x1440,
+8192 shadows, VSync off and no cap. Earlier document/scenario text incorrectly
+carried forward native-shadow/VSync-on labels. The reusable launch helper had
+read the editable WIP configuration. Logs, not those labels, are authoritative;
+the numerical captures are unchanged. Future launches use a separate frozen
+benchmark configuration and record its hash, preventing this dependency on
+the interactive WIP settings.
 
 Run `20261013-071039-264` repeats the unchanged candidate with another fresh
 save copy. No other Haze was running at launch, but another instance starts

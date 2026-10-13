@@ -12,7 +12,7 @@ does no file I/O while recording. It retains at most 65,536 rows in about
 Run `20261013-063936-228`, candidate `texture-identities`, uses a fresh copy of
 the confirmed private jungle save. Screenshot verification establishes the
 Nectar tutorial and its dismissal before two 24-second, 30-degree camera
-sweeps. Settings remain 1440p, native shadows, VSync on, uncapped, muted real
+sweeps. Boot logs confirm 1440p, 8192 shadows, VSync off, uncapped, muted real
 audio, native vertex-program consumer and GPU occurrence decoding enabled.
 The texture cache is back at 4,096 entries. Candidate SHA-256:
 `DF63277B78CD4EE7A4C475CCD50593BDE958F7D710C958A04A89CEF1CE8B1AE7`.
