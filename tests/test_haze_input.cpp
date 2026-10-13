@@ -177,6 +177,7 @@ int main() {
     controller.buttons=0;
     assert(poll(0,&controller,nullptr)==1 && !controller.buttons);
     // Controller input and keyboard input coexist; triggers retain pressure.
+    focused=true; sample(); // Observe neutral before accepting the next menu.
     enabled=true; gamepad_initialized=true; controller_enabled=true;
     fake_pad.connected=true; fake_pad.activity=true;
     fake_pad.family=HazeInputFamily::PlayStation;
@@ -208,20 +209,83 @@ int main() {
     p=sample(); assert((p.buttons&CELL_PAD_CTRL_CROSS) && p.ly==1);
     keys['J']=keys['I']=false;
     assert(sensitivity==.25 && invert_y);
+    // A rebound manual skip cannot activate Start, including across focus loss.
+    startup_skip.configure(false,true);
+    assert(startup_skip.playback(123,uri,true,ticks));
+    ticks+=500;
+    assert(!sample().buttons);
+    const auto old_start=bindings[10].vk;
+    bindings[10].vk='J'; keys['J']=true;
+    assert(sample().buttons==CELL_PAD_CTRL_CROSS);
+    startup_skip.playback(123,uri,false,ticks);
+    assert(!sample().buttons);
+    focused=false; assert(!sample().buttons);
+    focused=true; assert(!sample().buttons);
+    ticks+=10; haze_input_update(); // A fresh focused controller sample is required.
+    keys['J']=false; assert(!sample().buttons);
+    keys['J']=true; assert(sample().buttons&CELL_PAD_CTRL_START);
+    keys['J']=false; bindings[10].vk=old_start;
+    // Controller-only mode follows the same manual path and release gate.
+    enabled=false; controller_state.connected=true;
+    startup_skip.playback(123,uri,true,ticks); ticks+=300;
+    controller_state.input.buttons=CELL_PAD_CTRL_CROSS|CELL_PAD_CTRL_START;
+    assert(sample().buttons==CELL_PAD_CTRL_CROSS);
+    startup_skip.playback(123,uri,false,ticks);
+    assert(!sample().buttons);
+    controller_state.input.buttons=0; assert(!sample().buttons);
+    controller_state.input.buttons=CELL_PAD_CTRL_START;
+    assert(sample().buttons==CELL_PAD_CTRL_START);
+    controller_state={}; enabled=true;
+    // A mouse confirm can skip without first capturing the camera.
+    const auto old_cross=bindings[0].vk;
+    bindings[0].vk=VK_LBUTTON;
+    startup_skip.playback(123,uri,true,ticks); ticks+=300;
+    window_proc(window,WM_LBUTTONDOWN,0,0);
+    assert(!captured && sample().buttons==CELL_PAD_CTRL_CROSS);
+    startup_skip.playback(123,uri,false,ticks);
+    assert(!sample().buttons);
+    window_proc(window,WM_LBUTTONUP,0,0); assert(!sample().buttons);
+    bindings[0].vk=old_cross;
     DeleteFileA(config_path);
-    HazeStartupSkip isolated; bool pressed=true;
+    HazeStartupSkip isolated;
+    const uint16_t cross=CELL_PAD_CTRL_CROSS, start=CELL_PAD_CTRL_START;
     assert(!HazeStartupSkip::known_video(nullptr));
     assert(!HazeStartupSkip::known_video("frd.pam"));
     assert(!HazeStartupSkip::known_video("x-cell-fs:///dev_bdvd/PS3_GAME/USRDIR/assets/g5/pamf/story.pam"));
     assert(isolated.playback(123,uri,true,100));
-    assert(isolated.sample(399,pressed) && !pressed);
-    assert(isolated.sample(400,pressed) && pressed);
-    assert(isolated.sample(800,pressed) && !pressed);
+    assert(!isolated.filter(399,0,true,cross));
+    assert(isolated.filter(400,0,true,cross)==cross);
+    assert(!isolated.filter(800,0,true,cross));
     isolated.playback(456,uri,false,900); // An unrelated player cannot cancel it.
-    assert(isolated.sample(1100,pressed) && pressed);
-    assert(!isolated.sample(10100,pressed) && !pressed); // Bounded failure path.
+    assert(isolated.filter(1100,0,true,cross)==cross);
+    assert(isolated.filter(10900,0,false,cross)==cross); // Slow loading remains skippable.
     isolated.playback(123,uri,true,20000);
     assert(!isolated.playback(123,"story.pam",true,20100));
-    assert(!isolated.sample(20500,pressed) && !pressed);
+    assert(!isolated.filter(20500,cross|start,true,cross));
+    assert(!isolated.filter(20501,0,true,cross));
+    assert(isolated.filter(20502,start,true,cross)==start);
+    const char* prefix="x-cell-fs:///dev_bdvd/PS3_GAME/USRDIR/assets/g5/pamf/";
+    for (auto file : {"ubi.pam","ubi43.pam","frd.pam","frd43.pam"}) {
+        auto path=std::string(prefix)+file;
+        assert(HazeStartupSkip::opening_logo(path.c_str()));
+        isolated.configure(false,true);
+        assert(isolated.playback(123,path.c_str(),true,100));
+        assert(!isolated.filter(450,0,true,cross));
+        assert(isolated.filter(800,cross,true,cross)==cross); // Tap during auto release phase.
+        assert(!isolated.filter(800,cross,false,cross));
+        isolated.playback(123,path.c_str(),false,900);
+        assert(!isolated.filter(1000,0,true,cross));
+    }
+    auto demo=std::string(prefix)+"attract.pam";
+    assert(!HazeStartupSkip::opening_logo(demo.c_str()));
+    isolated.playback(123,demo.c_str(),true,100);
+    assert(isolated.filter(450,0,true,cross)==cross); // Independent of logos=false.
+    isolated.configure(true,false);
+    assert(!isolated.filter(450,0,true,cross));
+    assert(isolated.filter(450,cross,true,cross)==cross);
+    isolated.playback(123,demo.c_str(),false,900);
+    assert(!isolated.playback(123,(std::string(prefix)+"story.pam").c_str(),true,1000));
+    assert(!isolated.filter(1050,0,true,cross));
+    assert(!isolated.filter(1400,0,true,cross));
     puts("Haze keyboard taps, focus release, mouse capture gating and movie skip isolation passed.");
 }
