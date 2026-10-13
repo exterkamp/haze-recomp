@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from analyze_slow_draws import STAGES, analyze, validate_rows
+from analyze_slow_draws import RESOURCE_KINDS, STAGES, analyze, validate_rows
 
 
 def row():
@@ -80,6 +80,49 @@ class SlowDrawAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Incomplete nested PSO phase'):
             validate_rows([partial_phases])
 
+    def test_nested_resource_details_partition_resource_phase(self):
+        detail = row()
+        detail['resource_residual_ms'] = 0.3
+        for kind in RESOURCE_KINDS:
+            detail.update({
+                f'{kind}_calls': 1,
+                f'{kind}_total_ms': 0.05,
+                f'{kind}_max_ms': 0.05,
+                f'{kind}_max_location': 1,
+                f'{kind}_max_offset': 2,
+                f'{kind}_max_format': 3,
+                f'{kind}_max_width': 4,
+                f'{kind}_max_height': 5,
+                f'{kind}_max_slot': 6,
+            })
+        validate_rows([detail])
+        incomplete = copy.deepcopy(detail)
+        del incomplete['texture_max_ms']
+        with self.assertRaisesRegex(ValueError, 'Incomplete nested resource'):
+            validate_rows([incomplete])
+        too_long = copy.deepcopy(detail)
+        too_long['resource_residual_ms'] += 0.1
+        with self.assertRaisesRegex(ValueError, 'do not partition'):
+            validate_rows([too_long])
+        impossible_max = copy.deepcopy(detail)
+        impossible_max['surface_max_ms'] = 0.06
+        with self.assertRaisesRegex(ValueError, 'Invalid nested surface'):
+            validate_rows([impossible_max])
+        for key, value in (('texture_total_ms', -0.1),
+                           ('texture_max_ms', float('inf')),
+                           ('depth_max_offset', -1)):
+            invalid = copy.deepcopy(detail)
+            invalid[key] = value
+            with self.assertRaisesRegex(ValueError, 'Invalid nested'):
+                validate_rows([invalid])
+        empty_with_time = copy.deepcopy(detail)
+        empty_with_time.update(vertex_texture_calls=0,
+                               vertex_texture_total_ms=0.01,
+                               vertex_texture_max_ms=0)
+        empty_with_time['resource_residual_ms'] += 0.05
+        with self.assertRaisesRegex(ValueError, 'Empty vertex_texture'):
+            validate_rows([empty_with_time])
+
     def test_nan_and_qpc_mismatch_rejected(self):
         for key, value in [('wall_ms', float('nan')), ('qpc_end', 50_000)]:
             bad = row(); bad[key] = value
@@ -141,6 +184,19 @@ class SlowDrawAnalysisTests(unittest.TestCase):
             full.update(threshold_us=1000, get_pso_ms=0.4, pso_lookup=2,
                         build_pso_ms=0.3, shader_disk_load_ms=0.1,
                         d3d_compile_ms=0.1, create_graphics_pso_ms=0.1)
+            full['resource_residual_ms'] = 0.3
+            for kind in RESOURCE_KINDS:
+                full.update({
+                    f'{kind}_calls': 1,
+                    f'{kind}_total_ms': 0.05,
+                    f'{kind}_max_ms': 0.05,
+                    f'{kind}_max_location': 1,
+                    f'{kind}_max_offset': 2,
+                    f'{kind}_max_format': 3,
+                    f'{kind}_max_width': 4,
+                    f'{kind}_max_height': 5,
+                    f'{kind}_max_slot': 6,
+                })
             with source.open('w', newline='') as stream:
                 writer = csv.DictWriter(stream, fieldnames=full)
                 writer.writeheader()

@@ -55,6 +55,7 @@ typedef int SRWLOCK;
 #define SRWLOCK_INIT 0
 static unsigned qpc_calls, qpf_calls, cycle_calls;
 static unsigned long long fake_qpc = 10000;
+static unsigned long long fake_qpc_step = 1000;
 static unsigned long long fake_cycles;
 static int env_enabled;
 static int fake_early_return;
@@ -72,7 +73,7 @@ static int QueryPerformanceFrequency(LARGE_INTEGER* out) {
     ++qpf_calls; out->QuadPart = 1000000; return 1;
 }
 static int QueryPerformanceCounter(LARGE_INTEGER* out) {
-    ++qpc_calls; fake_qpc += 1000; out->QuadPart = (long long)fake_qpc; return 1;
+    ++qpc_calls; fake_qpc += fake_qpc_step; out->QuadPart = (long long)fake_qpc; return 1;
 }
 static int QueryThreadCycleTime(void* thread, unsigned long long* out) {
     (void)thread; ++cycle_calls; fake_cycles += 111; *out = fake_cycles; return 1;
@@ -133,6 +134,23 @@ static void sink_end_impl(void*, const rsx_dispatch*, ld_slow_draw_scope* scope)
     scope->event.create_graphics_pso_ticks = 100;
     ld_slow_draw_advance(scope, LD_SLOW_DRAW_PIPELINE_CONSTANTS);
     ld_slow_draw_advance(scope, LD_SLOW_DRAW_RESOURCE_RESOLUTION);
+    u64 resource_begin = ld_slow_resource_begin(scope);
+    ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_SURFACE, resource_begin,
+                            11, 22, 33, 44, 55, 6);
+    fake_qpc_step = 3000;
+    resource_begin = ld_slow_resource_begin(scope);
+    ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_SURFACE, resource_begin,
+                            12, 23, 34, 45, 56, 7);
+    fake_qpc_step = 1000;
+    resource_begin = ld_slow_resource_begin(scope);
+    ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_DEPTH, resource_begin,
+                            21, 32, 0, 43, 54, 5);
+    resource_begin = ld_slow_resource_begin(scope);
+    ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_TEXTURE, resource_begin,
+                            31, 42, 53, 64, 75, 8);
+    resource_begin = ld_slow_resource_begin(scope);
+    ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_VERTEX_TEXTURE, resource_begin,
+                            41, 52, 63, 74, 85, 9);
     scope->event.target = 5;
     scope->event.texture_mask = 0x21;
     scope->event.vertex_texture_mask = 0x02;
@@ -180,6 +198,13 @@ int main(int argc, char** argv) {
             e->build_pso_ticks != 300 || e->shader_disk_load_ticks != 100 ||
             e->d3d_compile_ticks != 100 || e->create_graphics_pso_ticks != 100 ||
             e->stage != LD_SLOW_DRAW_COMMAND_RECORDING) return 15;
+        if (e->resource[LD_SLOW_RESOURCE_SURFACE].calls != 2 ||
+            e->resource[LD_SLOW_RESOURCE_SURFACE].max_offset != 23 ||
+            e->resource[LD_SLOW_RESOURCE_SURFACE].max_slot != 7 ||
+            e->resource[LD_SLOW_RESOURCE_DEPTH].calls != 1 ||
+            e->resource[LD_SLOW_RESOURCE_TEXTURE].max_location != 31 ||
+            e->resource[LD_SLOW_RESOURCE_VERTEX_TEXTURE].max_format != 63)
+            return 22;
     }
     g.ready = 1;
     rsx_live_draw_dump_present_samples();
@@ -241,6 +266,10 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
         raise AssertionError("compile/PSO creation phases are not individually timed")
     if "slow_draw->event.build_pso_ticks +=" not in get_pso:
         raise AssertionError("build_pso nested duration is not recorded")
+    for token in ("surface_get_slow_draw(slow_draw", "LD_SLOW_RESOURCE_DEPTH",
+                  "LD_SLOW_RESOURCE_TEXTURE", "LD_SLOW_RESOURCE_VERTEX_TEXTURE"):
+        if token not in body:
+            raise AssertionError(f"resource attribution call site missing: {token}")
     output_dir.mkdir(parents=True, exist_ok=True)
     mode = "profile" if profile else "ordinary"
     fixture = output_dir / f"slow_draw_{mode}.cpp"
@@ -276,6 +305,20 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
                                              "create_graphics_pso_ms"))
         if nested > build_ms + 0.000003 or build_ms > pso_ms + 0.000003:
             raise AssertionError("nested PSO phase intervals are inconsistent")
+        resource_total = 0.0
+        for kind in ("surface", "depth", "texture", "vertex_texture"):
+            calls = int(row[f"{kind}_calls"])
+            total = float(row[f"{kind}_total_ms"])
+            maximum = float(row[f"{kind}_max_ms"])
+            if total < maximum or (calls == 0) != (maximum == 0):
+                raise AssertionError(f"invalid {kind} nested resource totals")
+            resource_total += total
+        if abs(resource_total + float(row["resource_residual_ms"]) -
+               float(row["resource_resolution_ms"])) > 0.00001:
+            raise AssertionError("nested resource detail/residual do not partition resource stage")
+        if row["surface_calls"] != "2" or row["surface_max_offset"] != "23" or \
+                row["surface_max_slot"] != "7" or row["texture_max_location"] != "31":
+            raise AssertionError("resource maxima did not retain the slowest-call identity")
     if {int(row["pso_lookup"]) for row in rows} != {0, 1, 2}:
         raise AssertionError("uncalled, hit, and miss outcomes were not all retained")
     subprocess.run([str(exe), str(output_dir / f"disabled_{mode}.csv"), "0"], check=True)
