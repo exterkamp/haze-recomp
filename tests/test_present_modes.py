@@ -152,6 +152,15 @@ class PresentWindows(unittest.TestCase):
             for invalid in [pull_good, occurrence_good.replace('qpc=80','qpc=101'),
                 occurrence_good+'[gpu-vertex-pull-mode] enabled=1 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['mode_column']='job_wait'
+            windows['blocks'][0]['flags']=1
+            args.windows.write_text(json.dumps(windows))
+            job_good='[haze-job-wait-mode] enabled=1 qpc=80\n'
+            run(job_good)
+            for invalid in [pull_good,job_good.replace('qpc=80','qpc=101'),
+                job_good.replace('enabled=1','enabled=0'),
+                job_good+'[haze-job-wait-mode] enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError):run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:

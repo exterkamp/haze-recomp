@@ -192,6 +192,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU job mode-summary validation failed.' }
     & $python "$root/tests/test_guest_pacer_patch.py"
     if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
+    & $python "$root/tests/test_job_wait_patch.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Job completion patch guard validation failed.' }
+    & $clang /nologo /EHsc /W0 /O2 "/I$assets/generated/ppu" "/Fe$root/local/test_job_wait.exe" "/Fo$root/local/" "$root/tests/test_job_wait.cpp" "$root/port/haze_job_wait.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native job wait test compilation failed.' }
+    & "$root/local/test_job_wait.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Native job wait scope validation failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }

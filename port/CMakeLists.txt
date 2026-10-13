@@ -76,9 +76,15 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
             "${HAZE_PACER_SOURCE}" "${HAZE_PACER_PATCHED}"
         DEPENDS "${HAZE_PACER_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_guest_pacer.py"
         VERBATIM)
+    set(HAZE_JOB_WAIT_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_job_wait/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_JOB_WAIT_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job_wait.py"
+            "${HAZE_PACER_PATCHED}" "${HAZE_JOB_WAIT_PATCHED}"
+        DEPENDS "${HAZE_PACER_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job_wait.py"
+        VERBATIM)
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PACER_SOURCE}")
-    list(APPEND RECOMP_SOURCES "${HAZE_PACER_PATCHED}")
-    set_property(SOURCE "${HAZE_PACER_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    list(APPEND RECOMP_SOURCES "${HAZE_JOB_WAIT_PATCHED}")
+    set_property(SOURCE "${HAZE_JOB_WAIT_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -245,6 +251,7 @@ add_executable(${PROJECT_NAME}
     haze_input.cpp
     haze_camera.cpp
     haze_guest_pacer.cpp
+    haze_job_wait.cpp
     haze_native_cursor.cpp
     haze_spu_triplet_copy.cpp
     haze_graphics.cpp

@@ -24,9 +24,42 @@ the entire sleep sum into an FPS gain. Prefer a native event after auditing all
 completion producers and publication/wakeup ordering. Generic game delays and
 audio timing are outside this replacement boundary.
 
-This is a proposed experiment, not implemented or enabled. Keep it on the
-experimental branch, track it separately and use focused commits. Required
+The first guarded prototype is now implemented, with performance validation
+pending and the release default unchanged. Keep it on the experimental branch
+and use focused commits. Required
 gates include both camera test orders, the squad conversation, scene transitions,
 shutdown and a long-run check for missed completion or lost work. Unlocked
 gameplay timing and VSync behavior remain required; neither stable 144 FPS nor
 consistent pacing is currently established.
+
+## First prototype
+
+`patch_job_wait.py` audits hashes of the completion loop, conditional delay
+helper and float-duration syscall wrapper. It changes only two boundaries in
+a build-local source copy, composing after the existing guest-pacer patch.
+The completion predicate, queue/work servicing, and original duration
+conversion and conditional call remain intact.
+
+`haze_job_wait_call` establishes an exception-safe thread-local scope only for
+guest thread 1, the audited TOC/call site and an in-range job index. Inside
+that scope, the syscall replacement requires the original sleep LR, syscall
+number 141 and exactly 330 us. Other calls take the original syscall path.
+The native policy performs 32 processor pauses and yields to the scheduler
+every 64 matching delays, then returns success. Every iteration still retries
+the real completion predicate and services pending work. It writes no job
+completion state, clocks or queue contents. This is bounded per-retry polling,
+not an event-based wait and not a deadline guarantee under OS scheduling.
+
+Runtime inspection clarified that the original Windows sub-millisecond
+`sys_timer_usleep` already loops over `SwitchToThread` and QPC until its
+requested deadline. The experiment removes that fixed deadline between
+completion checks; it does not replace a coarse Windows Sleep call.
+
+Internal `HAZE_NATIVE_JOB_WAIT=1` / `HAZE_JOB_WAIT_FILE` select the experiment.
+The default stays off; no user-facing graphics/control setting is added.
+Mode events and cumulative matching-delay/yield counts support comparison.
+Guard tests prove the patch can be reversed to the exact original source,
+composes with the pacer patch and rejects changed/repeated inputs. A native
+fixture checks scoped handling, thread/TOC/call/job/duration rejection, syscall
+result and exception cleanup. The full native regression gate passes after
+fixing the unrelated Windows `near` macro collision in the camera test.
