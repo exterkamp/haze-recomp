@@ -67,6 +67,7 @@ static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
 #endif
 #include "haze_input.h"
 #include "haze_camera.h"
+#include "haze_menu.h"
 #include "haze_graphics.h"
 #include "haze_display.h"
 #include "haze_pump_profile.h"
@@ -582,6 +583,7 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
     ppu_guest_call(opd, a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
+extern "C" int spu_float_native_set_mode(int requested);
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
@@ -615,6 +617,8 @@ int main(int argc, char** argv)
     for (const auto& setting : native_defaults)
         if (!getenv(setting[0])) _putenv_s(setting[0], setting[1]);
 #endif
+    const char* native_float = getenv("SPU_FLOAT_NATIVE");
+    spu_float_native_set_mode(!native_float || *native_float != '0');
     if (!haze_graphics_initialize()) return 2;
 #if defined(_WIN32) && defined(HAZE_REQUIRE_FMA)
     int cpu[4];
@@ -696,6 +700,7 @@ int main(int argc, char** argv)
     g_ps3_guest_caller = harness_guest_caller;
     haze_input_initialize();
     haze_camera_initialize();
+    haze_menu_initialize();
 #if defined(__EMSCRIPTEN__) && defined(HAZE_WASM_WEBGL)
     pthread_attr_t frame_attr;
     pthread_attr_init(&frame_attr);

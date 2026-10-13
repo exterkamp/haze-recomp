@@ -1,5 +1,7 @@
 #include "haze_input.h"
 #include "haze_mouse.h"
+#include "haze_menu.h"
+#include "haze_capture.h"
 #ifdef _WIN32
 #include "haze_prompts.h"
 #define WIN32_LEAN_AND_MEAN
@@ -8,6 +10,7 @@
 #include "cellPad.h"
 #include "cellSail.h"
 #include "haze_startup.h"
+#include "haze_startup_prompt.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -28,6 +31,7 @@ bool controller_enabled=true;
 bool gamepad_initialized=false;
 std::mutex settings_mutex;
 HazeGamepadState controller_state;
+bool controller_sample_focused=false;
 std::atomic<HazeInputFamily> last_family{HazeInputFamily::Keyboard};
 char config_path[MAX_PATH]{};
 ULONGLONG next_input_update=0, next_config_check=0;
@@ -35,9 +39,50 @@ FILETIME config_time{};
 double sensitivity = 0.10;
 bool invert_y;
 HazeStartupSkip startup_skip;
+ULONGLONG startup_epoch=0;
+HazeStartupPrompt startup_prompt;
+std::string skip_hint;
+ULONGLONG next_hint_check=0;
+HazeInputFamily hint_family=HazeInputFamily::Keyboard;
 enum { KEY_HELD=1, KEY_PENDING=2 };
 std::atomic<unsigned> message_keys[256];
 std::atomic<bool> capture_click;
+std::atomic<bool> menu_active{false}, pause_requested{false};
+ULONGLONG pause_request_time=0;
+std::atomic<bool> suppress_mouse_buttons{false};
+HazeCapturePolicy capture_policy;
+std::mutex pointer_mutex;
+HazeMenuPointer menu_pointer;
+HazeMenuPointer menu_delivered;
+float menu_press_x=0,menu_press_y=0;
+bool menu_right_held=false;
+POINT last_pointer{-1,-1};
+void pointer_mode(bool active) {
+    std::lock_guard lock(pointer_mutex);
+    menu_pointer.active=active;
+    if (!active) {
+        menu_pointer.held=menu_pointer.pressed=menu_pointer.released=menu_pointer.back=false;
+        menu_pointer.scroll=0;
+        menu_right_held=false;
+    }
+}
+void pointer_position(HWND hwnd) {
+    POINT point; RECT client;
+    if (!GetCursorPos(&point) || !ScreenToClient(hwnd,&point) ||
+        !GetClientRect(hwnd,&client) || client.right<=0 || client.bottom<=0) return;
+    std::lock_guard lock(pointer_mutex);
+    menu_pointer.x=float(point.x)/client.right;
+    menu_pointer.y=float(point.y)/client.bottom;
+}
+void pointer_event_position(HWND hwnd,LPARAM position) {
+    RECT client;
+    if (!GetClientRect(hwnd,&client) || client.right<=0 || client.bottom<=0) return;
+    std::lock_guard lock(pointer_mutex);
+    // Button coordinates belong to the queued event. GetCursorPos may already
+    // be at the end of a drag when the window thread handles its press.
+    menu_pointer.x=float(static_cast<short>(LOWORD(position)))/client.right;
+    menu_pointer.y=float(static_cast<short>(HIWORD(position)))/client.bottom;
+}
 struct Binding { const char* name; const char* fallback; u16 button; int vk=0; };
 Binding bindings[] = {
     {"Cross", "Space", CELL_PAD_CTRL_CROSS},
@@ -84,11 +129,16 @@ void record_key(int vk, bool held, ULONGLONG) {
         next=held ? previous | KEY_HELD | ((previous & KEY_HELD) ? 0u : KEY_PENDING)
                   : previous & ~unsigned(KEY_HELD);
     } while (!message_keys[vk].compare_exchange_weak(previous,next));
-    if (held && !(previous & KEY_HELD) && enabled) last_family=HazeInputFamily::Keyboard;
+    if (held && !(previous & KEY_HELD) && enabled) {
+        last_family=HazeInputFamily::Keyboard;
+        capture_policy.use_keyboard();
+        if (vk>VK_XBUTTON2) pointer_mode(false);
+    }
 }
 void update_title() {
     SetWindowTextA(window, captured ? "Haze | Mouse captured | Esc: Pause | F1: Release mouse"
-        : enabled ? "Haze | Click/F1: Capture mouse | Esc: Pause" : "Haze | Controller");
+        : enabled ? (menu_active ? "Haze | Mouse menu navigation | Right click: Back" :
+            "Haze | Click/F1: Capture mouse | Esc: Pause") : "Haze | Controller");
 }
 void clip_cursor() {
     RECT rect;
@@ -96,9 +146,9 @@ void clip_cursor() {
     MapWindowPoints(window,nullptr,(POINT*)&rect,2);
     ClipCursor(&rect);
 }
-void capture(bool on) {
+void capture(bool on,bool restore_position=true) {
     if (on == (InterlockedCompareExchange(&captured,0,0) != 0)) return;
-    if (on && GetForegroundWindow() != window) return;
+    if (on && (GetForegroundWindow() != window || menu_active || pause_requested || !enabled)) return;
     InterlockedExchange(&captured,on ? 1 : 0);
     mouse_motion.clear();
     InterlockedExchange(&wheel,0);
@@ -110,7 +160,12 @@ void capture(bool on) {
         ClipCursor(nullptr);
         if (GetCapture() == window) ReleaseCapture();
         while (ShowCursor(TRUE) < 0) {}
-        if (GetForegroundWindow() == window) SetCursorPos(old_cursor.x,old_cursor.y);
+        if (restore_position && GetForegroundWindow() == window) {
+            // Restoring the cursor is not user mouse activity and must not
+            // steal prompt/pointer ownership from a controller-opened menu.
+            last_pointer=old_cursor;
+            SetCursorPos(old_cursor.x,old_cursor.y);
+        }
     }
     update_title();
     fprintf(stderr,"[input] Mouse %s (F1 toggles capture)\n",on ? "captured" : "released");
@@ -122,7 +177,8 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             char caption[512];
             snprintf(caption,sizeof(caption),"%s | %s",(const char*)lp,
                 captured ? "Esc: Pause | F1: Release mouse"
-                         : enabled ? "Click/F1: Capture mouse | Esc: Pause" : "Controller");
+                         : enabled ? (menu_active ? "Mouse menu navigation | Right click: Back" :
+                             "Click/F1: Capture mouse | Esc: Pause") : "Controller");
             return CallWindowProc(original_proc,hwnd,msg,wp,(LPARAM)caption);
         }
         break;
@@ -130,12 +186,27 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SYSKEYDOWN:
         record_key((int)wp,true,GetTickCount64());
         if (!enabled) break;
-        if (wp == VK_F1) { if (!(lp & (1ll<<30))) capture(!captured); return 0; }
-        if (wp == VK_ESCAPE) { capture(false); return 0; } // Pause, rather than SDK's quit.
+        if (wp == VK_F1) {
+            if (!(lp & (1ll<<30)) && !menu_active && !pause_requested) {
+                capture_policy.focused=GetForegroundWindow()==hwnd;
+                capture_policy.menu_state(menu_active);
+                capture_policy.pause_pending=pause_requested;
+                capture_policy.toggle(captured!=0);
+                capture(!captured);
+            }
+            return 0;
+        }
+        if (wp == VK_ESCAPE) {
+            if (!menu_active) { pause_request_time=GetTickCount64(); pause_requested=true; }
+            capture(false); return 0;
+        } // Pause, rather than SDK's quit.
         {
             std::lock_guard<std::mutex> lock(settings_mutex);
             for (const auto& b : bindings)
-                if (b.button==CELL_PAD_CTRL_START && b.vk==(int)wp) capture(false);
+                if (b.button==CELL_PAD_CTRL_START && b.vk==(int)wp) {
+                    if (!menu_active) { pause_request_time=GetTickCount64(); pause_requested=true; }
+                    capture(false);
+                }
         }
         break;
     case WM_KEYUP: case WM_SYSKEYUP:
@@ -143,17 +214,57 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDOWN:
         if (!enabled) break;
         last_family=HazeInputFamily::Keyboard;
+        capture_policy.use_keyboard();
+        if (menu_active) {
+            capture(false,false);
+            SetCapture(hwnd); // Receive the end of a menu drag outside the window.
+            pointer_event_position(hwnd,lp);
+            std::lock_guard lock(pointer_mutex);
+            menu_pointer.active=true;
+            menu_pointer.held=menu_pointer.pressed=true;
+            menu_press_x=menu_pointer.x; menu_press_y=menu_pointer.y;
+            suppress_mouse_buttons=true;
+            return 0;
+        }
+        if (startup_skip.showing()) {
+            record_key(VK_LBUTTON,true,GetTickCount64());
+            return 0;
+        }
         if (!captured && GetForegroundWindow() == hwnd) {
             capture_click=true;
+            capture_policy.manual_release=false;
             capture(true);
             return 0; // The click that captures must not fire the weapon.
         }
         record_key(VK_LBUTTON,true,GetTickCount64());
         break;
     case WM_LBUTTONUP:
+        if (menu_active && enabled) {
+            pointer_event_position(hwnd,lp);
+            {
+                std::lock_guard lock(pointer_mutex);
+                menu_pointer.released=menu_pointer.held;
+                menu_pointer.held=false;
+            }
+            if (!captured && GetCapture()==hwnd) ReleaseCapture();
+            return 0;
+        }
         record_key(VK_LBUTTON,false,GetTickCount64());
         capture_click=false; break;
     case WM_RBUTTONDOWN: case WM_RBUTTONUP:
+        if (menu_active && enabled) {
+            pointer_event_position(hwnd,lp);
+            std::lock_guard lock(pointer_mutex);
+            if (msg==WM_RBUTTONUP) menu_pointer.back=menu_right_held;
+            menu_right_held=msg==WM_RBUTTONDOWN;
+            if (menu_right_held) {
+                menu_pointer.active=true;
+                last_family=HazeInputFamily::Keyboard;
+                capture_policy.use_keyboard();
+            }
+            suppress_mouse_buttons=true;
+            return 0;
+        }
         record_key(VK_RBUTTON,msg==WM_RBUTTONDOWN,GetTickCount64()); break;
     case WM_MBUTTONDOWN: case WM_MBUTTONUP:
         record_key(VK_MBUTTON,msg==WM_MBUTTONDOWN,GetTickCount64()); break;
@@ -161,21 +272,57 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         record_key(HIWORD(wp)==XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2,
                    msg==WM_XBUTTONDOWN,GetTickCount64()); break;
     case WM_KILLFOCUS: case WM_CLOSE: case WM_DESTROY:
-        clear_keys(); capture(false); break;
+        clear_keys(); pointer_mode(false); capture(false);
+        if (GetCapture()==hwnd) ReleaseCapture();
+        suppress_mouse_buttons=true;
+        if (msg!=WM_KILLFOCUS) capture_policy.ready=false;
+        break;
     case WM_CAPTURECHANGED:
-        if (captured && (HWND)lp != hwnd) capture(false);
+        if (captured && (HWND)lp != hwnd) {
+            capture_policy.manual_release=true;
+            capture(false);
+        } else if (!captured && (HWND)lp!=hwnd) {
+            std::lock_guard lock(pointer_mutex);
+            if (menu_pointer.held) {
+                menu_pointer.held=menu_pointer.pressed=menu_pointer.released=false;
+            }
+        }
         break;
     case WM_MOVE: case WM_SIZE:
         if (captured) clip_cursor(); break;
     case WM_SETCURSOR:
         if (captured && LOWORD(lp) == HTCLIENT) { SetCursor(nullptr); return TRUE; }
+        if (enabled && menu_active && LOWORD(lp)==HTCLIENT) {
+            SetCursor(LoadCursor(nullptr,IDC_ARROW)); return TRUE;
+        }
         break;
+    case WM_MOUSEMOVE: {
+        POINT position;
+        if (!GetCursorPos(&position)) break;
+        if (enabled && menu_active && GetForegroundWindow()==hwnd &&
+            (position.x!=last_pointer.x || position.y!=last_pointer.y)) {
+            pointer_event_position(hwnd,lp); pointer_mode(true);
+            last_family=HazeInputFamily::Keyboard;
+            capture_policy.use_keyboard();
+        }
+        last_pointer=position;
+        break;
+    }
     case WM_MOUSEWHEEL:
+        if (enabled && menu_active) {
+            pointer_position(hwnd);
+            std::lock_guard lock(pointer_mutex);
+            menu_pointer.active=true;
+            menu_pointer.scroll+=GET_WHEEL_DELTA_WPARAM(wp);
+            last_family=HazeInputFamily::Keyboard;
+            capture_policy.use_keyboard();
+            return 0;
+        }
         if (captured) { InterlockedExchange(&wheel,1); last_family=HazeInputFamily::Keyboard; }
         break;
     case WM_INPUT: {
         RAWINPUT input{}; UINT size = sizeof(input);
-        if (captured && GetRawInputData((HRAWINPUT)lp,RID_INPUT,&input,&size,sizeof(RAWINPUTHEADER)) == sizeof(input)
+        if (captured && !menu_active && !pause_requested && GetRawInputData((HRAWINPUT)lp,RID_INPUT,&input,&size,sizeof(RAWINPUTHEADER)) == sizeof(input)
             && input.header.dwType == RIM_TYPEMOUSE && !(input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)) {
             mouse_motion.add(input.data.mouse.lLastX,input.data.mouse.lLastY);
             if (input.data.mouse.lLastX || input.data.mouse.lLastY) last_family=HazeInputFamily::Keyboard;
@@ -190,32 +337,44 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     if (port) return 0;
     std::lock_guard<std::mutex> lock(settings_mutex);
     ULONGLONG now = GetTickCount64();
-    bool skip_pressed;
-    startup_skip.sample(now,skip_pressed);
-    if (skip_pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
     HWND foreground=GetForegroundWindow();
+    const bool focused=foreground && foreground==window.load();
+    auto finish=[&] {
+        // A stale neutral controller snapshot from focus loss must not release
+        // the transition gate before the window thread samples the held pad.
+        const bool ready=focused && (!gamepad_initialized || controller_sample_focused);
+        input->buttons=startup_skip.filter(now,input->buttons,ready,CELL_PAD_CTRL_CROSS);
+        return 1;
+    };
     if (!foreground || foreground != window.load()) {
+        controller_sample_focused=false;
         mouse_motion.clear();
         InterlockedExchange(&wheel,0);
         clear_keys();
-        return 1; // All controls neutral immediately on focus loss.
+        return finish(); // Only lifecycle-owned automatic skipping may run unfocused.
     }
     if (controller_enabled && controller_state.connected) {
-        const u16 startup_buttons=input->buttons;
         *input=controller_state.input;
-        input->buttons|=startup_buttons;
     }
-    if (!enabled) return 1;
+    if (!enabled) return finish();
+    if (suppress_mouse_buttons) {
+        bool held=false;
+        for (int vk : {VK_LBUTTON,VK_RBUTTON,VK_MBUTTON,VK_XBUTTON1,VK_XBUTTON2})
+            held|=(GetAsyncKeyState(vk)&0x8000)!=0;
+        if (!held) suppress_mouse_buttons=false;
+    }
     // A rebound key may drive several buttons or movement. Consume its pending
     // tap once, then share the same snapshot across all bindings in this report.
     bool sampled[256]={}, states[256]={};
+    const bool movie=startup_skip.showing();
     auto key_down=[&](int vk) {
         if (vk <= 0 || vk >= 256) return false;
         if (!sampled[vk]) { states[vk]=down(vk); sampled[vk]=true; }
         return states[vk];
     };
     for (const auto& b : bindings) {
-        if (b.vk >= VK_LBUTTON && b.vk <= VK_XBUTTON2 && !captured) continue;
+        if (b.vk >= VK_LBUTTON && b.vk <= VK_XBUTTON2 &&
+            ((!captured && !movie) || menu_active || pause_requested || (suppress_mouse_buttons && !movie))) continue;
         if (b.vk == VK_LBUTTON && capture_click) continue;
         if (key_down(b.vk)) input->buttons |= b.button;
     }
@@ -230,11 +389,22 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     }
     if ((input->buttons & CELL_PAD_CTRL_L2) && !input->l2) input->l2=255;
     if ((input->buttons & CELL_PAD_CTRL_R2) && !input->r2) input->r2=255;
-    return 1;
+    return finish();
 }
 void playback(u32 player, const char* uri, int started, void*) {
-    if (startup_skip.playback(player,uri,started!=0,GetTickCount64()))
-        fprintf(stderr,"[startup] Skipping undecoded startup video: %s\n",uri);
+    const auto now=GetTickCount64();
+    startup_skip.playback(player,uri,started!=0,now);
+    if (HazeStartupSkip::known_video(uri))
+        fprintf(stderr,"[startup] %s %s at +%llu ms: %s\n",
+                HazeStartupSkip::opening_logo(uri) ? "logo" : "attract",
+                started ? "start" : "stop",(unsigned long long)(now-startup_epoch),uri);
+}
+bool startup_setting(const char* name) {
+    char value[32];
+    GetPrivateProfileStringA("Startup",name,"1",value,sizeof(value),config_path);
+    if (!strcmp(value,"0")) return false;
+    if (strcmp(value,"1")) fprintf(stderr,"[startup] Invalid %s=%s; using 1\n",name,value);
+    return true;
 }
 void load_keyboard_config() {
     const char* path=config_path;
@@ -258,12 +428,18 @@ void load_keyboard_config() {
     if (end!=value && !*end && std::isfinite(requested) && requested > 0 && requested <= 10) sensitivity=requested;
     else fprintf(stderr,"[input] Invalid Mouse.Sensitivity=%s; using 0.10\n",value);
     invert_y=GetPrivateProfileIntA("Mouse","InvertY",0,path)!=0;
+    const bool logos=startup_setting("AutoSkipLogos"), demo=startup_setting("AutoSkipAttract");
+    startup_skip.configure(logos,demo);
+    fprintf(stderr,"[startup] Automatic logos=%s, idle demo=%s; movies are not decoded. Confirm skips manually.\n",
+            logos ? "on" : "off",demo ? "on" : "off");
     clear_keys(); mouse_motion.clear();
 }
 }
 void haze_input_initialize() {
+    startup_epoch=GetTickCount64();
     const char* mode=getenv("HAZE_INPUT");
     enabled=!(mode && !_stricmp(mode,"controller"));
+    capture_policy.enabled=enabled;
     controller_enabled=!(mode && !_stricmp(mode,"keyboard"));
     cellSail_set_host_playback_callback(playback,nullptr);
     cellPad_set_host_input_callback(poll,nullptr);
@@ -293,18 +469,27 @@ void haze_input_attach(void* hwnd) {
     }
     original_proc=(WNDPROC)SetWindowLongPtr(window,GWLP_WNDPROC,(LONG_PTR)window_proc);
     if (!original_proc) fprintf(stderr,"[input] Window input hook failed: %lu\n",GetLastError());
+    capture_policy.ready=original_proc!=nullptr;
+    capture_policy.focused=GetForegroundWindow()==window.load();
+    capture_policy.menu_state(menu_active);
+    capture(capture_policy.wants_capture());
     update_title();
 }
 bool haze_input_take_mouse(double& x, double& y, double& speed, bool& invert) {
     std::lock_guard<std::mutex> lock(settings_mutex);
     mouse_motion.take(x,y);
     speed=sensitivity; invert=invert_y;
-    return enabled && captured && GetForegroundWindow()==window.load();
+    return enabled && captured && !menu_active && !pause_requested && GetForegroundWindow()==window.load();
 }
 void haze_input_update() {
     const auto now=GetTickCount64();
     if (now<next_input_update) return;
     next_input_update=now+8;
+    // A pause key during loading may be ignored by the guest. Give the menu
+    // time to open, but do not leave capture disabled forever if it does not.
+    // Live menu ownership still gates both capture and camera independently.
+    if (pause_requested && !menu_active && now-pause_request_time>=1000)
+        pause_requested=false;
     if (now>=next_config_check) {
         next_config_check=now+500;
         WIN32_FILE_ATTRIBUTE_DATA attributes{};
@@ -322,15 +507,92 @@ void haze_input_update() {
         const bool focused=GetForegroundWindow()==window.load();
         if (focused && state.connected && (!enabled || last_family!=HazeInputFamily::Keyboard))
             last_family=state.family;
-        if (focused && state.activity) { last_family=state.family; capture(false); }
+        if (focused && state.activity) {
+            last_family=state.family; capture_policy.use_controller();
+            pointer_mode(false); capture(false);
+        }
         std::lock_guard<std::mutex> lock(settings_mutex);
-        controller_state=focused ? state : HazeGamepadState{};
+        controller_state=state;
+        controller_sample_focused=focused;
     }
+    capture_policy.focused=GetForegroundWindow()==window.load();
+    capture_policy.menu_state(menu_active);
+    capture_policy.pause_pending=pause_requested;
+    capture(capture_policy.wants_capture());
     haze_prompts_update(last_family.load());
+    if (startup_skip.showing()) {
+        const auto family=last_family.load();
+        if (now>=next_hint_check || family!=hint_family) {
+            hint_family=family; next_hint_check=now+500;
+            char value[128];
+            const bool kb=family==HazeInputFamily::Keyboard;
+            GetPrivateProfileStringA(kb ? "Bindings" : "ControllerBindings","Cross",
+                                     kb ? "Space" : "south",value,sizeof(value),config_path);
+            const char* label=value;
+            if (!kb) {
+                const char* positions[]={"south","east","west","north","start","back"};
+                const char* xbox[]={"A","B","X","Y","Menu","View"};
+                const char* ps[]={"Cross","Circle","Square","Triangle","Start / Options","Select / Share"};
+                const char* sw[]={"B","A","Y","X","+","-"};
+                for (int i=0;i<6;i++) if (!_stricmp(value,positions[i]))
+                    label=family==HazeInputFamily::Xbox ? xbox[i] : family==HazeInputFamily::Switch ? sw[i] : ps[i];
+            }
+            skip_hint=!_stricmp(value,"none") ? "Skip is unbound. Enable automatic logo skipping in input.ini."
+                : std::string("Press ")+label+" to skip (movie playback unavailable)";
+        }
+    }
+    startup_prompt.update(window.load(),startup_skip.showing(),skip_hint);
+}
+void haze_input_menu_state(bool active) {
+    if (active) pause_requested=false;
+    if (menu_active.exchange(active)==active) return;
+    mouse_motion.clear();
+    InterlockedExchange(&wheel,0);
+    suppress_mouse_buttons=true;
+    capture_click=false;
+    for (int vk : {VK_LBUTTON,VK_RBUTTON,VK_MBUTTON,VK_XBUTTON1,VK_XBUTTON2})
+        message_keys[vk]=0;
+    std::lock_guard lock(pointer_mutex);
+    menu_pointer.held=menu_pointer.pressed=menu_pointer.released=menu_pointer.back=false;
+    menu_right_held=false;
+    menu_pointer.scroll=0;
+}
+HazeMenuPointer haze_input_take_pointer() {
+    std::lock_guard lock(pointer_mutex);
+    auto result=menu_pointer;
+    result.active=(result.active || menu_pointer.scroll!=0) && enabled && menu_active &&
+        GetForegroundWindow()==window.load();
+    if (menu_pointer.pressed) {
+        // A slow guest frame may see a whole click or drag at once. Deliver
+        // the original press first so sliders retain the correct drag origin,
+        // then the current position/release on the following GUI update.
+        result.x=menu_press_x; result.y=menu_press_y;
+        result.held=true; result.released=result.back=false; result.scroll=0;
+        menu_pointer.pressed=false;
+        menu_delivered=result;
+        return result;
+    }
+    if (result.released && menu_delivered.held &&
+        (result.x!=menu_delivered.x || result.y!=menu_delivered.y)) {
+        // Native sliders commit the delta from their last held update on
+        // release. Preserve a final drag sample even if move/up arrived together.
+        result.held=true; result.released=result.back=false; result.scroll=0;
+        menu_delivered=result;
+        return result;
+    }
+    result.scroll=menu_pointer.scroll>=WHEEL_DELTA ? 1 : menu_pointer.scroll<=-WHEEL_DELTA ? -1 : 0;
+    menu_pointer.scroll-=result.scroll*WHEEL_DELTA;
+    if (result.scroll) menu_pointer.active=false; // Keep wheel selection until the pointer moves.
+    menu_pointer.pressed=menu_pointer.released=menu_pointer.back=false;
+    menu_delivered=result;
+    return result;
 }
 HazeInputFamily haze_input_family() { return last_family.load(); }
 void haze_input_shutdown() {
+    startup_prompt.close();
+    capture_policy.ready=false;
     capture(false);
+    if (GetCapture()==window.load()) ReleaseCapture();
     haze_gamepad_shutdown(); gamepad_initialized=false;
 }
 #elif defined(__EMSCRIPTEN__)
@@ -351,8 +613,7 @@ int browser_poll(u32 port, CellPadHostInput* input, void*) {
     const uint32_t axes = browser_axes.load();
     *input = {(u16)buttons, (u8)axes, (u8)(axes >> 8), (u8)(axes >> 16), (u8)(axes >> 24),
               (u8)((buttons & CELL_PAD_CTRL_L2) ? 255 : 0), (u8)((buttons & CELL_PAD_CTRL_R2) ? 255 : 0)};
-    bool pressed;
-    if (browser_startup.sample(GetTickCount64(), pressed) && pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
+    input->buttons=browser_startup.filter(GetTickCount64(),input->buttons,true,CELL_PAD_CTRL_CROSS);
     return 1;
 }
 void browser_playback(u32 player, const char* uri, int started, void*) {
@@ -384,6 +645,8 @@ bool haze_input_take_mouse(double&,double&,double&,bool&) { return false; }
 #endif
 
 #ifndef _WIN32
+void haze_input_menu_state(bool) {}
+HazeMenuPointer haze_input_take_pointer() { return {}; }
 void haze_input_update() {}
 void haze_input_shutdown() {}
 HazeInputFamily haze_input_family() { return HazeInputFamily::Keyboard; }

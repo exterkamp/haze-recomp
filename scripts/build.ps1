@@ -68,8 +68,6 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Deferred profile buffer compilation failed.' }
     & "$root/local/test_rsx_profile_buffer.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Deferred profile buffer regression failed.' }
-    & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
-    if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
     & $clang /nologo /W0 /O2 /std:c11 /Gy /Gw "/I$sdk/include" "/I$sdk/libs/video" "/Fe$root/local/test_rsx_vp_burst.exe" "/Fo$root/local/" "$sdk/libs/video/tests/test_rsx_vp_burst.c" "$sdk/libs/video/rsx_vp_burst.c" "$sdk/libs/video/rsx_dispatch.c" "$sdk/libs/video/rsx_commands.c" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer kernel compilation failed.' }
     & "$root/local/test_rsx_vp_burst.exe"
@@ -85,6 +83,13 @@ if ($Test) {
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"
     if ($LASTEXITCODE -ne 0) { throw 'Diagnostic controller detach regression failed.' }
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
+    & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
+    if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
+    $audioRingTest = Join-Path $root 'local/test_audio_ring.exe'
+    & $clang /nologo /W0 /O2 /std:c11 /Gy /Gw "/I$sdk/include" "/Fe$audioRingTest" "/Fo$root/local/test_audio_ring.obj" "$sdk/libs/audio/tests/test_audio_ring.c" /link /OPT:REF ole32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Audio ring/routing test compilation failed.' }
+    & $audioRingTest
+    if ($LASTEXITCODE -ne 0) { throw 'Audio ring/routing regression failed.' }
     & $python "$root/tests/test_wait_timeline.py"
     if ($LASTEXITCODE -ne 0) { throw 'Wait timeline syscall naming and interval-union tests failed.' }
     & $python "$root/tests/test_camera_sweep.py"
@@ -296,15 +301,24 @@ if ($Test) {
     & $padTest
     if ($LASTEXITCODE -ne 0) { throw 'Host pad input packet test failed.' }
     $hazeInputTest = Join-Path $root 'local/test_haze_input.exe'
-    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/Fe$hazeInputTest" "/Fo$root/local/test_haze_input.obj" "$root/tests/test_haze_input.cpp" /link user32.lib gdi32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse test compilation failed.' }
     & $hazeInputTest
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse mapping test failed.' }
     $hazeCameraTest = Join-Path $root 'local/test_haze_camera.exe'
-    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/I$sdk/libs/input" "/Fe$hazeCameraTest" "/Fo$root/local/test_haze_camera.obj" "$root/tests/test_haze_camera.cpp"
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/Fe$hazeCameraTest" "/Fo$root/local/test_haze_camera.obj" "$root/tests/test_haze_camera.cpp" /link user32.lib gdi32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Native camera test compilation failed.' }
     & $hazeCameraTest
     if ($LASTEXITCODE -ne 0) { throw 'Native camera gating/rotation test failed.' }
+    $hazeMenuTest = Join-Path $root 'local/test_haze_menu.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/Fe$hazeMenuTest" "/Fo$root/local/test_haze_menu.obj" "$root/tests/test_haze_menu.cpp" /link user32.lib gdi32.lib
+    if ($LASTEXITCODE -ne 0) { throw 'Native menu test compilation failed.' }
+    & $hazeMenuTest
+    if ($LASTEXITCODE -ne 0) { throw 'Native menu input regression failed.' }
+    if (-not $RuntimeOnly) {
+        & $python "$root/tests/test_menu_input_patch.py" "$assets/generated/ppu/ppu_recomp_001.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Native menu patch guard regression failed.' }
+    }
     & $python "$sdk/tools/test_spu_text_selection.py"
     if ($LASTEXITCODE -ne 0) { throw 'SPU segment-selection regression tests failed.' }
     & $python "$sdk/tools/test_spu_trace_registers.py"
