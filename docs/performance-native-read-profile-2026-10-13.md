@@ -190,3 +190,45 @@ A follow-up candidate is a precise volatile unaligned RAM load, which may
 preserve polling freshness without the full compiler clobber of unrelated
 host context state. It requires assembly and concurrency checks before
 building or timing; it is not implemented or promoted by these results.
+
+## Precise volatile-read follow-up: first enabled run
+
+The follow-up is now implemented in SDK `a30839e`, integrated by Haze
+`588e487`. Volatile packed scalar loads preserve repeated polling without
+the broad compiler memory clobber. Assembly checks confirm that ordinary
+reads can retain unrelated host context values in registers, while fallback
+calls still observe context mutations. All four read widths pass cross-thread
+publication checks. The expanded 70 fixture cases and existing 41 accessor
+cases pass; the two-job experimental game build also succeeds. The unrelated
+full regression suite was not rerun for this revision.
+
+Candidate: `local/candidates/precise-native-reads/HazeRecomp.exe`, SHA-256
+`248C41384DC230B8B8B330C604C8B5DD0F233A00079ABF2185BA39248249AFB9`.
+It remains excluded from ordinary builds.
+
+Run `jungle-precise-on-b1` used the same copied-save/settings/camera protocol.
+Automated setup initially remained at the title screen; manual private-pad
+navigation then reached the visually confirmed jungle and completed the
+Nectar setup before any timing. No menu/setup frames enter these windows.
+The two 60-second windows retained all 9,785 frame intervals:
+
+| FPS | Mean ms | p95 ms | p99 ms | Max ms | >33.333 / >50 ms |
+|---:|---:|---:|---:|---:|---:|
+| 81.560 | 12.261 | 15.310 | 17.586 | 73.839 | 2 / 1 |
+
+Individual windows averaged 81.435 and 81.685 FPS. Camera, actual-mode and
+process checks passed. The 26 bracketing resource observations recorded no
+other Haze or compiler, 51.35-51.77% memory use, and maximum spacing 5.360s.
+Sparse observations cannot exclude activity between samples. The owned muted
+instance exited normally with code 0; there was no own build, CPU sampling or
+capture during timing.
+
+Mean render-pump phases were wait 6.466 ms, FIFO 3.831 ms, and present 1.881 ms.
+These phase labels are not exclusive CPU-cost attribution or proof that
+waiting is avoidable. Process CPU averaged 3.86 and 4.00 cores across the two
+windows.
+
+This is a first enabled measurement, not an accepted performance gain.
+A same-binary disabled control and repeat comparisons remain outstanding.
+The earlier control's 83.458 FPS and prior binary's 94.045 FPS are retained
+above for context, not treated as matched causal comparisons with this run.
