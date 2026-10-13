@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <atomic>
+#include <array>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -26,33 +28,62 @@ void write_float(uint32_t address,float value) {
 // avoid accumulating yaw drift when the two variants have different pad poll
 // and simulation rates. This is used only at the already audited local-player
 // mouse boundary; normal launches never read a control file or sample QPC here.
+/* BEGIN CAMERA BENCHMARK */
 struct CameraBenchmark {
+    struct Sample {
+        LONGLONG qpc, frequency;
+        unsigned token, motor;
+        double phase, wanted_yaw, actual_yaw, wanted_pitch, actual_pitch;
+    };
+    static constexpr size_t capacity=65536;
     const char* path=std::getenv("HAZE_BENCHMARK_CAMERA_FILE");
-    FILE* csv=nullptr;
-    LONGLONG frequency=0, next_poll=0, origin=0, sample_qpc=0;
-    unsigned token=0, owner=0, samples=0;
+    HANDLE stop_event=nullptr, reader=nullptr;
+    std::atomic<unsigned> requested_token{0};
+    SRWLOCK sample_lock=SRWLOCK_INIT;
+    std::array<Sample,capacity> samples;
+    size_t next=0, retained=0;
+    unsigned long long recorded=0;
+    bool dumped=false;
+    LONGLONG frequency=0, origin=0, sample_qpc=0;
+    unsigned token=0, owner=0;
     double anchor_yaw=0, anchor_pitch=0, wanted_yaw=0, wanted_pitch=0;
     bool failed=false;
+    static DWORD WINAPI read_control(void* opaque) {
+        auto* self=static_cast<CameraBenchmark*>(opaque);
+        do {
+            if (FILE* file=std::fopen(self->path,"r")) {
+                unsigned value;
+                if (std::fscanf(file,"%u",&value)==1 && value<=1000000)
+                    self->requested_token.store(value,std::memory_order_release);
+                std::fclose(file);
+            }
+        } while (WaitForSingleObject(self->stop_event,100)==WAIT_TIMEOUT);
+        return 0;
+    }
+    void stop_reader() {
+        if (stop_event) SetEvent(stop_event);
+        if (reader) {
+            WaitForSingleObject(reader,INFINITE);
+            CloseHandle(reader); reader=nullptr;
+        }
+        if (stop_event) { CloseHandle(stop_event); stop_event=nullptr; }
+    }
+    ~CameraBenchmark() { stop_reader(); }
     bool apply(uint32_t motor) {
         if (!path || !*path || failed) return false;
         LARGE_INTEGER clock;
-        if (!frequency) { QueryPerformanceFrequency(&clock); frequency=clock.QuadPart; }
+        if (!frequency) {
+            if (!QueryPerformanceFrequency(&clock) || clock.QuadPart<=0) { failed=true; return false; }
+            frequency=clock.QuadPart;
+            stop_event=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+            if (stop_event) reader=CreateThread(nullptr,0,read_control,this,0,nullptr);
+            if (!reader) { failed=true; return false; }
+        }
         QueryPerformanceCounter(&clock); sample_qpc=clock.QuadPart;
-        if (sample_qpc>=next_poll) {
-            next_poll=sample_qpc+frequency/10;
-            unsigned requested=token;
-            if (FILE* file=std::fopen(path,"r")) {
-                unsigned value;
-                if (std::fscanf(file,"%u",&value)==1 && value<=1000000) requested=value;
-                std::fclose(file);
-            }
-            if (requested!=token) {
-                // The game shutdown can bypass CRT stream cleanup. Preserve
-                // the final partial batch when the recorder disables input.
-                if (csv) std::fflush(csv);
-                token=requested; origin=sample_qpc;
-                std::fprintf(stderr,"[benchmark-camera-mode] token=%u qpc=%lld period_s=4 amplitude_deg=30\n",token,sample_qpc);
-            }
+        const unsigned requested=requested_token.load(std::memory_order_acquire);
+        if (requested!=token) {
+            token=requested; origin=sample_qpc;
+            std::fprintf(stderr,"[benchmark-camera-mode] token=%u qpc=%lld period_s=4 amplitude_deg=30\n",token,sample_qpc);
         }
         if (!token) return false;
         const double yaw=read_float(motor+0xb0), base=read_float(motor+0xb4);
@@ -67,10 +98,6 @@ struct CameraBenchmark {
         }
         if (!owner) {
             owner=motor; anchor_yaw=yaw+base; anchor_pitch=pitch;
-            char output[4096];
-            const int n=std::snprintf(output,sizeof output,"%s.csv",path);
-            if (n>0 && n<sizeof output) csv=std::fopen(output,"wb");
-            if (csv) std::fprintf(csv,"qpc,qpc_frequency,token,motor,phase_s,wanted_yaw,actual_yaw,wanted_pitch,actual_pitch\n");
             std::fprintf(stderr,"[benchmark-camera-anchor] motor=%08X yaw=%.9f pitch=%.9f qpc=%lld\n",owner,anchor_yaw,anchor_pitch,sample_qpc);
         }
         constexpr double pi=3.14159265358979323846;
@@ -84,14 +111,49 @@ struct CameraBenchmark {
         return true;
     }
     void audit(uint32_t motor) {
-        if (!csv) return;
-        std::fprintf(csv,"%lld,%lld,%u,%u,%.9f,%.9f,%.9f,%.9f,%.9f\n",
+        const Sample sample={
             sample_qpc,frequency,token,motor,double(sample_qpc-origin)/frequency,
             wanted_yaw,double(read_float(motor+0xb0))+read_float(motor+0xb4),
-            wanted_pitch,double(read_float(motor+0xac)));
-        if ((++samples&63u)==0) std::fflush(csv);
+            wanted_pitch,double(read_float(motor+0xac))};
+        AcquireSRWLockExclusive(&sample_lock);
+        if (!dumped) {
+            samples[next]=sample;
+            next=(next+1)%capacity;
+            if (retained<capacity) ++retained;
+            ++recorded;
+        }
+        ReleaseSRWLockExclusive(&sample_lock);
+    }
+    void dump() {
+        if (!path || !*path) return;
+        // Only normal shutdown calls this. The producer never performs audit
+        // I/O, waits for the file reader, or takes this lock during file I/O.
+        stop_reader();
+        AcquireSRWLockExclusive(&sample_lock);
+        if (dumped) { ReleaseSRWLockExclusive(&sample_lock); return; }
+        dumped=true;
+        const size_t count=retained, first=retained<capacity ? 0 : next;
+        const auto total=recorded;
+        ReleaseSRWLockExclusive(&sample_lock);
+        char output[4096];
+        const int n=std::snprintf(output,sizeof output,"%s.csv",path);
+        FILE* csv=n>0 && static_cast<size_t>(n)<sizeof output ? std::fopen(output,"wb") : nullptr;
+        if (!csv) { std::fprintf(stderr,"[benchmark-camera-dump-error] cannot open audit CSV\n"); return; }
+        bool error=std::fprintf(csv,"qpc,qpc_frequency,token,motor,phase_s,wanted_yaw,actual_yaw,wanted_pitch,actual_pitch\n")<0;
+        for (size_t i=0;i<count;++i) {
+            const auto& s=samples[(first+i)%capacity];
+            if (std::fprintf(csv,"%lld,%lld,%u,%u,%.9f,%.9f,%.9f,%.9f,%.9f\n",
+                s.qpc,s.frequency,s.token,s.motor,s.phase,s.wanted_yaw,s.actual_yaw,s.wanted_pitch,s.actual_pitch)<0)
+                error=true;
+        }
+        if (std::ferror(csv)) error=true;
+        if (std::fclose(csv)!=0) error=true;
+        std::fprintf(stderr,"[benchmark-camera-dump%s] recorded=%llu retained=%zu overwritten=%llu\n",
+            error ? "-error" : "",total,count,total-count);
     }
 };
+CameraBenchmark& camera_benchmark() { static CameraBenchmark value; return value; }
+/* END CAMERA BENCHMARK */
 #endif
 void update_look(ppu_context* ctx) {
     static const bool trace=std::getenv("HAZE_MOUSE_TRACE")!=nullptr;
@@ -104,7 +166,7 @@ void update_look(ppu_context* ctx) {
     // AI and remote characters use this motor too.
     const uint32_t controls=actor ? vm_read32(actor+0x1a0) : 0;
 #ifdef _WIN32
-    static CameraBenchmark benchmark;
+    auto& benchmark=camera_benchmark();
     bool benchmark_applied=false;
 #endif
     if (controls && vm_read32(controls)==0x00dd9f78) {
@@ -140,6 +202,11 @@ void update_look(ppu_context* ctx) {
             mouse_x,mouse_y,before_yaw,read_float(motor+0xb0)+read_float(motor+0xb4),
             before_pitch,read_float(motor+0xac));
 }
+}
+void haze_camera_dump_benchmark() {
+#ifdef _WIN32
+    camera_benchmark().dump();
+#endif
 }
 void haze_camera_initialize() {
     // BLUS30094 01.00: virtual character-look update, BEFORE camera/aim matrices

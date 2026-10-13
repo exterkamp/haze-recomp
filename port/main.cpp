@@ -397,6 +397,7 @@ static DWORD WINAPI frame_clock(LPVOID)
 
             if (pump_messages() != 0) {
                 haze_input_shutdown();
+                haze_camera_dump_benchmark();
 #ifdef _WIN32
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
                 spu_float_native_summary();

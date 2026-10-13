@@ -348,3 +348,87 @@ The analyzer uses QPC intersections, reports clipped events, and keeps raw
 thread cycles separate from wall time. Its full-ring worst frames and worst
 frames wholly inside the selected windows are separate outputs. No WIP or
 native job-delay default is changed by this diagnostic work.
+
+## Camera benchmark I/O contamination
+
+The next 90-second diagnostic run, `20261013-164110-374` (PID 57976,
+producer TID 26544), used the same ordinary `6FD67D...` binary, original
+job delay and acknowledged PAD_FILE detach. FIFO/flush rings were off.
+Sampling triggered only after 40 ms without observed present-counter
+progress. It recorded 12 samples across six episodes, with no overwrite,
+20.083 ms total measured suspension and 2.442 ms maximum suspension per
+sample. The polling gap reached 57.056 ms. There were no observed compilers;
+memory use ranged from 44.13 to 45.13%. This is stack attribution, not an FPS
+benchmark or a continuous execution trace.
+
+| Pump frame | Total ms | Outer wait ms | Samples | Suspension ms | Sampled producer location |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 41360 | 533.600 | 521.029 | 3 | 5.667 | `ZwCreateFile` through `fopen`, `update_look+0x477` |
+| 41254 | 155.750 | 147.130 | 3 | 4.753 | Same camera-control file-open chain |
+| 40171 | 95.087 | 88.370 | 3 | 5.664 | `ZwWriteFile` through `fprintf`, `update_look+0xA0F` |
+
+Source inspection identifies the file-open path as the benchmark's 100-ms
+control-file poll and the write path as its per-sample camera audit CSV.
+Both run synchronously on the game producer thread. The samples do not
+attribute every millisecond of these intervals, but they directly establish
+that benchmark I/O can stall the producer. Earlier camera-sweep tail numbers
+therefore mix game behavior with measurement-induced stalls; they are not a
+clean baseline for normal interactive gameplay. Other sampled stalls remain:
+a 54.414-ms frame sampled `func_006B2DF0`, and two approximately 52-ms frames
+sampled host wait/delay paths. Do not attribute all hitches to this one cause.
+
+The correction moves control-file polling to a dedicated background reader
+that publishes the requested token atomically. The producer still observes
+the actual token and supplies the same absolute camera trajectory. Audit
+samples go into a 65,536-entry RAM ring and are written only at normal game
+shutdown. The CSV schema and actual-angle validation remain unchanged;
+shutdown reports retained/overwritten counts. Normal interactive launches
+have no reader thread or audit work. Diagnostic command/anchor messages are
+still emitted on state changes, which precede timing-window warmup.
+
+The unrelated slow-syscall probe drafted during this investigation is saved
+privately and deferred from this experiment. The SDK remains at `e471243`;
+the next candidate changes the camera benchmark only.
+
+The two-job ordinary camera-only build passes, SHA256
+`D964EB18188771720140DF6F4A0C9D109D6EA15BAD71BEB023416C164C131B99`.
+Four extracted production-class fixture cases pass: disabled mode, producer
+progress while the reader's file open is blocked, token/angle semantics and
+one-shot dump, bounded chronological wrap, and dump excluding an audit paused
+before publication. The existing actual-angle validator test also passes.
+The fixture is wired into `build.ps1 -Test`; the full suite was not rerun.
+
+Run `20261013-165133-669` (PID 64564) repeats two 60-second camera sweeps,
+with original job delay and FIFO/flush diagnostics configured exactly as in
+the earlier phase capture (5-ms slow-flush threshold). Shutdown writes 10,895
+camera samples with no overwrite, and both actual-angle/mode validations
+pass. The strict process-isolation check correctly fails: another Haze
+instance, PID 64812 from `.worktrees/menu-acceptance`, overlaps the capture.
+The separate diagnostic report retains all frames and explicitly records
+this failed isolation check; it is not release or isolated-speedup evidence.
+No compiler is observed, memory use 44.80–46.03%.
+
+There are 9,990 timed frames: 12.010 ms mean / 83.27 FPS, p95 15.273 ms,
+p99 20.117 ms, max 438.021 ms, with 39 frames over 33.333 ms and 28 over
+50 ms. The largest pump intervals have a different dominant phase:
+
+| Pump frame | Total ms | Outer wait ms | FIFO ms | Present ms |
+| --- | ---: | ---: | ---: | ---: |
+| 35630 | 438.023 | 4.633 | 4.614 | 428.771 |
+| 44772 | 397.232 | 9.388 | 5.065 | 382.705 |
+| 36032 | 214.344 | 7.514 | 3.286 | 203.529 |
+
+The flush ring retains eight events without overwrite or errors (maximum
+17.722 ms), none overlapping these three frames. This does not identify the
+specific operation inside presentation. Possible paths still requiring
+measurement include the DXGI present call and the diagnostic screenshot
+trigger's per-frame `GetFileAttributesA`. Do not assign the stalls to GPU
+fences, the other Haze instance, or the camera reader without evidence.
+The next diagnostic should sample the render/window thread during a long
+presentation, while preserving the corrected producer-side camera path.
+
+This is a verified removal of synchronous benchmark file I/O from the producer,
+not a demonstrated interactive gameplay speedup or proof of consistent pacing.
+The ordinary WIP launcher already omits the camera-benchmark environment.
+Queue-wake performance and long-run gameplay acceptance still need new
+comparisons using the corrected benchmark.

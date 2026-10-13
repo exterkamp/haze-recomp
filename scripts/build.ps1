@@ -89,6 +89,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Wait timeline syscall naming and interval-union tests failed.' }
     & $python "$root/tests/test_camera_sweep.py"
     if ($LASTEXITCODE -ne 0) { throw 'Camera benchmark trajectory evidence tests failed.' }
+    & $python "$root/tests/test_camera_benchmark_io.py" --compiler $clang --output-dir "$root/build/camera-benchmark-io"
+    if ($LASTEXITCODE -ne 0) { throw 'Camera benchmark asynchronous control and deferred audit tests failed.' }
     $graphicsTest = Join-Path $root 'local/test_haze_graphics.exe'
     & $clang /nologo /W0 /O1 /std:c++20 "/I$sdk/libs/video" "/Fe$graphicsTest" "/Fo$root/local/test_haze_graphics.obj" "$root/tests/test_haze_graphics.cpp" /link user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Graphics configuration test compilation failed.' }
