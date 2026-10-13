@@ -66,6 +66,22 @@ endif()
 list(LENGTH RECOMP_SOURCES RECOMP_SOURCE_COUNT)
 message(STATUS "Lifted sources:  ${RECOMP_SOURCE_COUNT} file(s)")
 
+# Restore the audited local jump table in a build-local copy of the old lift.
+# Fresh lifter output is deliberately rejected until its changed body is audited.
+set(HAZE_DISPATCH_SOURCE "${RECOMP_DIR}/ppu_recomp_000.cpp")
+if(EXISTS "${HAZE_DISPATCH_SOURCE}")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_DISPATCH_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_local_dispatch/ppu_recomp_000.cpp")
+    add_custom_command(OUTPUT "${HAZE_DISPATCH_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_local_dispatch.py"
+            "${HAZE_DISPATCH_SOURCE}" "${HAZE_DISPATCH_PATCHED}"
+        DEPENDS "${HAZE_DISPATCH_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_local_dispatch.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_DISPATCH_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_DISPATCH_PATCHED}")
+    set_property(SOURCE "${HAZE_DISPATCH_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+
 # Keep the game-derived input untouched; fail closed on an unaudited main loop.
 set(HAZE_PACER_SOURCE "${RECOMP_DIR}/ppu_recomp_003.cpp")
 if(EXISTS "${HAZE_PACER_SOURCE}")

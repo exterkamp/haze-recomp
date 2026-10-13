@@ -60,6 +60,12 @@ if (-not $RuntimeOnly) {
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    & $python "$sdk/tools/test_ppu_jumptables.py"
+    if ($LASTEXITCODE -ne 0) { throw 'PPU local jump-table discovery regression failed.' }
+    if (-not $RuntimeOnly) {
+        & $python "$root/tests/test_local_dispatch.py" --compiler $clang --source "$assets/generated/ppu/ppu_recomp_000.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Local jump-table dispatch and shared-frame regression failed.' }
+    }
     & $clang /nologo /W0 /O2 /std:c++17 /EHsc "/Fe$root/local/test_spu_idle_workers.exe" "/Fo$root/local/test_spu_idle_workers.obj" "$root/tests/test_spu_idle_workers.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'SPU idle-worker cache compilation failed.' }
     & "$root/local/test_spu_idle_workers.exe"
