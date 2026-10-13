@@ -536,8 +536,11 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
     ppu_guest_call(opd, a0, a1, a2, a3, a4, a5, a6, a7);
 }
 
+extern "C" int spu_float_native_set_mode(int requested);
 int main(int argc, char** argv)
 {
+    const char* native_float = getenv("SPU_FLOAT_NATIVE");
+    spu_float_native_set_mode(!native_float || *native_float != '0');
     if (!haze_graphics_initialize()) return 2;
 #if defined(_WIN32) && defined(HAZE_REQUIRE_FMA)
     int cpu[4];
