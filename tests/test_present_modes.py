@@ -170,6 +170,14 @@ class PresentWindows(unittest.TestCase):
                 vp_good.replace('enabled=1','enabled=0'),
                 vp_good+'[haze-vp-packet-mode] enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid),self.assertRaises(ValueError):run(invalid)
+            windows['mode_column']='vp_consumer'
+            args.windows.write_text(json.dumps(windows))
+            consumer_good='[rsx-vp-burst-mode] enabled=1 qpc=80\n'
+            run(consumer_good)
+            for invalid in [vp_good,consumer_good.replace('qpc=80','qpc=101'),
+                consumer_good.replace('enabled=1','enabled=0'),
+                consumer_good+'[rsx-vp-burst-mode] enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid),self.assertRaises(ValueError):run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:

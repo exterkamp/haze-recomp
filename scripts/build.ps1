@@ -62,6 +62,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
     & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
     if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
+    & $clang /nologo /W0 /O2 /std:c11 /Gy /Gw "/I$sdk/include" "/I$sdk/libs/video" "/Fe$root/local/test_rsx_vp_burst.exe" "/Fo$root/local/" "$sdk/libs/video/tests/test_rsx_vp_burst.c" "$sdk/libs/video/rsx_vp_burst.c" "$sdk/libs/video/rsx_dispatch.c" "$sdk/libs/video/rsx_commands.c" /link /OPT:REF
+    if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer kernel compilation failed.' }
+    & "$root/local/test_rsx_vp_burst.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer state parity failed.' }
+    & $python "$root/tests/test_vp_consumer_boundary.py" --compiler $clang --sdk $sdk --output-dir "$root/build/vp-consumer-boundary"
+    if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer FIFO/wrapper/diagnostic boundary tests failed.' }
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     & $python "$root/tests/test_wait_timeline.py"
     if ($LASTEXITCODE -ne 0) { throw 'Wait timeline syscall naming and interval-union tests failed.' }
