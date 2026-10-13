@@ -85,3 +85,20 @@ gap 5.380 seconds, memory 54.23-55.11%. No owned build, screenshot or heavy
 analysis overlaps timing. These results verify the unwanted logging path is
 off, but establish neither an FPS gain nor a regression against previous runs.
 Evidence prefix: `local/jungle-milestones-off-a1`.
+
+## Background writer implementation
+
+The SDK now queues first-key and scalar records in a bounded 4,096-entry queue.
+A background writer owns file open, formatting, flush and close; repeat keys
+only update atomic counts. Overflow is explicit in the log. The writer checks
+its two-second checkpoint deadline between bounded drain batches, including
+under continuous traffic and when guest calls stop. I/O failure disables later
+records without spinning; shutdown still joins the writer and drains accepted
+records. The unset-environment path creates no writer or output file.
+
+The five actual-source regression cases cover disabled output, a parked writer
+with responsive producers and explicit overflow, checkpoint persistence without
+clean exit or further guest calls, continuous-traffic checkpoints, and failed
+open with low idle CPU and clean shutdown. The existing SDK milestone suite
+also passes. The blocked-writer case includes concurrent/idempotent dump calls.
+These are implementation checks; a full game build and live check are separate.

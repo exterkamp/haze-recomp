@@ -62,6 +62,8 @@ if (-not $RuntimeOnly) {
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    & $python "$root/tests/test_milestone_async.py" --compiler $clang --sdk $sdk --output-dir "$root/local"
+    if ($LASTEXITCODE -ne 0) { throw 'Asynchronous milestone writer regression failed.' }
     & $python "$sdk/tools/test_ppu_jumptables.py"
     if ($LASTEXITCODE -ne 0) { throw 'PPU local jump-table discovery regression failed.' }
     if (-not $RuntimeOnly) {
