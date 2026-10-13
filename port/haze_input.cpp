@@ -9,6 +9,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include "haze_window_icon.h"
 #include "cellPad.h"
 #include "cellSail.h"
 #include "haze_startup.h"
@@ -172,6 +173,7 @@ void capture(bool on,bool restore_position=true) {
 }
 LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_DPICHANGED: haze_window_icon(hwnd,LOWORD(wp)); break;
     case WM_SETTEXT:
         if (lp && std::strstr((const char*)lp," | FPS:")) {
             char caption[512];
@@ -480,6 +482,7 @@ void haze_input_initialize() {
 void haze_input_attach(void* hwnd) {
     if (!hwnd) return;
     window=(HWND)hwnd;
+    haze_window_icon(window);
     haze_video_menu_register();
     haze_audio_menu_register();
     haze_controls_menu_register();
