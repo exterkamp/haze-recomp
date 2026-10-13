@@ -26,7 +26,18 @@ RESOURCE_ELAPSED_FIELDS = {'resource_residual_ms'} | {
     f'{kind}_{field}' for kind in RESOURCE_KINDS
     for field in ('total_ms', 'max_ms')
 }
-ELAPSED_FIELDS = set(FLOATS) | {'get_pso_ms'} | PSO_DETAIL_PHASES | RESOURCE_ELAPSED_FIELDS
+TEXTURE_DETAIL_PHASES = {
+    'texture_slot_lookup_ms', 'texture_slot_watch_ms', 'texture_slot_hash_ms',
+    'texture_slot_decode_ms', 'texture_slot_srv_ms', 'texture_slot_retire_ms',
+    'texture_slot_log_ms', 'texture_slot_residual_ms',
+    'texture_resource_create_ms',
+}
+TEXTURE_DETAIL_FLAGS = {
+    'texture_outcome', 'texture_decode_attempted', 'texture_decode_succeeded', 'texture_watch_skipped',
+    'texture_cache_full', 'texture_resource_create_calls',
+}
+ELAPSED_FIELDS = (set(FLOATS) | {'get_pso_ms'} | PSO_DETAIL_PHASES |
+                  RESOURCE_ELAPSED_FIELDS | TEXTURE_DETAIL_PHASES)
 
 
 def validate_rows(rows):
@@ -102,6 +113,59 @@ def validate_rows(rows):
                 raise ValueError('Invalid resource residual')
             if abs(nested_ms + residual - row['resource_resolution_ms']) > 0.000004:
                 raise ValueError('Nested resource detail and residual do not partition resource phase')
+        present_texture_detail = TEXTURE_DETAIL_PHASES.intersection(row)
+        present_texture_flags = TEXTURE_DETAIL_FLAGS.intersection(row)
+        if present_texture_detail or present_texture_flags:
+            if (present_texture_detail != TEXTURE_DETAIL_PHASES or
+                    present_texture_flags != TEXTURE_DETAIL_FLAGS):
+                raise ValueError('Incomplete nested texture-call detail fields')
+            if present_resources != RESOURCE_DETAIL_PHASES:
+                raise ValueError('Texture-call detail requires the complete outer resource schema')
+            for key in TEXTURE_DETAIL_FLAGS:
+                if not isinstance(row[key], int) or row[key] < 0:
+                    raise ValueError('Invalid nested texture-call metadata')
+            if (row['texture_outcome'] not in range(6) or
+                    row['texture_decode_attempted'] not in (0, 1) or
+                    row['texture_decode_succeeded'] not in (0, 1) or
+                    row['texture_watch_skipped'] not in (0, 1) or
+                    row['texture_cache_full'] not in (0, 1)):
+                raise ValueError('Invalid nested texture-call outcome')
+            phases = [row[name] for name in TEXTURE_DETAIL_PHASES]
+            if any(not math.isfinite(value) or value < 0 for value in phases):
+                raise ValueError('Invalid nested texture-call elapsed time')
+            if row['texture_resource_create_ms'] > row['texture_slot_decode_ms'] + 0.000003:
+                raise ValueError('Nested texture resource creation exceeds decode interval')
+            if (row['texture_resource_create_calls'] == 0 and
+                    row['texture_resource_create_ms'] != 0):
+                raise ValueError('Empty nested texture resource creation has nonzero time')
+            if (row['texture_decode_succeeded'] and
+                    not row['texture_decode_attempted']):
+                raise ValueError('Texture decode succeeded without an attempt')
+            if (row['texture_outcome'] in (1, 2) and
+                    row['texture_decode_attempted']) or (
+                    row['texture_outcome'] in (3, 4, 5) and
+                    not row['texture_decode_attempted']):
+                raise ValueError('Texture outcome disagrees with decode attempt flag')
+            if (row['texture_outcome'] in (1, 2) and
+                    row['texture_decode_succeeded']):
+                raise ValueError('Cache hit cannot report a new decode success')
+            if row['texture_cache_full'] and row['texture_outcome'] != 5:
+                raise ValueError('Full texture cache is only valid for a miss')
+            if row['texture_calls'] == 0:
+                if (row['texture_outcome'] != 0 or row['texture_decode_attempted'] or
+                        row['texture_decode_succeeded'] or row['texture_watch_skipped'] or
+                        row['texture_cache_full'] or row['texture_resource_create_calls'] or
+                        any(row[name] != 0 for name in TEXTURE_DETAIL_PHASES)):
+                    raise ValueError('No texture calls may carry no per-call detail')
+            elif row['texture_outcome'] == 0:
+                raise ValueError('Texture call has no classified outcome')
+            slot_partition = sum(row[name] for name in (
+                'texture_slot_lookup_ms', 'texture_slot_watch_ms',
+                'texture_slot_hash_ms', 'texture_slot_decode_ms',
+                'texture_slot_srv_ms', 'texture_slot_retire_ms',
+                'texture_slot_log_ms', 'texture_slot_residual_ms'))
+            if abs(slot_partition - row['texture_max_ms']) > 0.00001:
+                raise ValueError('Nested texture-call detail does not partition maximum texture call')
         if row['thread_cycles_valid'] not in (0, 1):
             raise ValueError('Invalid cycle validity flag')
         if row['thread_cycles_valid']:
@@ -155,6 +219,7 @@ def analyze(csv_path, windows_path, log_path, capacity=256):
                            longest_retained_callbacks=sorted(selected, key=lambda r:r['wall_ms'], reverse=True)[:12]))
     return dict(note='Filtered retained callbacks only, not complete-frame costs or an isolation audit. '
                      'Stages partition each callback; PSO details are nested. Resource subphases are nested in resource_resolution_ms; residual includes uninstrumented resolution work such as zdepth_get and descriptor handling. '
+                     'Texture slot subphases describe only the slowest texture bind. CreateCommittedResource is nested within its decode time; decode residual includes conversion, content-cache work, and upload/copy/barrier recording. Direct slot diagnostics are timed as log work; helper diagnostics remain inside their enclosing phase. '
                      'Raw thread cycles are not CPU milliseconds; absence from this ring does not rule out a stall.',
                 saved=saved, overwritten=overwritten, callbacks=callbacks, capacity=capacity,
                 threshold_us=threshold,

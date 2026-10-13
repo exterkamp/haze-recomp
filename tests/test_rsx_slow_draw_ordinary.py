@@ -86,6 +86,7 @@ static void ReleaseSRWLockExclusive(SRWLOCK* lock) { (void)lock; }
 static u32 g_ld_frames = 9;
 static struct { int ready; } g;
 typedef struct { int unused; } rsx_dispatch;
+typedef struct { u32 location, offset, format, width, height; } rsx_dsp_texture;
 #ifdef TEST_PROFILE
 #define YZ_PERF_PROFILE 1
 typedef struct {
@@ -145,9 +146,23 @@ static void sink_end_impl(void*, const rsx_dispatch*, ld_slow_draw_scope* scope)
     resource_begin = ld_slow_resource_begin(scope);
     ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_DEPTH, resource_begin,
                             21, 32, 0, 43, 54, 5);
+    fake_qpc_step = 10;
     resource_begin = ld_slow_resource_begin(scope);
-    ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_TEXTURE, resource_begin,
-                            31, 42, 53, 64, 75, 8);
+    rsx_dsp_texture texture = {31, 42, 53, 64, 75};
+    ld_slow_texture_detail texture_detail = {};
+    u64 texture_phase_begin = ld_slow_texture_phase_begin(scope, &texture_detail);
+    ld_slow_texture_phase_end(scope, &texture_detail,
+                              &texture_detail.lookup_ticks, texture_phase_begin);
+    texture_detail.decode_ticks = 20;
+    texture_phase_begin = ld_slow_draw_qpc();
+    ld_slow_texture_resource_create(&texture_detail, texture_phase_begin);
+    texture_detail.outcome = LD_SLOW_TEXTURE_MISS;
+    texture_detail.decode_attempted = 1;
+    texture_detail.decode_succeeded = 1;
+    texture_detail.cache_full = 1;
+    ld_slow_texture_resource_finish(scope, resource_begin, &texture, 8,
+                                    &texture_detail);
+    fake_qpc_step = 1000;
     resource_begin = ld_slow_resource_begin(scope);
     ld_slow_resource_finish(scope, LD_SLOW_RESOURCE_VERTEX_TEXTURE, resource_begin,
                             41, 52, 63, 74, 85, 9);
@@ -267,9 +282,21 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
     if "slow_draw->event.build_pso_ticks +=" not in get_pso:
         raise AssertionError("build_pso nested duration is not recorded")
     for token in ("surface_get_slow_draw(slow_draw", "LD_SLOW_RESOURCE_DEPTH",
-                  "LD_SLOW_RESOURCE_TEXTURE", "LD_SLOW_RESOURCE_VERTEX_TEXTURE"):
+                  "ld_slow_texture_resource_finish", "LD_SLOW_RESOURCE_VERTEX_TEXTURE"):
         if token not in body:
             raise AssertionError(f"resource attribution call site missing: {token}")
+    texture_slot = extract_function(text, "static u32 texture_srv_slot_scoped(")
+    if "ld_slow_texture_phase_begin" not in texture_slot or \
+            "LD_SLOW_TEXTURE_REFRESH" not in texture_slot or \
+            "LD_SLOW_TEXTURE_MISS" not in texture_slot or \
+            "slots[u] = texture_srv_slot(&t);" not in body:
+        raise AssertionError("texture scope, outcomes, or ordinary null-scope path missing")
+    for signature in ("static ID3D12Resource* create_texture_mipped_scoped(",
+                      "static ID3D12Resource* create_texture_cube("):
+        creation = extract_function(text, signature)
+        if "CreateCommittedResource" not in creation or \
+                "ld_slow_texture_resource_create" not in creation:
+            raise AssertionError("texture committed-resource creation is not timed")
     output_dir.mkdir(parents=True, exist_ok=True)
     mode = "profile" if profile else "ordinary"
     fixture = output_dir / f"slow_draw_{mode}.cpp"
@@ -319,6 +346,13 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
         if row["surface_calls"] != "2" or row["surface_max_offset"] != "23" or \
                 row["surface_max_slot"] != "7" or row["texture_max_location"] != "31":
             raise AssertionError("resource maxima did not retain the slowest-call identity")
+        texture_phases = sum(float(row[f"texture_slot_{name}_ms"]) for name in (
+            "lookup", "watch", "hash", "decode", "srv", "retire", "log", "residual"))
+        if abs(texture_phases - float(row["texture_max_ms"])) > 0.00001 or \
+                float(row["texture_resource_create_ms"]) > float(row["texture_slot_decode_ms"]) or \
+                row["texture_outcome"] != str(5) or row["texture_cache_full"] != "1" or \
+                row["texture_max_offset"] != "42":
+            raise AssertionError("slowest texture-call detail lost identity or partition")
     if {int(row["pso_lookup"]) for row in rows} != {0, 1, 2}:
         raise AssertionError("uncalled, hit, and miss outcomes were not all retained")
     subprocess.run([str(exe), str(output_dir / f"disabled_{mode}.csv"), "0"], check=True)

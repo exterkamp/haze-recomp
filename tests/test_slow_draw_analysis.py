@@ -95,6 +95,19 @@ class SlowDrawAnalysisTests(unittest.TestCase):
                 f'{kind}_max_height': 5,
                 f'{kind}_max_slot': 6,
             })
+        detail.update(texture_outcome=4, texture_decode_attempted=1,
+                      texture_decode_succeeded=1,
+                      texture_watch_skipped=0, texture_cache_full=0,
+                      texture_slot_lookup_ms=0.005,
+                      texture_slot_watch_ms=0.005,
+                      texture_slot_hash_ms=0.005,
+                      texture_slot_decode_ms=0.010,
+                      texture_slot_srv_ms=0.005,
+                      texture_slot_retire_ms=0.005,
+                      texture_slot_log_ms=0.005,
+                      texture_slot_residual_ms=0.010,
+                      texture_resource_create_ms=0.004,
+                      texture_resource_create_calls=1)
         validate_rows([detail])
         incomplete = copy.deepcopy(detail)
         del incomplete['texture_max_ms']
@@ -122,6 +135,77 @@ class SlowDrawAnalysisTests(unittest.TestCase):
         empty_with_time['resource_residual_ms'] += 0.05
         with self.assertRaisesRegex(ValueError, 'Empty vertex_texture'):
             validate_rows([empty_with_time])
+
+    def test_nested_texture_detail_partition_and_validation(self):
+        detail = row()
+        detail['resource_residual_ms'] = 0.0
+        for kind in RESOURCE_KINDS:
+            detail.update({
+                f'{kind}_calls': 0, f'{kind}_total_ms': 0.0,
+                f'{kind}_max_ms': 0.0, f'{kind}_max_location': 0,
+                f'{kind}_max_offset': 0, f'{kind}_max_format': 0,
+                f'{kind}_max_width': 0, f'{kind}_max_height': 0,
+                f'{kind}_max_slot': 0,
+            })
+        detail.update(resource_residual_ms=0.0,
+                      texture_calls=1, texture_total_ms=0.5,
+                      texture_max_ms=0.5,
+                      texture_outcome=5, texture_decode_attempted=1,
+                      texture_decode_succeeded=1,
+                      texture_watch_skipped=0, texture_cache_full=1,
+                      texture_slot_lookup_ms=0.03, texture_slot_watch_ms=0.02,
+                      texture_slot_hash_ms=0.05, texture_slot_decode_ms=0.30,
+                      texture_slot_srv_ms=0.04, texture_slot_retire_ms=0.01,
+                      texture_slot_log_ms=0.01, texture_slot_residual_ms=0.04,
+                      texture_resource_create_ms=0.15,
+                      texture_resource_create_calls=1)
+        validate_rows([detail])
+        for key, value, message in (
+            ('texture_slot_decode_ms', float('nan'), 'elapsed'),
+            ('texture_slot_residual_ms', -0.1, 'elapsed'),
+            ('texture_resource_create_ms', 0.31, 'exceeds decode'),
+            ('texture_resource_create_calls', -1, 'metadata'),
+            ('texture_outcome', 6, 'outcome'),
+            ('texture_outcome', 1, 'outcome disagrees'),
+            ('texture_slot_residual_ms', 0.05, 'partition'),
+        ):
+            invalid = copy.deepcopy(detail)
+            invalid[key] = value
+            with self.assertRaisesRegex(ValueError, message):
+                validate_rows([invalid])
+        incomplete = copy.deepcopy(detail)
+        del incomplete['texture_slot_hash_ms']
+        with self.assertRaisesRegex(ValueError, 'Incomplete nested texture-call'):
+            validate_rows([incomplete])
+        no_calls = copy.deepcopy(detail)
+        no_calls.update(texture_calls=0, texture_total_ms=0.0,
+                        texture_max_ms=0.0, resource_residual_ms=0.5,
+                        texture_outcome=0, texture_decode_attempted=0,
+                        texture_decode_succeeded=0, texture_watch_skipped=0,
+                        texture_cache_full=0)
+        for phase in ('lookup', 'watch', 'hash', 'decode', 'srv', 'retire',
+                      'log', 'residual'):
+            no_calls[f'texture_slot_{phase}_ms'] = 0.0
+        no_calls['texture_resource_create_ms'] = 0.0
+        no_calls['texture_resource_create_calls'] = 0
+        validate_rows([no_calls])
+        invalid_empty = copy.deepcopy(no_calls)
+        invalid_empty['texture_outcome'] = 1
+        with self.assertRaisesRegex(ValueError, 'No texture calls'):
+            validate_rows([invalid_empty])
+        partial_outer = row()
+        partial_outer.update(texture_outcome=1, texture_decode_attempted=0,
+                             texture_decode_succeeded=0, texture_watch_skipped=0,
+                             texture_cache_full=0,
+                             **{key: 0.0 for key in (
+                                 'texture_slot_lookup_ms', 'texture_slot_watch_ms',
+                                 'texture_slot_hash_ms', 'texture_slot_decode_ms',
+                                 'texture_slot_srv_ms', 'texture_slot_retire_ms',
+                                 'texture_slot_log_ms', 'texture_slot_residual_ms',
+                                 'texture_resource_create_ms')},
+                             texture_resource_create_calls=0)
+        with self.assertRaisesRegex(ValueError, 'complete outer resource schema'):
+            validate_rows([partial_outer])
 
     def test_nan_and_qpc_mismatch_rejected(self):
         for key, value in [('wall_ms', float('nan')), ('qpc_end', 50_000)]:
@@ -184,6 +268,19 @@ class SlowDrawAnalysisTests(unittest.TestCase):
             full.update(threshold_us=1000, get_pso_ms=0.4, pso_lookup=2,
                         build_pso_ms=0.3, shader_disk_load_ms=0.1,
                         d3d_compile_ms=0.1, create_graphics_pso_ms=0.1)
+            full.update(texture_outcome=5, texture_decode_attempted=1,
+                        texture_decode_succeeded=1,
+                        texture_watch_skipped=0, texture_cache_full=0,
+                        texture_slot_lookup_ms=0.005,
+                        texture_slot_watch_ms=0.005,
+                        texture_slot_hash_ms=0.005,
+                        texture_slot_decode_ms=0.020,
+                        texture_slot_srv_ms=0.005,
+                        texture_slot_retire_ms=0.002,
+                        texture_slot_log_ms=0.003,
+                        texture_slot_residual_ms=0.005,
+                        texture_resource_create_ms=0.010,
+                        texture_resource_create_calls=1)
             full['resource_residual_ms'] = 0.3
             for kind in RESOURCE_KINDS:
                 full.update({

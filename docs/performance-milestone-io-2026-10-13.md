@@ -64,3 +64,24 @@ A new muted same-binary baseline validates this correction separately from the
 stack capture. The SDK's logging implementation also needs a bounded background
 writer so enabling diagnostics cannot put filesystem I/O on frame-critical
 threads. Those follow-ups do not make consistent pacing or 144 FPS complete.
+
+## Logging-disabled validation
+
+Run `20261013-233403-144` uses the same binary and two 45-second settled jungle
+camera sweeps, tokens 3540/3541. An intentionally inherited milestone output
+path and the run's boot-milestones.log both remain absent; boot-result.json
+records `milestone_logging: false`. The muted game exits normally and original
+save hashes match.
+
+All 6,129 intervals are retained: **68.119 FPS / 14.680 ms mean**, 19.669 ms p95,
+25.274 ms p99, 50.857 ms maximum; 20 above 33.333 ms and one above 50 ms.
+Individual windows average 71.423 and 64.815 FPS. Disjoint pump means are
+8.009 ms wait, 4.570 ms FIFO processing, 1.961 ms presentation and 0.140 ms
+other/tick. Waiting does not establish removable idle time.
+
+Another Haze PID 15056 and up to three compiler processes overlap, so strict
+isolation fails. Twenty resource observations bracket the windows, maximum
+gap 5.380 seconds, memory 54.23-55.11%. No owned build, screenshot or heavy
+analysis overlaps timing. These results verify the unwanted logging path is
+off, but establish neither an FPS gain nor a regression against previous runs.
+Evidence prefix: `local/jungle-milestones-off-a1`.
