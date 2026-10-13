@@ -82,6 +82,22 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
 endif()
 
 # ---------------------------------------------------------------------------
+# Native GUI pointer bridge
+# ---------------------------------------------------------------------------
+set(HAZE_MENU_SOURCE "${RECOMP_DIR}/ppu_recomp_001.cpp")
+if(EXISTS "${HAZE_MENU_SOURCE}")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_MENU_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_menu/ppu_recomp_001.cpp")
+    add_custom_command(OUTPUT "${HAZE_MENU_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_input.py"
+            "${HAZE_MENU_SOURCE}" "${HAZE_MENU_PATCHED}"
+        DEPENDS "${HAZE_MENU_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_input.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_MENU_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_MENU_PATCHED}")
+    set_property(SOURCE "${HAZE_MENU_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+# ---------------------------------------------------------------------------
 # ps3recomp runtime library
 # ---------------------------------------------------------------------------
 # Built from source as a subdirectory rather than imported as a prebuilt
@@ -227,6 +243,7 @@ add_executable(${PROJECT_NAME}
     stubs.cpp
     haze_input.cpp
     haze_camera.cpp
+    haze_menu.cpp
     haze_guest_pacer.cpp
     haze_spu_triplet_copy.cpp
     haze_graphics.cpp
