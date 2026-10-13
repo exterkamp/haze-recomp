@@ -10,7 +10,7 @@ KINDS = {1: 'submit', 2: 'dispatch_including_trampolines', 3: 'transform_kernel'
          4: 'completion_wait', 5: 'transform_handler', 6: 'state_publication',
          7: 'spu_submit_point', 8: 'spu_create_thread', 9: 'spu_setup',
          10: 'spu_execute', 11: 'spu_finish', 12: 'spu_cleanup',
-         13: 'spu_create_failed', 14: 'spu_setup_failed'}
+         13: 'spu_create_failed', 14: 'spu_setup_failed', 15: 'spu_reuse_worker'}
 
 
 def union_ticks(intervals):
@@ -73,6 +73,10 @@ def join_async_jobs(events):
     for phases in jobs.values():
         if 8 in phases and 13 in phases:
             raise ValueError('SDK job reports both successful and failed creation')
+        if 15 in phases and 13 in phases:
+            raise ValueError('SDK job reports both worker reuse and failed creation')
+        if 8 in phases and 15 in phases:
+            raise ValueError('SDK job reports both thread creation and worker reuse')
         if 14 in phases and 10 in phases:
             raise ValueError('Failed setup reports execution')
         for before, after in ((9, 10), (10, 11), (11, 12)):
@@ -82,7 +86,8 @@ def join_async_jobs(events):
                     raise ValueError('SDK worker phase order/thread mismatch')
         # A worker may finish before CreateThread returns; do not order it after
         # the submitting thread's end timestamp.
-        if 8 in phases and 9 in phases and phases[9]['begin_qpc'] < phases[8]['begin_qpc']:
+        startup = phases.get(8, phases.get(15))
+        if startup and 9 in phases and phases[9]['begin_qpc'] < startup['begin_qpc']:
             raise ValueError('SDK worker started before thread creation began')
     return jobs
 
@@ -95,10 +100,12 @@ def summarize_async(jobs, lo, hi, scale, frames):
         for kind, row in phases.items():
             if row['begin_qpc'] < hi and row['end_qpc'] >= lo:
                 images[image]['phases'][kind].append(row)
-        if 8 in phases and 9 in phases:
-            create, setup = phases[8], phases[9]
-            if lo <= create['begin_qpc'] <= setup['begin_qpc'] <= hi:
-                images[image]['startup_gap_ms'].append((setup['begin_qpc'] - create['begin_qpc']) * scale)
+        startup = phases.get(8, phases.get(15))
+        if startup and 9 in phases:
+            setup = phases[9]
+            if lo <= startup['begin_qpc'] <= setup['begin_qpc'] <= hi:
+                images[image]['startup_gap_ms'].append(
+                    (setup['begin_qpc'] - startup['begin_qpc']) * scale)
     result = []
     for image, data in images.items():
         phases = {}

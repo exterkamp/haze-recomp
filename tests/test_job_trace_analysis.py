@@ -72,6 +72,21 @@ class JobTraceAnalysis(unittest.TestCase):
         with self.assertRaises(ValueError):
             join_async_jobs(rows)
 
+    def test_reuse_worker_dispatch_may_overlap_setup_but_is_mutually_exclusive(self):
+        def row(kind, lo, hi, tid):
+            return dict(kind=kind, begin_qpc=lo, end_qpc=hi, host_tid=tid,
+                        **{f'arg{i}': value for i, value in enumerate((1, 30, 123, 456, 0, 0, 0, 0))})
+        rows = [row(15, 10, 40, 1), row(9, 20, 30, 2), row(10, 30, 60, 2)]
+        jobs = join_async_jobs(rows)
+        self.assertIn(15, jobs[1])
+        self.assertEqual(summarize_async(jobs, 0, 100, 1, 1)[0]['startup_gap_mean_ms'], 10)
+        rows.append(row(8, 10, 15, 1))
+        with self.assertRaises(ValueError):
+            join_async_jobs(rows)
+        failed_reuse = [row(15, 10, 40, 1), row(13, 12, 12, 1)]
+        with self.assertRaises(ValueError):
+            join_async_jobs(failed_reuse)
+
     def test_union_nested_disjoint_touching(self):
         self.assertEqual(union_ticks([(0, 20), (5, 10), (20, 25), (30, 40)]), 35)
         self.assertEqual(union_ticks([]), 0)
