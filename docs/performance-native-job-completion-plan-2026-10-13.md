@@ -127,3 +127,40 @@ Private evidence: `local/native-job-wait-motion-{windows,report}.json`,
 Keep the policy off by default and #39 open. Squad conversation, transitions,
 long runs and completion-producer/publication auditing remain outstanding.
 Do not treat the earlier 5.315 ms service scope as wholly removable time.
+
+## Disabled-path binary comparison
+
+Four fresh private-save runs compare the previous GPU-occurrence binary
+(`D16063B0...1D8D0165`) with the job-wait binary above, with the new policy
+explicitly disabled throughout. Order: old/new/new/old. Settings match the
+carrier test above; each launch has two 24-second audited yaw windows after
+five-second warmups. Captures and compiler/test activity precede measurement.
+Both binaries share SDK `6acf5d9`; both new runs log only job-wait mode zero.
+
+| Binary/run | Frames | Mean ms | p95 ms | p99 ms | Max ms |
+|---|---:|---:|---:|---:|---:|
+| Old A | 709 | 33.797 | 46.699 | 50.947 | 101.030 |
+| Old A | 687 | 34.874 | 47.510 | 53.334 | 90.704 |
+| New A, disabled | 727 | 32.965 | 44.888 | 50.422 | 63.399 |
+| New A, disabled | 750 | 31.974 | 44.433 | 50.221 | 67.332 |
+| New B, disabled | 706 | 33.963 | 47.940 | 70.730 | 188.625 |
+| New B, disabled | 754 | 31.748 | 43.999 | 52.926 | 69.565 |
+| Old B | 524 | 45.746 | 64.557 | 71.898 | 87.139 |
+| Old B | 534 | 44.928 | 65.338 | 102.308 | 150.404 |
+
+All eight windows pass complete-present, CPU-mode, actual-camera and sampled
+Haze-process validation. Carrier captures have the same initial view. These
+are live-world comparisons, not deterministic simulation replays. System-wide
+contention and changes between process observations are not excluded.
+
+The hypothesized persistent slowdown from adding the disabled hook is not
+reproduced: the previous binary also varies substantially, including the slowest
+repeat. This does not prove the hook is free or explain the slow session, and
+the new binary still has a 188.625 ms stall. Do not call this a speedup from a
+disabled optimization. Retain the earlier mixed policy comparison and leave
+the policy disabled. Prefer same-executable mode comparisons for the next
+index-preparation experiment, and retain the unresolved variability in reports.
+
+Private stems: `local/job-baseline-{old-a,new-a,new-b,old-b}-`; runs respectively
+`20261013-005931-679`, `20261013-010301-559`, `20261013-010604-278`,
+`20261013-011025-687`. Each run closed normally and flushed its present ring.
