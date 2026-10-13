@@ -5,6 +5,7 @@ param(
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
+    [switch]$ExperimentalInlineReads,
     [switch]$CompareSpuByteOps,
     [switch]$SpuFma,
     [switch]$NativeSpuFloat = $true,
@@ -50,11 +51,12 @@ if ($RuntimeOnly) {
 $ErrorActionPreference = 'Continue' # Windows PowerShell treats native stderr warnings as errors.
 $exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory) } else { $build }
 $controllerArgs = @()
+if (-not $RuntimeOnly) { $controllerArgs += "-DHAZE_EXPERIMENT_INLINE_READS=$([int][bool]$ExperimentalInlineReads)" }
 if ($SDL3Root) { $controllerArgs += "-DFETCHCONTENT_SOURCE_DIR_SDL3=$((Resolve-Path -LiteralPath $SDL3Root).Path)" }
 & $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)" "-DPS3RECOMP_NATIVE_FLOAT_RUNTIME=$([int][bool]$NativeSpuFloat)" @controllerArgs
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 if (-not $RuntimeOnly) {
-    & $python "$root/tests/check_profile_configuration.py" $build --enabled $([int][bool]$ProfileRenderer)
+    & $python "$root/tests/check_profile_configuration.py" $build --enabled $([int][bool]$ProfileRenderer) --inline-reads $([int][bool]$ExperimentalInlineReads)
     if ($LASTEXITCODE -ne 0) { throw 'Profiling definitions do not match the requested build.' }
 }
 & $cmake --build $build --parallel $Jobs

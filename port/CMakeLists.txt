@@ -483,13 +483,16 @@ else()
         COMPILE_OPTIONS "-w;-ffp-contract=off")
 endif()
 
+# This unproven code-size tradeoff is excluded from ordinary builds entirely.
+# PPU_INLINE_READS only changes execution within a deliberately compiled probe.
+option(HAZE_EXPERIMENT_INLINE_READS "Compile the developer inline-read comparison" OFF)
 # Ordinary guest reads may be inlined into lifted host code. The runtime owns
 # the startup eligibility decision; special addresses and diagnostics retain
 # their original accessor. Never apply this remapping to runtime/HLE sources.
-if(MSVC)
+if(HAZE_EXPERIMENT_INLINE_READS AND MSVC)
     set_property(SOURCE ${RECOMP_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
         "/FI${CMAKE_CURRENT_SOURCE_DIR}/haze_ppu_inline_reads.h")
-else()
+elseif(HAZE_EXPERIMENT_INLINE_READS)
     set_property(SOURCE ${RECOMP_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
         "-include" "${CMAKE_CURRENT_SOURCE_DIR}/haze_ppu_inline_reads.h")
 endif()
