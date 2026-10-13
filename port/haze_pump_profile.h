@@ -71,7 +71,9 @@ struct HazePumpProfile {
         const LONGLONG t=now();
         if (!enabled || t-epoch<frequency*2) return;
         const double scale=1000.0/frequency;
-        fprintf(stderr,"[pump-perf] elapsed_ms=%.3f drains=%u presents=%u wait_ms=%.3f fifo_ms=%.3f present_ms=%.3f tick_ms=%.3f waits=%u queued_waits=%u timeout_ms=%u\n",
+        // CSV captures retain per-frame data in memory. Avoid duplicate CRT/file
+        // output on the render thread; keep report cadence and live controls.
+        if (!csv_path) fprintf(stderr,"[pump-perf] elapsed_ms=%.3f drains=%u presents=%u wait_ms=%.3f fifo_ms=%.3f present_ms=%.3f tick_ms=%.3f waits=%u queued_waits=%u timeout_ms=%u\n",
             (t-epoch)*scale,drains,presents,wait*scale,fifo*scale,present*scale,tick*scale,waits,queued_waits,wait_ms);
         epoch=t; wait=fifo=present=tick=0; drains=presents=0;
         waits=queued_waits=0;

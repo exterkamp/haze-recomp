@@ -60,6 +60,10 @@ if (-not $RuntimeOnly) {
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    & $clang /nologo /W0 /O2 /std:c11 /D_CRT_SECURE_NO_WARNINGS "/I$sdk/libs/video" "/Fe$root/local/test_rsx_profile_buffer.exe" "/Fo$root/local/test_rsx_profile_buffer.obj" "$sdk/libs/video/tests/test_rsx_profile_buffer.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Deferred profile buffer compilation failed.' }
+    & "$root/local/test_rsx_profile_buffer.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Deferred profile buffer regression failed.' }
     & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
     if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
     & $clang /nologo /W0 /O2 /std:c11 /Gy /Gw "/I$sdk/include" "/I$sdk/libs/video" "/Fe$root/local/test_rsx_vp_burst.exe" "/Fo$root/local/" "$sdk/libs/video/tests/test_rsx_vp_burst.c" "$sdk/libs/video/rsx_vp_burst.c" "$sdk/libs/video/rsx_dispatch.c" "$sdk/libs/video/rsx_commands.c" /link /OPT:REF
