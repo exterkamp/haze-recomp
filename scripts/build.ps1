@@ -93,6 +93,8 @@ if ($Test) {
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
     if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
+    & $python "$root/tests/test_ppu_coherency_predicate.py" --compiler $clang --sdk $sdk --output-dir "$root/build/ppu-coherency-predicate"
+    if ($LASTEXITCODE -ne 0) { throw 'PPU coherency predicate startup/store regression failed.' }
     if (-not $RuntimeOnly) {
         & $python "$root/tests/test_ppu_inline_reads.py" --compiler $clang --sdk $sdk --recomp "$assets/generated/ppu" --output-dir "$root/build/ppu-inline-reads"
         if ($LASTEXITCODE -ne 0) { throw 'Generated inline memory-read regression failed.' }
@@ -152,6 +154,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime test compilation failed.' }
     & $coherencyTest
     if ($LASTEXITCODE -ne 0) { throw 'SPU coherency lifetime/holder-capacity test failed.' }
+    $coherencyStoreTest = Join-Path $root 'local/test_spu_coherency.exe'
+    & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$coherencyStoreTest" "/Fo$root/local/test_spu_coherency.obj" "$sdk/runtime/spu/tests/test_spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU coherency store-path test compilation failed.' }
+    & $coherencyStoreTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU coherency store/notification regression failed.' }
+    $coherencyAtomicTest = Join-Path $root 'local/test_coherency_atomic_visibility.exe'
+    & $clang /nologo /W0 /O2 /EHsc /std:c++17 /clang:-msse4.1 "/I$sdk/include" "/Fe$coherencyAtomicTest" "/Fo$root/local/" "$sdk/runtime/spu/tests/test_coherency_atomic_visibility.cpp" "$sdk/runtime/spu/spu_coherency.c"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU reservation publication test compilation failed.' }
+    & $coherencyAtomicTest
+    if ($LASTEXITCODE -ne 0) { throw 'SPU reservation publication/polling regression failed.' }
     $idleTest = Join-Path $root 'local/test_spu_idle_wait.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/runtime/spu" "/Fe$idleTest" "/Fo$root/local/" "$root/tests/test_spu_idle_wait.c" "$sdk/runtime/spu/spu_coherency.c"
     if ($LASTEXITCODE -ne 0) { throw 'Haze SPU idle wait test compilation failed.' }

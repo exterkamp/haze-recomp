@@ -253,3 +253,42 @@ Repeated alternating trials would be required to quantify an effect reliably.
 Both modes include the larger experimental generated code, whereas ordinary
 builds exclude it completely. The next experiment targets the out-of-line
 write accessor's reservation predicate, with the read shim excluded.
+
+The retained pump records also separate two hitch shapes. ON's worst frame
+contained 64.507 ms in FIFO drain, 4.972 ms in pump waits and 2.790 ms in
+present; its other >33 ms frame contained 27.111 ms in FIFO drain. OFF's worst
+frame instead contained 29.360 ms in pump waits, 6.612 ms in FIFO drain and
+2.262 ms in present (31 wait calls). These are wall-time phase boundaries,
+not proof of compilation, GPU stalls, scheduling delay or exclusive CPU work.
+They show that reducing average accessor cost alone will not establish the
+cause of all pacing outliers. Existing slow-drain/flush diagnostics can narrow
+the FIFO case in a separate instrumented run.
+
+## Narrow write-accessor experiment
+
+SDK `17eb9d3` adds an optional inline reservation-bitmap predicate only at the
+out-of-line PPU loader's ordinary store macro. `PPU_INLINE_COH_CHECK=ON` selects
+it once at startup; default, typo, null VM and memory-diagnostic cases retain
+the ABI helper. This is a developer experiment, not a release settings entry.
+Both branches retain the same reserved-line lock, store and notification;
+all accessor guards and write side effects remain in their original code.
+
+Bitmap publication uses atomic operations in both branches. On clang-cl,
+writers already holding the lock preserve neighboring bits with a relaxed
+load and release store; predicate readers use acquire loads. This avoids a
+locked read-modify-write for every reservation and prevents compiler caching
+of an unlocked bitmap read. It does not serialize an unreserved store against
+a concurrent first reservation: that pre-existing race is not claimed fixed.
+The MSVC fallback uses interlocked operations and has not been benchmarked.
+
+Focused validation covers 70 fresh-process cases using the actual loader
+startup code and store macro (all widths, unarmed/unreserved/reserved paths,
+address truncation, byte bounds, lock/notification routing, diagnostics and
+mode selection), 78 actual inline-store coherency assertions, and 4,096
+cross-thread predicate polls through the production reservation API. The
+existing 70 inline-read cases also pass with the extended initialization.
+
+The new candidate excludes the generated read shim entirely. Its executable
+is 122,747,392 bytes, compared with the precise-read candidate's 180,904,448.
+Same-binary enabled/disabled measurements will evaluate the predicate call
+change; they will not separately attribute the atomic-publication change.
