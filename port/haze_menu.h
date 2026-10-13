@@ -12,6 +12,9 @@ struct HazeMenuRow {
     std::vector<HazeMenuChoice> choices;
     bool slider=false;
     double minimum=0,maximum=1,step=.05;
+    bool action=false;
+    std::string prompt_binding;
+    HazeInputFamily prompt_family=HazeInputFamily::Keyboard;
 };
 struct HazeMenuModal {
     unsigned revision=0;
@@ -29,6 +32,7 @@ struct HazeMenuProvider {
     // Called on the window thread while Apply is pending. Providers publish
     // completion from their owning thread; polling must never block rendering.
     std::function<HazeMenuApply(std::string&)> poll;
+    std::function<void(const std::string&)> activate;
     std::function<void(bool)> update;
     std::function<HazeMenuModal()> modal;
     std::function<void(int)> modal_key,modal_choose;
@@ -42,7 +46,9 @@ bool haze_menu_has_focus();
 void* haze_menu_owner();
 void haze_menu_update(void* owner,const HazeGamepadState& pad);
 void haze_menu_shutdown();
+void haze_menu_retail();
 void haze_video_menu_register();
+void haze_controls_menu_register();
 
 #include <cstdint>
 

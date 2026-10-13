@@ -13,6 +13,7 @@
 #include "cellSail.h"
 #include "haze_startup.h"
 #include "haze_startup_prompt.h"
+#include "haze_input_key.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -35,6 +36,7 @@ std::mutex settings_mutex;
 HazeGamepadState controller_state;
 bool controller_sample_focused=false;
 std::atomic<bool> menu_return_pending{false};
+std::atomic<bool> menu_pop{true};
 std::atomic<HazeInputFamily> last_family{HazeInputFamily::Keyboard};
 char config_path[MAX_PATH]{};
 ULONGLONG next_input_update=0, next_config_check=0;
@@ -101,15 +103,8 @@ Binding bindings[] = {
 };
 int movement[4] = {'W','S','A','D'};
 int key_code(const char* name) {
-    if (name[0] && !name[1]) return std::toupper((unsigned char)name[0]);
-    const struct { const char* name; int vk; } names[] = {
-        {"Space",VK_SPACE},{"Enter",VK_RETURN},{"Escape",VK_ESCAPE},{"Tab",VK_TAB},
-        {"Shift",VK_SHIFT},{"Ctrl",VK_CONTROL},{"Alt",VK_MENU},
-        {"Up",VK_UP},{"Down",VK_DOWN},{"Left",VK_LEFT},{"Right",VK_RIGHT},
-        {"Mouse1",VK_LBUTTON},{"Mouse2",VK_RBUTTON},{"Mouse3",VK_MBUTTON},
-        {"Mouse4",VK_XBUTTON1},{"Mouse5",VK_XBUTTON2},{"None",0},
-    };
-    for (const auto& n : names) if (!_stricmp(name,n.name)) return n.vk;
+    const int code=haze_key_code(name);
+    if (code>=0) return code;
     fprintf(stderr,"[input] Unknown key '%s'; binding disabled\n",name);
     return 0;
 }
@@ -477,6 +472,7 @@ void haze_input_attach(void* hwnd) {
     window=(HWND)hwnd;
     haze_video_menu_register();
     haze_audio_menu_register();
+    haze_controls_menu_register();
     if (controller_enabled) gamepad_initialized=haze_gamepad_initialize(config_path);
     RAWINPUTDEVICE device{0x01,0x02,0,window};
     if (!RegisterRawInputDevices(&device,1,sizeof(device))) {
@@ -511,11 +507,7 @@ void haze_input_update() {
         WIN32_FILE_ATTRIBUTE_DATA attributes{};
         if (GetFileAttributesExA(config_path,GetFileExInfoStandard,&attributes) &&
             CompareFileTime(&config_time,&attributes.ftLastWriteTime)!=0) {
-            std::lock_guard<std::mutex> lock(settings_mutex);
-            load_keyboard_config();
-            if (gamepad_initialized) haze_gamepad_configure(config_path);
-            config_time=attributes.ftLastWriteTime;
-            fprintf(stderr,"[input] Reloaded %s\n",config_path);
+            haze_input_reload();
         }
     }
     if (gamepad_initialized) {
@@ -600,6 +592,7 @@ HazeMenuPointer haze_input_take_pointer() {
         for (int key:movement) held|=key_held(key);
         if (held) return {};
         menu_return_pending=false;
+        if (!menu_pop) return {}; // Game control options retains its retail page.
         HazeMenuPointer back; back.active=true; back.back=true;
         return back;
     }
@@ -632,7 +625,18 @@ HazeMenuPointer haze_input_take_pointer() {
     return result;
 }
 HazeInputFamily haze_input_family() { return last_family.load(); }
-void haze_input_menu_return() { menu_return_pending=true; }
+const char* haze_input_config_path() { return config_path; }
+void haze_input_reload() {
+    std::lock_guard<std::mutex> lock(settings_mutex);
+    load_keyboard_config();
+    if (gamepad_initialized) haze_gamepad_configure(config_path);
+    controller_state={}; controller_sample_focused=false;
+    WIN32_FILE_ATTRIBUTE_DATA attributes{};
+    if (GetFileAttributesExA(config_path,GetFileExInfoStandard,&attributes)) config_time=attributes.ftLastWriteTime;
+    fprintf(stderr,"[input] Reloaded %s\n",config_path);
+}
+void haze_input_menu_return() { menu_pop=true; menu_return_pending=true; }
+void haze_input_menu_retail() { menu_pop=false; menu_return_pending=true; }
 unsigned haze_input_menu_button(int virtual_key) {
     std::lock_guard<std::mutex> lock(settings_mutex);
     last_family=HazeInputFamily::Keyboard;

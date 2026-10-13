@@ -74,6 +74,12 @@ options, and startup skipping live in [config/input.ini](config/input.ini)
 and reload while running. Action names above assume Haze's default controller
 layout; zoom and crouch can be changed from toggle to hold in the game's settings.
 
+**Settings > Control Setup** opens PC Controls for bindings, sensitivity,
+deadzones and prompt style. Select a binding to capture an input, review any
+conflicts, then **Apply**. **Back** discards edits; **Defaults** requires Apply.
+**Game control options** opens the original controller layout and toggle/hold
+settings.
+
 Open **Video Setup** or **Sound Setup** from the main or pause menu for PC
 Video and Audio settings. Changes are staged until **Apply**; **Back** discards
 edits. Display changes offer a 15-second **Keep/Revert** confirmation. Render

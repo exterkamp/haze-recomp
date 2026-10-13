@@ -30,6 +30,9 @@ bool pad_neutral=false,notice_error=false;
 bool applying=false;
 unsigned modal_revision=0;
 int modal_selected=0;
+unsigned menu_recovery=0;
+bool menu_recovery_raw=false;
+HazeInputFamily menu_family=HazeInputFamily::Xbox;
 void clear_notice() { notice.clear(); notice_error=false; }
 HazeMenuProvider& provider() { return providers[size_t(current)]; }
 HazeMenuModal modal() { return provider().modal ? provider().modal() : HazeMenuModal{}; }
@@ -59,13 +62,13 @@ void refresh() {
     scroll=std::clamp(scroll,0,std::max(0,int(items.size())-visible_rows));
     InvalidateRect(panel,nullptr,FALSE);
 }
-void close_page() {
+void close_page(bool back=true) {
     if (!panel || applying) return;
     if (provider().update) provider().update(false);
     if (GetCapture()==panel) ReleaseCapture();
     ShowWindow(panel,SW_HIDE); dropdown=dragging=-1;
     current=HazeMenuPage::None; active=false;
-    haze_input_menu_return();
+    if (back) haze_input_menu_return(); else haze_input_menu_retail();
     SetForegroundWindow(owner_window); SetFocus(owner_window);
 }
 void activate() {
@@ -75,7 +78,10 @@ void activate() {
         dropdown=-1; clear_notice(); refresh(); return;
     }
     if (selected<int(items.size())) {
-        if (!items[selected].slider) {
+        if (items[selected].action && provider().activate) {
+            provider().activate(items[selected].key); modal_selected=0; pad_neutral=false;
+            if (!active) return;
+        } else if (!items[selected].slider && !items[selected].choices.empty()) {
             dropdown=selected; drop_scroll=drop_selected=0;
             const auto& choices=items[selected].choices;
             for (size_t i=0;i<choices.size();++i) if (choices[i].value==items[selected].value)
@@ -152,6 +158,10 @@ void paint(HDC target) {
         RECT left=rect; left.left+=unit/2; left.right=width/2-unit;
         label(dc,row.label,left,RGB(235,235,225));
         RECT right=rect; right.left=width/2; right.right-=unit;
+        if (!row.prompt_binding.empty()) {
+            haze_prompts_draw_binding(dc,row.prompt_family,row.prompt_binding.c_str(),right.left,rect.top+unit/4,unit*3/2);
+            right.left+=unit*2;
+        }
         std::string value=row.value;
         for (const auto& choice:row.choices) if (choice.value==row.value) value=choice.label;
         if (row.slider) {
@@ -161,7 +171,7 @@ void paint(HDC target) {
             const double fraction=std::clamp((std::strtod(row.value.c_str(),nullptr)-row.minimum)/(row.maximum-row.minimum),0.,1.);
             const int x=width/2+int((end-width/2)*fraction);
             fill(dc,{x-4,y-unit/2,x+4,y+unit/2},RGB(242,221,0)); right.left=end+unit/2;
-        } else value+="  v";
+        } else value+=row.action ? "  >" : row.choices.empty() ? "" : "  v";
         label(dc,value,right,RGB(242,221,0),DT_RIGHT|DT_VCENTER|DT_SINGLELINE);
     }
     const std::string hint=!notice.empty() ? notice : selected<int(items.size()) ? items[selected].hint :
@@ -175,10 +185,16 @@ void paint(HDC target) {
     }
     const int footer=height-unit*3,icon_size=unit*2;
     const int slots[]={12,14,13}; const char* hints[]={"Select","Back","Defaults"};
+    const unsigned masks[]={CELL_PAD_CTRL_CROSS,CELL_PAD_CTRL_CIRCLE,CELL_PAD_CTRL_SQUARE};
+    const char* recovery[]={"south","east","west"};
     for (int i=0;i<3;++i) {
         const int x=unit*2+i*(width-unit*4)/3;
-        haze_prompts_draw_icon(dc,slots[i],x,footer,icon_size);
-        label(dc,hints[i],{x+icon_size,footer,x+(width-unit*4)/3,footer+icon_size},RGB(190,195,180));
+        const bool recover=haze_input_family()!=HazeInputFamily::Keyboard && (menu_recovery&masks[i]);
+        if (recover)
+            haze_prompts_draw_binding(dc,menu_family,menu_recovery_raw ? ("raw:b"+std::to_string(i)).c_str() : recovery[i],x,footer,icon_size);
+        else haze_prompts_draw_icon(dc,slots[i],x,footer,icon_size);
+        const std::string hint=std::string(hints[i])+(recover && menu_recovery_raw ? " (button "+std::to_string(i+1)+")" : "");
+        label(dc,hint,{x+icon_size,footer,x+(width-unit*4)/3,footer+icon_size},RGB(190,195,180));
     }
     if (dropdown>=0) {
         auto rect=dropdown_rect(); fill(dc,rect,RGB(64,68,53));
@@ -317,6 +333,7 @@ bool haze_menu_has_focus() { return panel && active && GetForegroundWindow()==pa
 void* haze_menu_owner() { return owner_window; }
 void haze_menu_update(void* owner,const HazeGamepadState& pad) {
     owner_window=(HWND)owner;
+    menu_recovery=pad.menu_recovery; menu_family=pad.family; menu_recovery_raw=pad.menu_recovery_raw;
     const bool confirming=current!=HazeMenuPage::None && modal().revision!=0;
     const int next=(applying || confirming) ? 0 : requested.exchange(0);
     if (next) {
@@ -357,9 +374,10 @@ void haze_menu_update(void* owner,const HazeGamepadState& pad) {
     if (foreground==owner_window) SetFocus(panel);
     if (applying) { pad_neutral=false; return; }
     const auto dialog=sync_modal();
-    unsigned buttons=pad.input.buttons;
-    if (pad.input.ly<64) buttons|=CELL_PAD_CTRL_UP; if (pad.input.ly>192) buttons|=CELL_PAD_CTRL_DOWN;
-    if (pad.input.lx<64) buttons|=CELL_PAD_CTRL_LEFT; if (pad.input.lx>192) buttons|=CELL_PAD_CTRL_RIGHT;
+    const auto& navigation=pad.menu_input_valid ? pad.menu_input : pad.input;
+    unsigned buttons=navigation.buttons;
+    if (navigation.ly<64) buttons|=CELL_PAD_CTRL_UP; if (navigation.ly>192) buttons|=CELL_PAD_CTRL_DOWN;
+    if (navigation.lx<64) buttons|=CELL_PAD_CTRL_LEFT; if (navigation.lx>192) buttons|=CELL_PAD_CTRL_RIGHT;
     if (!pad_neutral) { if (!buttons) pad_neutral=true; previous_buttons=buttons; return; }
     const auto now=GetTickCount64(); unsigned presses=buttons&~previous_buttons;
     if (presses) repeat_at=now+350;
@@ -388,6 +406,7 @@ void haze_menu_shutdown() {
     if (font) DeleteObject(font); if (heading) DeleteObject(heading); font=heading=nullptr;
     active=false; requested=0; current=HazeMenuPage::None; applying=false; width=height=0;
 }
+void haze_menu_retail() { close_page(false); }
 #else
 void haze_menu_register(HazeMenuPage,HazeMenuProvider) {}
 bool haze_menu_request(HazeMenuPage) { return false; }
@@ -396,4 +415,5 @@ bool haze_menu_has_focus() { return false; }
 void* haze_menu_owner() { return nullptr; }
 void haze_menu_update(void*,const HazeGamepadState&) {}
 void haze_menu_shutdown() {}
+void haze_menu_retail() {}
 #endif
