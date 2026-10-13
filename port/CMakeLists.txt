@@ -90,8 +90,14 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
             "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/extract_vp_packet_oracle.py"
         VERBATIM)
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PACER_SOURCE}")
-    list(APPEND RECOMP_SOURCES "${HAZE_VP_UPLOAD_PATCHED}")
-    set_property(SOURCE "${HAZE_VP_UPLOAD_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    set(HAZE_JOB_TRACE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_job_trace/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_JOB_TRACE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job_dispatch_trace.py"
+            "${HAZE_VP_UPLOAD_PATCHED}" "${HAZE_JOB_TRACE_PATCHED}"
+        DEPENDS "${HAZE_VP_UPLOAD_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job_dispatch_trace.py"
+        VERBATIM)
+    list(APPEND RECOMP_SOURCES "${HAZE_JOB_TRACE_PATCHED}")
+    set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -261,6 +267,7 @@ add_executable(${PROJECT_NAME}
     haze_guest_pacer.cpp
     haze_job_wait.cpp
     haze_job_profile.cpp
+    haze_job_trace.cpp
     haze_vp_upload.cpp
     haze_native_cursor.cpp
     haze_spu_triplet_copy.cpp
@@ -338,8 +345,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 if(HAZE_RSX_PROFILE)
-    set_property(SOURCE "${HAZE_VP_UPLOAD_PATCHED}" main.cpp haze_job_profile.cpp
+    set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" main.cpp haze_job_profile.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
+    set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" main.cpp haze_job_trace.cpp
+        APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_TRACE)
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE

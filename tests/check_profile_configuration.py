@@ -41,6 +41,15 @@ def check(build, enabled):
         defines = next((line for line in blocks[0].splitlines() if line.startswith('  DEFINES = ')), '')
         if bool(re.search(r'(?:-D|/D)HAZE_JOB_PROFILE(?:\s|$)', defines)) != enabled:
             raise ValueError(f'{source}: completion profiler compile gate mismatch')
+    for source in ('main.cpp', 'haze_job_trace.cpp', 'ppu_recomp_003.cpp'):
+        blocks = [block for block in ninja.split('\n\n') if block.startswith('build ')
+                  and re.search(r'[\\/]' + re.escape(source) + r'\.obj:', block.splitlines()[0])
+                  and '__HazeRecomp_' in block.splitlines()[0]]
+        if len(blocks) != 1:
+            raise ValueError(f'Expected one job-trace rule for {source}')
+        defines = next((line for line in blocks[0].splitlines() if line.startswith('  DEFINES = ')), '')
+        if bool(re.search(r'(?:-D|/D)HAZE_JOB_TRACE(?:\s|$)', defines)) != enabled:
+            raise ValueError(f'{source}: job trace compile gate mismatch')
 
 
 if __name__ == '__main__':

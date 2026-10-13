@@ -215,6 +215,18 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
     & $python "$root/tests/test_job_wait_patch.py"
     if ($LASTEXITCODE -ne 0) { throw 'Job completion patch guard validation failed.' }
+    & $python "$root/tests/test_job_dispatch_trace_patch.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Job trace boundary guard validation failed.' }
+    & $python "$root/tests/test_job_trace_analysis.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Job trace interval accounting failed.' }
+    & $clang /nologo /EHsc /W0 /O2 /std:c++20 /DHAZE_JOB_TRACE /DHAZE_JOB_TRACE_TEST_CAPACITY=64 "/Fe$root/local/test_job_trace.exe" "/Fo$root/local/" "$root/tests/test_job_trace.cpp" "$root/port/haze_job_trace.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Job trace test compilation failed.' }
+    & "$root/local/test_job_trace.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Job trace concurrency and retention tests failed.' }
+    & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_trace_noop.exe" "/Fo$root/local/" "$root/tests/test_job_trace_noop.cpp" "$root/port/haze_job_trace.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op compilation failed.' }
+    & "$root/local/test_job_trace_noop.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op test failed.' }
     & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_profile.exe" "/Fo$root/local/test_job_profile.obj" "$root/tests/test_job_profile.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler test compilation failed.' }
     & "$root/local/test_job_profile.exe" "$root/local/test-job-profile.csv"

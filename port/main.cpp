@@ -32,6 +32,7 @@
  * table. It comes first: everything below is written against that struct. */
 #include "ppu_recomp.h"
 #include "haze_job_profile.h"
+#include "haze_job_trace.h"
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
  * VirtualAlloc, the scalar typedefs -- from one place. On Windows this is a
@@ -384,6 +385,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 haze_vp_upload_summary();
                 g_pump_profile.dump();
                 haze_job_profile_dump();
+                haze_job_trace_dump();
 #endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.
