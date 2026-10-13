@@ -225,6 +225,7 @@ int rsx_live_draw_init(void*, uint32_t, uint32_t,
     const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
 void rsx_live_draw_present(uint32_t);
 void rsx_live_draw_dump_present_samples(void);
+void rsx_live_draw_dump_shader_cache(void);
 int rsx_null_backend_init(uint32_t, uint32_t, const char*);
 int rsx_null_backend_pump_messages(void);
 void* rsx_null_backend_get_hwnd(void);
@@ -411,6 +412,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 haze_job_trace_dump();
                 haze_job_wait_dump_counts();
                 haze_job0_capture_dump();
+                if (s_rsx_live) rsx_live_draw_dump_shader_cache();
 #endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.
