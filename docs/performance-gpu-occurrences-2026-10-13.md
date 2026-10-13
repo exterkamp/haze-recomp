@@ -120,10 +120,32 @@ to deduplication alone. Normal profile close exits 0.
 Private evidence: `local/gpu-occurrences-profile-{windows,summary,present-report}.json`,
 renderer CSV and `.geometry.csv`, camera CSV, process observations and run logs.
 
+## Reverse-order ordinary confirmation
+
+Run `20261013-001552-315` uses the same ordinary executable hash and settings,
+with mode order 2/1/1/2, five-second warmups and 24-second camera sweeps.
+The scene was verified before timing. All four windows pass present continuity,
+mode events, camera trajectory and sampled Haze-process checks. Maximum actual
+yaw error is 1.19e-7 radians, pitch error is zero, and the largest process
+observation gap is 2.13 seconds. Only the owned Haze was observed.
+
+| GPU input | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Occurrences | 758 | 31.61 | 31.632 | 42.662 | 46.824 | 50.318 |
+| Deduplicated | 739 | 30.82 | 32.447 | 45.058 | 50.063 | 57.517 |
+| Deduplicated | 753 | 31.42 | 31.830 | 44.198 | 52.408 | 64.621 |
+| Occurrences | 794 | 33.10 | 30.211 | 40.866 | 44.933 | 53.621 |
+
+Both occurrence windows improve mean, p95 and p99 relative to either
+deduplicated window in reverse order too. The gain varies and neither mode
+achieves consistent pacing. Normal close exits 0; the final log has zero
+dropped draws, texture decode failures and GPU preparation bypasses. Private
+records use the prefix `local/gpu-occurrences-reverse-` plus the run captures/logs.
+
 ## Remaining work
 
-- Reverse the ordinary comparison and validate the squad conversation and
-  additional campaign scenes before automatic promotion.
+- Validate the squad conversation and additional campaign scenes before
+  automatic promotion; both ordinary camera comparison orders now pass.
 - Check rendering equivalence with broader topology and deforming-model
   coverage; the numeric decoder oracle is not a whole-renderer proof.
 - Investigate direct index/reference submission and persistent raw geometry
