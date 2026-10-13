@@ -60,6 +60,10 @@ if (-not $RuntimeOnly) {
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    & $clang /nologo /W0 /O2 /std:c++17 /EHsc "/Fe$root/local/test_spu_idle_workers.exe" "/Fo$root/local/test_spu_idle_workers.obj" "$root/tests/test_spu_idle_workers.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU idle-worker cache compilation failed.' }
+    & "$root/local/test_spu_idle_workers.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'SPU idle-worker cache regression failed.' }
     & $clang /nologo /W0 /O2 /std:c11 /D_CRT_SECURE_NO_WARNINGS "/I$sdk/libs/video" "/Fe$root/local/test_rsx_profile_buffer.exe" "/Fo$root/local/test_rsx_profile_buffer.obj" "$sdk/libs/video/tests/test_rsx_profile_buffer.c"
     if ($LASTEXITCODE -ne 0) { throw 'Deferred profile buffer compilation failed.' }
     & "$root/local/test_rsx_profile_buffer.exe"
@@ -236,6 +240,8 @@ if ($Test) {
     & $python "$root/tests/test_job_dispatch_trace_patch.py"
     if ($LASTEXITCODE -ne 0) { throw 'Job trace boundary guard validation failed.' }
     & $python "$root/tests/test_job_trace_analysis.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Job trace analysis regression failed.' }
+    & $python "$root/tests/test_job_wait_frames.py"
     if ($LASTEXITCODE -ne 0) { throw 'Job trace interval accounting failed.' }
     & $clang /nologo /EHsc /W0 /O2 /std:c++20 /DHAZE_JOB_TRACE /DHAZE_JOB_TRACE_TEST_CAPACITY=64 "/Fe$root/local/test_job_trace.exe" "/Fo$root/local/" "$root/tests/test_job_trace.cpp" "$root/port/haze_job_trace.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Job trace test compilation failed.' }

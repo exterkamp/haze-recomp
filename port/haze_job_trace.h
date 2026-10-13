@@ -18,6 +18,7 @@ enum class HazeJobTraceKind : unsigned {
     SpuCleanup = 12,
     SpuCreateFailed = 13,
     SpuSetupFailed = 14,
+    SpuReuseWorker = 15,
 };
 
 #if defined(HAZE_JOB_TRACE_TEST_CAPACITY)

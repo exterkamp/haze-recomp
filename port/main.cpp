@@ -34,12 +34,12 @@
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
 #include "haze_job0_capture.h"
-#if defined(HAZE_JOB_TRACE) && defined(_WIN32)
 #include "spu_workload.h"
+#if defined(HAZE_JOB_TRACE) && defined(_WIN32)
 static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
                            uint64_t begin, uint64_t end)
 {
-    if (phase < 1 || phase > 8 || !job) return;
+    if (phase < 1 || phase > 9 || !job) return;
     const uint64_t args[] = {
         job->job_id, static_cast<uint32_t>(job->image_id) | (uint64_t(job->have_r3) << 32),
         job->args_ea, (uint64_t(job->taskset_ea) << 32) | job->taskid,
@@ -574,6 +574,13 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
 
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+    // Exact whole-image fingerprints; no generic/persistent controller jobs.
+    // Each invocation retains fresh context/LS and existing completion cleanup.
+    spu_workload_allow_worker_reuse(0xDB819079AF1D1346ULL, 30);
+    spu_workload_allow_worker_reuse(0x6336AB246138D1D7ULL, 41);
+    spu_workload_allow_worker_reuse(0x3AAE86BBB6D9BAA1ULL, 43);
+#endif
 #if defined(HAZE_JOB_TRACE) && defined(_WIN32)
     const char* job_trace_path = getenv("HAZE_JOB_TRACE_CSV");
     if (job_trace_path && *job_trace_path)
@@ -590,6 +597,7 @@ int main(int argc, char** argv)
         {"SPURS_QUEUE_WAIT_NATIVE", "1"},
         {"HAZE_SPU_IDLE_WAIT", "1"},
         {"SPU_FLOAT_NATIVE", "1"},
+        {"SPU_WORKER_REUSE", "1"},
         {"RSX_PROFILE_LIGHT", "1"},
     };
     for (const auto& setting : native_defaults)

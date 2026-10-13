@@ -146,6 +146,15 @@ class PresentWindows(unittest.TestCase):
                 kernel_good+'[haze-job0-kernel-mode] enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
 
+            windows['mode_column'] = 'spu_worker_reuse'
+            args.windows.write_text(json.dumps(windows))
+            kernel_good = '[spu-worker-reuse-mode] enabled=1 qpc=80\n'
+            run(kernel_good)
+            for invalid in ['', float_good, kernel_good.replace('qpc=80', 'qpc=101'),
+                kernel_good.replace('enabled=1', 'enabled=0'),
+                kernel_good+'[spu-worker-reuse-mode] enabled=0 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+
             windows['mode_column'] = 'gpu_vertex_pull'
             args.windows.write_text(json.dumps(windows))
             pull_good=float_good.replace('spu-float-native-mode','gpu-vertex-pull-mode')
