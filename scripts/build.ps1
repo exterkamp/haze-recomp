@@ -91,6 +91,10 @@ if ($Test) {
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
     if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
+    if (-not $RuntimeOnly) {
+        & $python "$root/tests/test_ppu_inline_reads.py" --compiler $clang --sdk $sdk --recomp "$assets/generated/ppu" --output-dir "$root/build/ppu-inline-reads"
+        if ($LASTEXITCODE -ne 0) { throw 'Generated inline memory-read regression failed.' }
+    }
     $audioRingTest = Join-Path $root 'local/test_audio_ring.exe'
     & $clang /nologo /W0 /O2 /std:c11 /Gy /Gw "/I$sdk/include" "/Fe$audioRingTest" "/Fo$root/local/test_audio_ring.obj" "$sdk/libs/audio/tests/test_audio_ring.c" /link /OPT:REF ole32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Audio ring/routing test compilation failed.' }
