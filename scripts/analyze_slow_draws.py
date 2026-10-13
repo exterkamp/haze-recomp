@@ -42,7 +42,9 @@ def validate_rows(rows):
     return frequency
 
 
-def analyze(csv_path, windows_path, log_path):
+def analyze(csv_path, windows_path, log_path, capacity=256):
+    if not isinstance(capacity, int) or isinstance(capacity, bool) or capacity <= 0:
+        raise ValueError('Ring capacity must be a positive integer')
     rows = []
     with Path(csv_path).open(newline='') as stream:
         for raw in csv.DictReader(stream):
@@ -57,9 +59,9 @@ def analyze(csv_path, windows_path, log_path):
     if len(matches) != 1:
         raise ValueError('Expected exactly one recorder summary')
     saved, overwritten, callbacks, threshold = map(int, matches[0])
-    if saved != len(rows) or saved > 256 or saved + overwritten > callbacks:
+    if saved != len(rows) or saved > capacity or saved + overwritten > callbacks:
         raise ValueError('Recorder counts disagree')
-    if overwritten and saved != 256:
+    if overwritten and saved != capacity:
         raise ValueError('Overwritten ring is not full')
     if rows and max(row['callback_id'] for row in rows) > callbacks:
         raise ValueError('Callback ID exceeds final count')
@@ -83,7 +85,8 @@ def analyze(csv_path, windows_path, log_path):
     return dict(note='Filtered retained callbacks only, not complete-frame costs or an isolation audit. '
                      'Stages partition each callback but can contain existing nested timers. '
                      'Raw thread cycles are not CPU milliseconds; absence from this ring does not rule out a stall.',
-                saved=saved, overwritten=overwritten, callbacks=callbacks, threshold_us=threshold,
+                saved=saved, overwritten=overwritten, callbacks=callbacks, capacity=capacity,
+                threshold_us=threshold,
                 qpc_frequency=frequency, first_retained_begin_qpc=min((r['qpc_begin'] for r in rows), default=None),
                 blocks=blocks)
 
@@ -94,8 +97,10 @@ def main():
     parser.add_argument('--windows', required=True, type=Path)
     parser.add_argument('--log', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--capacity', type=int, default=256,
+                        help='recorder ring capacity (default: historical profile ring 256)')
     args = parser.parse_args()
-    result = analyze(args.csv, args.windows, args.log)
+    result = analyze(args.csv, args.windows, args.log, capacity=args.capacity)
     args.output.write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
     print(json.dumps(result, indent=2))
 

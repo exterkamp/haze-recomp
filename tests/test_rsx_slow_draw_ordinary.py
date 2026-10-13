@@ -14,8 +14,8 @@ BEGIN = "/* BEGIN RSX_SLOW_DRAW_DIAGNOSTIC */"
 END = "/* END RSX_SLOW_DRAW_DIAGNOSTIC */"
 
 
-def extract_function(source: str, signature: str) -> str:
-    start = source.find(signature)
+def extract_function(source: str, signature: str, last: bool = False) -> str:
+    start = source.rfind(signature) if last else source.find(signature)
     if start < 0:
         raise ValueError(f"missing function signature: {signature}")
     brace = source.find("{", start)
@@ -83,6 +83,7 @@ static LONG64 InterlockedIncrement64(volatile LONG64* p) { return ++*p; }
 static void AcquireSRWLockExclusive(SRWLOCK* lock) { (void)lock; }
 static void ReleaseSRWLockExclusive(SRWLOCK* lock) { (void)lock; }
 static u32 g_ld_frames = 9;
+static struct { int ready; } g;
 typedef struct { int unused; } rsx_dispatch;
 #ifdef TEST_PROFILE
 #define YZ_PERF_PROFILE 1
@@ -96,8 +97,25 @@ static LONGLONG ld_profile_qpc(void) { LARGE_INTEGER q; QueryPerformanceCounter(
 """
 
 
-def fixture_source(diag: str, wrapper: str) -> str:
+EXIT_STUBS = r"""
+static unsigned summaries_called;
+static void ld_report_counters(void) { ++summaries_called; }
+static void ld_slow_flush_dump(void) { ++summaries_called; }
+static void ld_texture_content_summary(void) { ++summaries_called; }
+static void ld_pull_summary(void) { ++summaries_called; }
+static void ld_present_measure_dump(void) { ++summaries_called; }
+static void ld_texture_watch_summary(void) { ++summaries_called; }
+static void ld_geometry_cache_summary(void) { ++summaries_called; }
+static void ld_vertex_worker_summary(void) { ++summaries_called; }
+#ifdef YZ_PERF_PROFILE
+static void ld_profile_buffers_dump(void) { ++summaries_called; }
+#endif
+"""
+
+
+def fixture_source(diag: str, wrapper: str, exit_dump: str) -> str:
     return PREFIX + diag + r"""
+""" + EXIT_STUBS + exit_dump + r"""
 static unsigned stub_calls;
 static void sink_end_impl(void*, const rsx_dispatch*, ld_slow_draw_scope* scope) {
     ++stub_calls;
@@ -125,7 +143,7 @@ int main(int argc, char** argv) {
     ld_slow_draw_configure();
     if (!enabled) {
         for (unsigned i = 0; i < 32; ++i) sink_end(NULL, &dispatch);
-        ld_slow_draw_dump();
+        rsx_live_draw_dump_present_samples();
 #ifdef YZ_PERF_PROFILE
         if (qpc_calls != 64 || qpf_calls || cycle_calls || g_ld_slow_draw.enabled ||
 #else
@@ -154,8 +172,24 @@ int main(int argc, char** argv) {
             e->primitive != 7 || e->texture_mask != 0x21 ||
             e->stage != LD_SLOW_DRAW_COMMAND_RECORDING) return 15;
     }
-    ld_slow_draw_dump();
+    g.ready = 1;
+    rsx_live_draw_dump_present_samples();
     if (!g_ld_slow_draw.dumped) return 16;
+    FILE* first_dump = fopen(output_path, "rb");
+    if (!first_dump || fseek(first_dump, 0, SEEK_END) != 0) return 17;
+    const long first_size = ftell(first_dump);
+    fclose(first_dump);
+    rsx_live_draw_dump_present_samples();
+    FILE* second_dump = fopen(output_path, "rb");
+    if (!second_dump || fseek(second_dump, 0, SEEK_END) != 0) return 18;
+    const long second_size = ftell(second_dump);
+    fclose(second_dump);
+    if (first_size <= 0 || second_size != first_size) return 19;
+#ifdef YZ_PERF_PROFILE
+    if (summaries_called != 18) return 20;
+#else
+    if (summaries_called != 16) return 21;
+#endif
     free(g_ld_slow_draw.events);
     g_ld_slow_draw.events = NULL;
     return 0;
@@ -167,6 +201,7 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
     text = source.read_text(encoding="utf-8")
     diag = extract_block(text)
     wrapper = extract_function(text, "static void sink_end(void* user, const rsx_dispatch* r)")
+    exit_dump = extract_function(text, "void rsx_live_draw_dump_present_samples(void)", last=True)
     # Assert the checked-in phase boundaries remain in the actual draw path.
     body = extract_function(text, "static void sink_end_impl(void* user, const rsx_dispatch* r,")
     stages = re.findall(r"ld_slow_draw_advance\(slow_draw,\s*(LD_SLOW_DRAW_\w+)\)", body)
@@ -178,7 +213,7 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
     fixture = output_dir / f"slow_draw_{mode}.cpp"
     exe = output_dir / f"slow_draw_{mode}.exe"
     csv_path = output_dir / f"slow_draw_{mode}.csv"
-    fixture.write_text(fixture_source(diag, wrapper), encoding="utf-8")
+    fixture.write_text(fixture_source(diag, wrapper, exit_dump), encoding="utf-8")
     cmd = [compiler, "/nologo", "/std:c++17", "/EHsc", "/W4", "/WX",
            "/Od", f"/Fo{output_dir / f'{mode}.obj'}", str(fixture), f"/Fe{exe}"]
     if profile:

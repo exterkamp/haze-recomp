@@ -18,6 +18,28 @@ def row():
                 **dict(zip(STAGES, (1.0, 0.5, 0.5, 1.0))))
 
 
+def write_capture(root, events, saved, overwritten, callbacks, threshold=1000):
+    source, windows, log = (root / name for name in ('draw.csv', 'windows.json', 'stderr.log'))
+    rows = []
+    for callback_id in events:
+        event = row()
+        event.update(callback_id=callback_id,
+                     qpc_begin=callback_id * 30_000,
+                     qpc_end=callback_id * 30_000 + 30_000,
+                     threshold_us=threshold)
+        rows.append(event)
+    with source.open('w', newline='') as stream:
+        writer = csv.DictWriter(stream, fieldnames=rows[0])
+        writer.writeheader()
+        writer.writerows(rows)
+    windows.write_text(json.dumps(dict(
+        complete=True, qpc_frequency=10_000_000,
+        blocks=[dict(start_qpc=0, end_qpc=(max(events) + 1) * 30_000 + 1, flags=1)])))
+    log.write_text(f'[slow-draw] saved={saved} overwritten={overwritten} '
+                   f'callbacks={callbacks} threshold_us={threshold}')
+    return source, windows, log
+
+
 class SlowDrawAnalysisTests(unittest.TestCase):
     def test_partition_and_raw_cycle_units(self):
         self.assertEqual(validate_rows([row()]), 10_000_000)
@@ -74,6 +96,50 @@ class SlowDrawAnalysisTests(unittest.TestCase):
             log.write_text('[slow-draw] saved=2 overwritten=0 callbacks=2 threshold_us=1000')
             with self.assertRaisesRegex(ValueError, 'counts'):
                 analyze(source, windows, log)
+
+    def test_legacy_256_capacity_default_remains_compatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, windows, log = write_capture(root, range(3, 259), 256, 2, 258)
+            report = analyze(source, windows, log)
+            self.assertEqual(report['capacity'], 256)
+            self.assertEqual((report['saved'], report['overwritten']), (256, 2))
+
+    def test_capacity_1024_no_overwrite_and_full_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, windows, log = write_capture(root, range(1, 4), 3, 0, 3)
+            report = analyze(source, windows, log, capacity=1024)
+            self.assertEqual((report['capacity'], report['saved'], report['overwritten']),
+                             (1024, 3, 0))
+
+            source, windows, log = write_capture(root, range(5, 1029), 1024, 4, 1028)
+            report = analyze(source, windows, log, capacity=1024)
+            self.assertEqual((report['capacity'], report['saved'], report['overwritten']),
+                             (1024, 1024, 4))
+
+    def test_ring_counts_must_match_selected_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, windows, log = write_capture(root, range(1, 1025), 1024, 4, 1027)
+            with self.assertRaisesRegex(ValueError, 'counts'):
+                analyze(source, windows, log, capacity=1024)
+
+            source, windows, log = write_capture(root, range(5, 1028), 1023, 4, 1028)
+            with self.assertRaisesRegex(ValueError, 'not full'):
+                analyze(source, windows, log, capacity=1024)
+
+            source, windows, log = write_capture(root, range(1, 3), 2, 0, 1)
+            with self.assertRaisesRegex(ValueError, 'counts'):
+                analyze(source, windows, log, capacity=1024)
+
+    def test_capacity_must_be_positive_integer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, windows, log = write_capture(root, range(1, 2), 1, 0, 1)
+            for capacity in (0, -1, 1.5, True):
+                with self.assertRaisesRegex(ValueError, 'positive integer'):
+                    analyze(source, windows, log, capacity=capacity)
 
 
 if __name__ == '__main__':
