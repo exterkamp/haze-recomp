@@ -47,8 +47,8 @@ Evidence: `local/shader-bundle-tests.log`.
 SDK `0a796ee` passes the two-job ordinary full build. Candidate
 `local/candidates/shader-bundle/HazeRecomp.exe` is 122,836,992 bytes with SHA-256
 `30574D93947C1C6C9828A438EF87464CBF160CA3A51A056A94E4D7ED1431B196`.
-Build log: `local/shader-bundle-build.log`. Live persistence/reload validation
-is still required before performance conclusions or release promotion.
+Build log: `local/shader-bundle-build.log`. Live results are recorded below;
+release promotion requires a repeatable end-to-end benefit.
 
 No end-to-end loading or frame-pacing gain is established yet. Measurements
 must include archive initialization time, fallback coverage, first resume, and
@@ -88,3 +88,66 @@ loader events. These filtered nested sums are not a complete loading budget.
 
 Evidence: `local/jungle-bundle-legacy-a1-{comparison-evidence,draw-analysis,slow-analysis}.json`,
 raw captures and resource records, run `20261013-222657-499`.
+
+## Same-candidate absent-archive run
+
+`jungle-bundle-training-a1`, run `20261013-223503-237`, uses the new candidate
+and a fresh copy of the same legacy cache, initially without an archive. The
+init log reports `absent`, 0.136 ms. The private save/settings and two 60-second
+camera windows match the baseline procedure; the jungle is visually verified.
+Navigation, measurement and normal game close all exit 0.
+
+All 10,872 complete intervals: **90.622 FPS / 11.035 ms mean**, p99 16.160 ms,
+worst 29.289 ms; no frame exceeds 33.333 ms. The two windows average 89.772 and
+91.473 FPS. Both strict validators pass. Twenty-six resource observations
+bracket the windows, maximum gap 5.340 seconds, memory 51.54-52.20%, and no
+other Haze instance or compiler observed. This run changes host conditions
+relative to the earlier legacy baseline, so their difference is not attributed
+to the new code. The bundle is absent throughout this run.
+
+Normal close exports exactly one successful bundle save: **230 entries,
+4,920,754 bytes**, zero archive hits, 230 misses/fallbacks, and 89.460 ms save
+time outside gameplay. Every archived source and bytecode payload matches its
+legacy file byte-for-byte. Archive SHA-256:
+`88912837ac616705f3c31ab8a98835c13f4263ab44f66286caf15e179e87da57`.
+Evidence: `local/shader-bundle-training-exact-match.json`, boot log and
+`local/jungle-bundle-training-a1-{comparison-evidence,draw-analysis}.json`.
+
+## Same-candidate archive replay
+
+`jungle-bundle-replay-b1`, run `20261013-224009-998`, copies the training cache
+including its saved archive. The executable, save snapshot, settings, normal
+navigation and two 60-second camera windows are unchanged. The scene is
+visually verified; navigation, measurement and normal close all exit 0.
+
+Initialization loads the 230 entries in **10.745 ms**. Final counters show
+**220 archive hits and 18 legacy fallbacks**. Close saves 248 entries /
+5,211,376 bytes in 94.693 ms, preserving the ten old entries not requested by
+this launch. Every one of the 248 archived source/bytecode pairs matches its
+legacy file exactly. This validates real archive lookup and merge behavior,
+including different shader coverage between launches.
+
+All 8,818 complete intervals: **73.501 FPS / 13.605 ms mean**, p99 20.028 ms,
+worst 48.206 ms; five frames exceed 33.333 ms and none exceed 50 ms. Resource
+coverage passes: 26 samples, maximum gap 5.368 seconds, memory 52.36-53.62%,
+no compiler observed. Another Haze PID 12436 appears; both strict isolation
+checks fail. This is not a controlled regression or speedup relative to the
+isolated absent-archive run. All intervals and failed checks are retained.
+
+The draw ring retains 17 events with no overwrite, versus 114 in the absent
+run. Their filtered shader-load scopes sum to 65.193 ms, versus 549.927 ms;
+the largest replay load is 8.413 ms. Zero compilation is recorded in these
+retained events. These threshold-filtered sums are neither complete loading
+budgets nor a measured startup-to-interactive improvement. One replay event
+falls inside a timed window: 4.146 ms, of which 4.129 ms is resource resolution;
+PSO lookup hits and takes 0.0028 ms. Settled pacing remains a separate problem.
+
+The archive removes 220 per-shader load attempts in this replay for a measured
+10.745-ms startup scope. That is a verified change in the I/O path. Repeatable
+end-to-end loading gains, colder-cache behavior, and stable frame pacing remain
+unproven; this prototype is not promoted into the user launcher.
+
+Replay archive SHA-256:
+`ef84421c54ecfb4d3e0fda2fe42d3879fafd9d5c1357cd3ae1fb63e714cd5d93`.
+Evidence: `local/shader-bundle-replay-exact-match.json`, boot log and
+`local/jungle-bundle-replay-b1-{comparison-evidence,draw-analysis,slow-analysis}.json`.
