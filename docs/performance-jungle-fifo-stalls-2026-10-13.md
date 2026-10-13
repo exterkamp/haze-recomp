@@ -226,3 +226,57 @@ The cache inventory contains 1,996 files totaling 21,220,829 bytes; only the
 128-file subset is probed. No cache file is modified or removed. Private source
 and results: `local/rsx_shader_cache_io_probe.c` and
 `local/rsx-shader-cache-io-probe.csv`. No shader source/blob is committed.
+
+## Fixed-mode VP reporting deferred and verified
+
+SDK `afc8da5`, integrated by Haze `fd85d5a`, removes periodic VP counter prints
+and polling-clock calls when the consumer mode is fixed and its explicit
+profile/file controls are absent. Startup mode evidence remains. Dedicated
+`cellGcm_vp_burst_dump()` exports final totals once under the FIFO lock, called
+from Haze's actual normal window-close path. This matters because that path
+exports reports and calls `exit(0)` without SDK renderer shutdown. Explicit
+profile and file-control reporting remains available; no user setting is added.
+
+Focused tests compile the actual header and exporter with simulated expensive
+printing. They cover fixed/inactive/profile modes, file-control transitions,
+final counters, and repeated export. Existing 62 native consumer boundary and
+diagnostic checks pass. The two-job incremental ordinary build exits 0.
+Candidate `local/candidates/vp-report-deferred/HazeRecomp.exe` has SHA-256
+`BC188C842105204458DAD1B42CA58E56A4315D73F717EF186267DFDDE0FCB21F`.
+
+Live verification `jungle-vp-report-deferred-a1` / `20261013-221119-926`
+uses the same 1440p diagnostic settings with native fill off. Navigation reaches
+the jungle normally; a capture verifies the scene, diagnostic PAD polling
+detaches, and two 60-second camera windows finish. Both measurement and owned
+game exit 0. The complete log has exactly one startup `[rsx-vp-burst-counts]`
+line, no periodic count lines, and one `[rsx-vp-burst-final]` with **8,186,674
+native operations, zero original/rejected operations, and zero profiling ticks**.
+These are whole-launch counters, not timed-window rates.
+
+All 8,248 complete intervals are retained: **68.765 FPS / 14.542 ms mean**,
+p95 19.575 ms, p99 23.764 ms, maximum 345.555 ms; 15 frames exceed 33.333 ms and
+three exceed 50 ms. Pump means are 7.892 ms outer wait, 4.558 ms FIFO, and
+1.963 ms presentation. Camera/mode checks pass; strict isolation fails.
+Twenty-six bracketing resource samples show no compilers, memory 51.87-54.34%,
+maximum gap 6.314 seconds, and other Haze PIDs 44672/36096/23568 over the run.
+Host workload and startup differ from the preceding diagnostic, so the lower
+mean/p99/maximum cannot be attributed solely to the reporting change.
+
+Draw/FIFO/flush exports validate with zero overwritten events; the draw ring
+contains 95 events. The three largest timed frames still need work:
+
+- 345.556 ms frame: 339.664 ms FIFO, including a 336.294 ms drain with no
+  overlapping retained draw over 4 ms.
+- 285.900 ms frame: 278.937 ms FIFO, including a 278.754 ms drain with no
+  overlapping retained draw over 4 ms.
+- 141.570 ms frame: a retained 128.204 ms draw spends 128.166 ms resolving
+  resources; its PSO lookup hits and takes 0.0032 ms, with no PSO build.
+
+The avoidable periodic output is removed and verified, but non-draw FIFO stalls,
+resource-resolution stalls, and stable pacing remain unresolved. The shader-cache
+replacement is tracked separately in #89. Its orderly persistence must use the
+actual Haze exit path, not only `rsx_live_draw_shutdown`.
+
+Private evidence: `local/vp-report-deferred-identity.json`, build/focused-test
+logs, and `local/jungle-vp-report-deferred-a1-{comparison-evidence,draw-analysis,slow-analysis,draw-joins}.json`
+with corresponding original captures, CSVs, window manifests and observers.
