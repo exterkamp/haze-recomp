@@ -253,3 +253,41 @@ the persistent pre-draw and draw-span gaps without equating service elapsed time
 with wasted CPU. Private stage evidence uses `local/native-index-refs-profile-`:
 windows, validation, renderer CSV/geometry sidecar, summary, camera and process
 logs. Normal close flushes both stage and present data.
+
+### Fresh ordinary confirmation: incomplete recording, retained pacing evidence
+
+The same ordinary candidate (SHA-256
+`54802A22F6528D704FE5308916C7BFC44FBECE4BD049DFCEEC394C28CB3D7F07`)
+ran eight 24-second camera windows in on/off/off/on/off/on/on/off order,
+with five-second warmups, 1440p, VSync on and no frame cap. GPU occurrence
+mode stayed at 2; vertex-program caching and native job waits stayed off.
+The owned game remained open for attempted traversal afterward. This exceeded
+the present recorder's 16,384-entry retention: its first retained present is
+19273, and six earlier windows lack complete coverage. The full report correctly
+rejects this run. Do not use it as a completed eight-window comparison.
+
+The final two complete windows pass present continuity, CPU-mode, actual camera
+trajectory and process-observation checks. No intervals in them are trimmed:
+
+| Native refs | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms | Frames >50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| On | 701 | 29.23 | 34.213 | 46.238 | 53.750 | 67.382 | 14 |
+| Off | 770 | 32.13 | 31.122 | 40.948 | 47.003 | 62.054 | 4 |
+
+This is a current pacing observation, not a clean treatment effect. Read-only
+system CPU observations show 69.98% versus 54.80% busy over fully contained
+sample pairs (21.07 and 20.97 seconds of each window). The game's own CPU use
+is similar, 5.495 versus 5.551 cores. Host load differs, but these observations
+do not establish the cause of the frame-time difference. Window rectangle,
+minimized state, priority and foreground PID do not change at sampled instants;
+short interactions between polls remain possible. Neither mode has consistent
+pacing, and the native-index whole-frame benefit remains unproven.
+
+After-window captures still show the carrier approach, not a verified squad
+conversation. The progression gate remains open. Normal close exits 0.
+Future comparative runs must flush promptly after timing; perform traversal
+in a separate run so it cannot overwrite comparison evidence.
+
+Private evidence: `local/native-index-refs-confirm-` files include the original
+eight-window manifest, retained-window manifest (with all six exclusions),
+retained report, presents, camera audit, process observations and host summary.
