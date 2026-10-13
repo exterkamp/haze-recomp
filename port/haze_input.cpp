@@ -14,6 +14,8 @@
 #include "haze_startup.h"
 #include "haze_startup_prompt.h"
 #include "haze_input_key.h"
+#include "haze_quit.h"
+#include "haze_quit_menu.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -183,6 +185,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
+        if (haze_quit_menu_key(int(wp),(lp&(1ll<<30))!=0)) { capture(false); return 0; }
         if (wp == VK_F6) { if (!(lp & (1ll<<30))) haze_graphics_request_reload(); return 0; }
         record_key((int)wp,true,GetTickCount64());
         if (!enabled) break;
@@ -271,7 +274,14 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_XBUTTONDOWN: case WM_XBUTTONUP:
         record_key(HIWORD(wp)==XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2,
                    msg==WM_XBUTTONDOWN,GetTickCount64()); break;
-    case WM_KILLFOCUS: case WM_CLOSE: case WM_DESTROY:
+    case WM_CLOSE:
+        clear_keys(); pointer_mode(false); capture(false);
+        if (GetCapture()==hwnd) ReleaseCapture();
+        suppress_mouse_buttons=true;
+        if (haze_quit_window_close()) return 0;
+        capture_policy.ready=false;
+        break;
+    case WM_KILLFOCUS: case WM_DESTROY:
         clear_keys(); pointer_mode(false); capture(false);
         if (GetCapture()==hwnd) ReleaseCapture();
         suppress_mouse_buttons=true;
@@ -339,7 +349,7 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     ULONGLONG now = GetTickCount64();
     HWND foreground=GetForegroundWindow();
     const bool focused=foreground && foreground==window.load();
-    if (haze_menu_active()) {
+    if (haze_menu_active() || haze_quit_menu_active()) {
         *input=CellPadHostInput{0,128,128,128,128,0,0};
         clear_keys(); mouse_motion.clear(); InterlockedExchange(&wheel,0); return 1;
     }
@@ -490,7 +500,7 @@ bool haze_input_take_mouse(double& x, double& y, double& speed, bool& invert) {
     std::lock_guard<std::mutex> lock(settings_mutex);
     mouse_motion.take(x,y);
     speed=sensitivity; invert=invert_y;
-    return enabled && captured && !haze_menu_active() && !menu_return_pending &&
+    return enabled && captured && !haze_menu_active() && !haze_quit_menu_active() && !menu_return_pending &&
         !menu_active && !pause_requested && GetForegroundWindow()==window.load();
 }
 void haze_input_update() {
@@ -510,26 +520,34 @@ void haze_input_update() {
             haze_input_reload();
         }
     }
+    HazeGamepadState latest=controller_state;
+    bool sample_focused=controller_sample_focused;
     if (gamepad_initialized) {
-        const auto state=haze_gamepad_update();
-        const bool focused=GetForegroundWindow()==window.load() || haze_menu_has_focus();
+        latest=haze_gamepad_update();
+        const auto& state=latest;
+        const bool focused=GetForegroundWindow()==window.load() || haze_menu_has_focus() || haze_quit_menu_has_focus();
         if (focused && state.connected && (!enabled || last_family!=HazeInputFamily::Keyboard))
             last_family=state.family;
         if (focused && state.activity) {
             last_family=state.family; capture_policy.use_controller();
             pointer_mode(false); capture(false);
         }
-        std::lock_guard<std::mutex> lock(settings_mutex);
-        controller_state=state;
-        controller_sample_focused=focused;
+        sample_focused=focused;
     }
     capture_policy.focused=GetForegroundWindow()==window.load();
     capture_policy.menu_state(menu_active);
     capture_policy.pause_pending=pause_requested;
     capture(capture_policy.wants_capture());
     haze_prompts_update(last_family.load());
-    if (haze_menu_active()) capture(false);
-    haze_menu_update(window.load(),controller_state);
+    if (haze_menu_active() || haze_quit_menu_active() || haze_quit_offer().available) capture(false);
+    // Give menu actions first ownership of a new controller press. Publishing
+    // it to the guest before opening Quit could also activate the retail page.
+    haze_menu_update(window.load(),latest);
+    haze_quit_menu_update(window.load(),latest);
+    {
+        std::lock_guard<std::mutex> lock(settings_mutex);
+        controller_state=latest; controller_sample_focused=sample_focused;
+    }
     if (startup_skip.showing()) {
         const auto family=last_family.load();
         if (now>=next_hint_check || family!=hint_family) {
@@ -570,13 +588,13 @@ void haze_input_menu_state(bool active) {
 }
 HazeMenuPointer haze_input_take_pointer() {
     std::scoped_lock lock(settings_mutex,pointer_mutex);
-    if (haze_menu_active() || menu_return_pending) {
+    if (haze_menu_active() || haze_quit_menu_active() || menu_return_pending) {
         // This consumer runs after the guest's normal GUI input update, unlike
         // host pad polls (which GetInfo can consume before GetData is used).
         // Discard queued pointer clicks as well as pad input while the PC page
         // owns focus, then deliver exactly one Back through the GUI's packet.
         menu_pointer={}; menu_delivered={}; menu_right_held=false;
-        if (haze_menu_active() || GetForegroundWindow()!=window.load() ||
+        if (haze_menu_active() || haze_quit_menu_active() || GetForegroundWindow()!=window.load() ||
             (gamepad_initialized && !controller_sample_focused)) return {};
         bool held=controller_state.input.buttons || controller_state.input.lx!=128 || controller_state.input.ly!=128 ||
             controller_state.input.rx!=128 || controller_state.input.ry!=128;
@@ -645,7 +663,8 @@ unsigned haze_input_menu_button(int virtual_key) {
     return buttons;
 }
 void haze_input_shutdown() {
-    haze_menu_shutdown();
+    haze_quit_menu_shutdown();
+    haze_menu_shutdown(true);
     startup_prompt.close();
     capture_policy.ready=false;
     capture(false);

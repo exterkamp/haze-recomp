@@ -83,10 +83,19 @@ static bool native_menu_active;
 bool haze_menu_active() { return native_menu_active; }
 bool haze_menu_has_focus() { return false; }
 void haze_menu_update(void*,const HazeGamepadState&) {}
-void haze_menu_shutdown() {}
+static bool menu_exiting_process;
+void haze_menu_shutdown(bool exiting_process) { menu_exiting_process=exiting_process; }
 void haze_video_menu_register() {}
 void haze_audio_menu_register() {}
 void haze_controls_menu_register() {}
+static bool quit_active=false,close_accepted=false;
+bool haze_quit_menu_active() { return quit_active; }
+bool haze_quit_menu_has_focus() { return false; }
+bool haze_quit_menu_key(int,bool) { return false; }
+void haze_quit_menu_update(void*,const HazeGamepadState&) {}
+void haze_quit_menu_shutdown() {}
+HazeQuitOffer haze_quit_offer() { return {}; }
+bool haze_quit_window_close() { return close_accepted; }
 static CellPadHostInput sample() {
     CellPadHostInput input{0,128,128,128,128,0,0};
     assert(poll(0,&input,nullptr)==1);
@@ -132,6 +141,19 @@ int main() {
     keys[VK_SPACE]=false;
     assert(!haze_input_take_pointer().back && !menu_return_pending);
     assert(!sample().buttons); // Retail handoff never injects Back.
+    quit_active=true; keys['W']=keys[VK_SPACE]=true;
+    menu_pointer.active=menu_pointer.released=menu_pointer.back=true;
+    auto quit_pointer=haze_input_take_pointer();
+    assert(!quit_pointer.active && !quit_pointer.released && !quit_pointer.back);
+    blocked=sample(); assert(!blocked.buttons && blocked.ly==128);
+    double quit_x,quit_y,quit_speed; bool quit_invert;
+    assert(!haze_input_take_mouse(quit_x,quit_y,quit_speed,quit_invert));
+    quit_active=false; keys['W']=keys[VK_SPACE]=false;
+    haze_input_menu_retail(); assert(!sample().buttons && menu_return_pending);
+    assert(!haze_input_take_pointer().back && !menu_return_pending);
+    close_accepted=true; forwarded_message=0; window_proc(window,WM_CLOSE,0,0);
+    assert(forwarded_message!=WM_CLOSE);
+    close_accepted=false; window_proc(window,WM_CLOSE,0,0); assert(forwarded_message==WM_CLOSE);
     keys['W']=keys['D']=keys[VK_SPACE]=true;
     auto p=sample(); assert(p.lx==255 && p.ly==1 && (p.buttons&CELL_PAD_CTRL_CROSS));
     keys['S']=keys['A']=true;
@@ -438,5 +460,6 @@ int main() {
     capture_policy={}; capture_policy.enabled=false; enabled=false;
     haze_input_attach((void*)1); ticks+=10; haze_input_update(); assert(!captured);
     haze_input_shutdown();
+    assert(menu_exiting_process);
     puts("Haze keyboard taps, focus release, mouse capture gating and movie skip isolation passed.");
 }
