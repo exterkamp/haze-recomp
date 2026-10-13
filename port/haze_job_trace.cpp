@@ -47,8 +47,8 @@ struct RingSlot {
 };
 
 static_assert(HAZE_JOB_TRACE_CAPACITY > 0, "trace ring capacity must be nonzero");
-static_assert((sizeof(RingSlot) + sizeof(std::uint64_t)) * static_cast<std::size_t>(HAZE_JOB_TRACE_CAPACITY) < 64u * 1024u * 1024u,
-    "trace ring must stay under 64 MiB");
+static_assert((sizeof(RingSlot) + sizeof(std::uint64_t)) * static_cast<std::size_t>(HAZE_JOB_TRACE_CAPACITY) <= 512u * 1024u * 1024u,
+    "trace ring must stay at or under 512 MiB");
 
 RingSlot g_ring[HAZE_JOB_TRACE_CAPACITY];
 std::uint64_t g_span_scratch[HAZE_JOB_TRACE_CAPACITY];

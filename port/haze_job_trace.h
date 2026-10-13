@@ -24,7 +24,9 @@ enum class HazeJobTraceKind : unsigned {
 #if defined(HAZE_JOB_TRACE_TEST_CAPACITY)
 #define HAZE_JOB_TRACE_CAPACITY HAZE_JOB_TRACE_TEST_CAPACITY
 #else
-#define HAZE_JOB_TRACE_CAPACITY 262144u
+// Diagnostic builds only: retain both 24-second comparison windows plus
+// warmup/close time. Consumers must still validate actual ring coverage.
+#define HAZE_JOB_TRACE_CAPACITY 2097152u
 #endif
 
 #if defined(HAZE_JOB_TRACE) && defined(_WIN32)

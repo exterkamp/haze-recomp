@@ -131,3 +131,42 @@ The WIP launcher is staged at
 `local/releases/haze-wip-2026-10-13-idle-workers/Play-Haze.cmd`, preserving the
 previous WIP and its current graphics settings. Interactive play uses audio
 and normal saves; all tests above used muted disposable saves.
+
+## Isolated confirmation contradicts an unconditional gain
+
+The fresh ordinary WIP run `20261013-101551-895` (PID 38632, exited normally)
+completed reversed order **1, 0, 0, 1**, tokens 2100–2103, with the same
+24-second windows, five-second warmups, checkpoint and settings. All full-window
+mode, camera, present and process audits pass. The pressure observer recorded
+22 samples, maximum gap 5.859 seconds, memory 46.74–47.40%, and no compiler or
+other Haze process. This still cannot exclude unsampled background activity.
+
+| Reuse | Intervals | Mean ms | FPS | p95 ms | p99 ms | Maximum ms |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 1061 | 22.091 | 45.267 | 23.300 | 107.499 | 3136.075 |
+| 0 | 1574 | 15.239 | 65.623 | 19.342 | 27.142 | 47.769 |
+| 0 | 1582 | 15.161 | 65.958 | 19.745 | 28.215 | 52.354 |
+| 1 | 1891 | 12.680 | 78.866 | 16.347 | 19.539 | 32.568 |
+
+Pooling complete intervals gives dedicated **15.200 ms / 65.790 FPS** versus
+reuse **16.062 ms / 62.258 FPS**. Reuse has 30 intervals above 33.333 ms and
+18 above 50 ms; dedicated has 20 and one respectively. No outlier was removed.
+The final reuse window is faster, but the complete run does **not** reproduce
+the previous pooled gain. Neither a general improvement nor a causal reuse
+regression is established by these order-dependent results.
+
+The 3136.075 ms present gap (QPC 13987713667731–13987745028481) overlaps pump
+frame 28781: total 3307.044 ms, FIFO-drain scope 3129.998 ms, present scope
+173.399 ms, idle wait 0.0016 ms, reported thread CPU 15.625 ms. Other large
+stalls fall in present, FIFO and idle-wait scopes. These coarse wall-time
+buckets do not identify a lock, GPU fence, scheduler delay or paging cause.
+Both modes improve later, making checkpoint settling a lead requiring a
+controlled capture, not a reason to discard the first window.
+
+Evidence prefix: `local/jungle-idle-worker-confirm` (`-windows.json`,
+`-report.json`, `-pooled.json`, `-pump.csv`, `-presents.csv`, `-camera.txt.csv`,
+`-processes.jsonl`, `-pressure.jsonl`). The current WIP hash is the CB9052BB
+hash above. Consistent pacing and independent performance acceptance remain
+open. Windows WPR CPU capture failed to enable the system profiling policy
+(0xc5585011); no ETW capture was obtained. The next diagnostic uses the existing
+in-game recorder with a larger bounded history and checks actual retention.

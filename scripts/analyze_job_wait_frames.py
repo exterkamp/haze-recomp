@@ -348,8 +348,8 @@ def analyze(trace_path, windows_path, pump_path):
                  'reported separately. Pump scope times are disjoint only within the pump thread. '
                  'The pump-interval residual means time not covered by observed matched waits in QPC; '
                  'it is not CPU, unblocked execution, or a removable-cost estimate. Thread CPU is the '
-                 'pump CSV Windows accounting and may be quantized. This trace predates 37ffeb7; '
-                 'results describe this capture only, not current FPS.'),
+                 'pump CSV Windows accounting and may be quantized. '
+                 'Results describe this instrumented capture only, not ordinary-build FPS.'),
         'blocks': blocks,
     }
 
