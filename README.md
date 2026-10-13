@@ -37,8 +37,13 @@ $env:PS3_DEV_FLASH = 'C:\path\to\dev_flash'
 .venv\Scripts\python.exe scripts/lift_firmware.py
 
 .\scripts\build.ps1
+# Or double-click build/haze/HazeLauncher.exe after building.
 .\scripts\play.ps1
 ```
+
+**HazeLauncher.exe** starts the game without a scripting console, preserves
+save/settings/cache paths and retains session logs. Native dialogs select
+missing game or firmware paths; see the [launcher guide](docs/executable-launcher.md).
 
 Already extracted files belong in `game/disc/PS3_GAME/`, including `PARAM.SFO`
 and `USRDIR/EBOOT.BIN`. Decryption produces `USRDIR/EBOOT.ELF`. Set
