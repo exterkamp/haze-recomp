@@ -578,6 +578,8 @@ int main(int argc, char** argv)
     // Exact whole-image fingerprints; no generic/persistent controller jobs.
     // Each invocation retains fresh context/LS and existing completion cleanup.
     spu_workload_allow_worker_reuse(0xDB819079AF1D1346ULL, 30);
+    spu_workload_allow_worker_reuse(0xD7E7384CB7BEF175ULL, 32);
+    spu_workload_allow_worker_reuse(0x6840DFFCF7F63411ULL, 33);
     spu_workload_allow_worker_reuse(0x6336AB246138D1D7ULL, 41);
     spu_workload_allow_worker_reuse(0x3AAE86BBB6D9BAA1ULL, 43);
 #endif
