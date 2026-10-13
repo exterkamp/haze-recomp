@@ -145,6 +145,13 @@ class PresentWindows(unittest.TestCase):
                 pull_good.replace('enabled=1','enabled=0'),
                 pull_good+'[gpu-vertex-pull-mode] enabled=0 qpc=150\n']:
                 with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
+            windows['blocks'][0]['flags'] = 2
+            args.windows.write_text(json.dumps(windows))
+            occurrence_good = pull_good.replace('enabled=1','enabled=2')
+            run(occurrence_good)
+            for invalid in [pull_good, occurrence_good.replace('qpc=80','qpc=101'),
+                occurrence_good+'[gpu-vertex-pull-mode] enabled=1 qpc=150\n']:
+                with self.subTest(log=invalid), self.assertRaises(ValueError): run(invalid)
 
     def test_modes_and_invalid_windows(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:

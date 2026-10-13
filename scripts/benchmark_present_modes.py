@@ -188,7 +188,8 @@ def report(args):
                     'native_cursor':'haze-native-cursor-mode',
                     'spu_float_native':'spu-float-native-mode',
                     'gpu_vertex_pull':'gpu-vertex-pull-mode'}[mode_column]
-            match = re.fullmatch(r'\[' + name + r'\] enabled=([01]) qpc=(\d+)', line)
+            valid_modes = '[012]' if mode_column == 'gpu_vertex_pull' else '[01]'
+            match = re.fullmatch(r'\[' + name + r'\] enabled=(' + valid_modes + r') qpc=(\d+)', line)
             if match: worker_modes['process'].append((int(match[2]), int(match[1])))
         worker_modes['process'].sort()
     elif mode_column in ('spurs_queue_wait', 'spu_idle_wait', 'usleep', 'frame_pacer', 'fifo_recycle_wait'):
@@ -297,7 +298,7 @@ if __name__ == '__main__':
         if not 0 < args.camera_token_base <= 1000000-len(args.flags):
             parser.error('Camera trajectory tokens must fit the range 1..1000000')
         allowed_modes = ((0,1,2,3) if args.mode_column == 'vertex_workers' else
-                         (0,1,2) if args.mode_column == 'window_position' else
+                         (0,1,2) if args.mode_column in ('window_position','gpu_vertex_pull') else
                          (0,8) if args.mode_column == 'usleep' else (0,1))
         if args.mode_column != 'cpu_work' and any(f not in allowed_modes for f in args.flags):
             parser.error('Use shadow/depth/queue flags 0/1, vertex-worker flags 0..3, window-position flags 0/1/2, or usleep flags 0/8')
