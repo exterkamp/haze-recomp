@@ -20,8 +20,8 @@ The existing shader disk cache was retained; this was not a cleared-cache test.
 Menu captures verify Campaign -> Single Player -> Continue Campaign and its
 confirmation. Confirm input is timestamped QPC `13805747204007`, frequency
 10,000,000. No screenshots occur during the next 45 seconds. The resulting
-scene is the jungle Nectar tutorial; the user has been asked whether this is
-the intended busy-area checkpoint. No settled combat FPS is claimed. Subsequent
+scene is the jungle Nectar tutorial; the user confirms this is the intended
+busy-area checkpoint. No settled combat FPS is claimed. Subsequent
 captures and inputs advance the tutorial, but do not complete that benchmark.
 
 | Frame | Seconds after confirm | Interval ms | PSO preparation ms | Pipeline creation ms | Shader disk-load scope ms |
