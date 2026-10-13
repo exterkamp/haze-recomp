@@ -291,3 +291,59 @@ in a separate run so it cannot overwrite comparison evidence.
 Private evidence: `local/native-index-refs-confirm-` files include the original
 eight-window manifest, retained-window manifest (with all six exclusions),
 retained report, presents, camera audit, process observations and host summary.
+
+### Prompt-close repeat and squad progression
+
+Fresh run `20261013-015016-453` repeats off/on/on/off using the same ordinary
+candidate and settings. Every 24-second window has complete present/mode and
+actual-camera coverage. Closing promptly preserves all timing data:
+
+| Native refs | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Off | 792 | 33.03 | 30.273 | 40.882 | 45.717 | 81.873 |
+| On | 786 | 32.84 | 30.452 | 40.653 | 45.460 | 83.692 |
+| On | 772 | 32.19 | 31.062 | 43.029 | 52.553 | 65.387 |
+| Off | 765 | 31.91 | 31.336 | 42.095 | 46.613 | 60.524 |
+
+Pooled mean intervals are 30.795 ms off and 30.754 ms on: effectively unchanged
+in this sequence, with a time trend within both modes. The local preparation
+saving has not produced a clear whole-frame improvement. Do not promote it
+on an FPS claim. Host CPU observations across the four windows are approximately
+54.87%, 53.04%, 53.02% and 55.50% busy.
+
+The strict process observer rejects the fourth window because its first sample
+after the window, 1.582 seconds after its endpoint, sees the already closed
+game. Samples through the endpoint see only the owned PID; the preceding three
+windows have valid bracketing samples. This is a post-window coverage caveat,
+not a reported competing Haze instance. Preserve the strict rejection and the
+separate camera/present report. Later runners must wait for a post-window
+observation before closing. Private files use `native-index-refs-final-abba-`.
+
+A separate muted run `20261013-015447-393` enables native indices, takes a
+bounded CPU diagnostic outside all timing windows, then follows the squad
+route. Capture 020890 verifies "Objective complete: Gather with the rest of
+your squad". Native indices and GPU occurrences remain enabled throughout
+traversal. An automatic launch-approval timeout delayed the timing script;
+the following two 30-second windows measure later progression, not the entire
+approach or exact conversation entry:
+
+| Later squad progression | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| First | 599 | 20.22 | 49.457 | 94.283 | 304.157 | 557.790 |
+| Second | 755 | 25.23 | 39.633 | 53.265 | 69.054 | 131.388 |
+
+Both windows pass complete present/mode checks without trimming. Process
+observation coverage is incomplete for the first window after the approval
+delay; the second passes the strict process check (16 samples, maximum gap
+2.160 seconds). No input, captures, builds or CPU sampling run inside either
+window. Close waits three seconds for observation coverage and returns 0.
+Exit counters show zero dropped draws, texture decode failures and GPU-path
+bypasses. These counters and the objective capture validate this traversal;
+they do not establish graphical equivalence or campaign-wide correctness.
+Long stalls remain and are not attributed to a particular subsystem here.
+
+Evidence: `local/native-index-refs-squad-` window/report files (all windows and
+separate second-window process coverage), process logs, and
+`local/native-index-refs-cpu-callers-presents.csv`. The caller diagnostic and
+next producer replacement are documented in
+[native vertex-program packet preparation](performance-native-vp-packets-2026-10-13.md).
