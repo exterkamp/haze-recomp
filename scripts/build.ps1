@@ -206,6 +206,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet test compilation failed.' }
     & "$root/local/test_vp_packets.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet boundary comparison failed.' }
+    & $python "$root/tests/test_vp_upload_patch.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program upload patch guards failed.' }
+    & $clang /nologo /EHsc /W0 /O2 /std:c++17 "/I$assets/generated/ppu" "/I$sdk/runtime/ppu" "/I$root/local" "/Fe$root/local/test_vp_upload.exe" "/Fo$root/local/" "$root/tests/test_vp_upload.cpp" "$root/port/haze_vp_upload.cpp" "$sdk/runtime/ppu/ppu_native_memory.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Native vertex-program upload adapter compilation failed.' }
+    & "$root/local/test_vp_upload.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Native vertex-program upload boundary validation failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }

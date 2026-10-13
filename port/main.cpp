@@ -194,6 +194,7 @@ extern "C" int  rsx_null_backend_pump_messages(void);
  * ticks behind it paces the whole game behind it. */
 extern "C" void spu_float_native_update(void);
 extern "C" void spu_float_native_summary(void);
+extern "C" void haze_vp_upload_summary(void);
 #ifdef _WIN32
 extern "C" {
 int rsx_live_draw_enabled(void);
@@ -381,6 +382,7 @@ static DWORD WINAPI frame_clock(LPVOID)
 #ifdef _WIN32
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
                 spu_float_native_summary();
+                haze_vp_upload_summary();
 #endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.

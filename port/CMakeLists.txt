@@ -82,9 +82,16 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
             "${HAZE_PACER_PATCHED}" "${HAZE_JOB_WAIT_PATCHED}"
         DEPENDS "${HAZE_PACER_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job_wait.py"
         VERBATIM)
+    set(HAZE_VP_UPLOAD_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_vp_upload/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_VP_UPLOAD_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_vp_upload.py"
+            "${HAZE_JOB_WAIT_PATCHED}" "${HAZE_VP_UPLOAD_PATCHED}"
+        DEPENDS "${HAZE_JOB_WAIT_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_vp_upload.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/extract_vp_packet_oracle.py"
+        VERBATIM)
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PACER_SOURCE}")
-    list(APPEND RECOMP_SOURCES "${HAZE_JOB_WAIT_PATCHED}")
-    set_property(SOURCE "${HAZE_JOB_WAIT_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    list(APPEND RECOMP_SOURCES "${HAZE_VP_UPLOAD_PATCHED}")
+    set_property(SOURCE "${HAZE_VP_UPLOAD_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -149,6 +156,7 @@ endif()
 # ppu_recomp.h, so they can only be built against a particular lift.
 set(PS3RECOMP_SCAFFOLD
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_loader.cpp"
+    "${PS3RECOMP_DIR}/runtime/ppu/ppu_native_memory.cpp"
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_hle.cpp"
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_fs.cpp"
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_sysprx.cpp"
@@ -252,6 +260,7 @@ add_executable(${PROJECT_NAME}
     haze_camera.cpp
     haze_guest_pacer.cpp
     haze_job_wait.cpp
+    haze_vp_upload.cpp
     haze_native_cursor.cpp
     haze_spu_triplet_copy.cpp
     haze_graphics.cpp

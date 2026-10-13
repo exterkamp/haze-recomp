@@ -2,9 +2,9 @@
 
 Tracked in [#35](https://github.com/zdiemer/haze-recomp/issues/35) and
 [#38](https://github.com/zdiemer/haze-recomp/issues/38), with attribution in #9.
-This is a tested host packing kernel and a selected producer boundary, not an
-installed game hook or a demonstrated FPS improvement. Direct native draw
-submission remains a later step under #35.
+The guarded producer hook is implemented, passes its boundary tests, and runs
+on the carrier. Its first ordinary comparison does not establish a performance
+gain. It defaults off. Direct native draw submission remains a later step under #35.
 
 ## Caller evidence
 
@@ -70,21 +70,101 @@ null inputs, overlap rejection without writes, oversized counts and Windows
 guard pages immediately after exact source/output spans. Oracle extraction
 and changed-source rejection tests pass. The focused C++ test builds with
 clang-cl `/O2 /W4 /std:c++17` and is included in the standard `build.ps1 -Test`
-gate. No full game rebuild or runtime speedup is claimed for this unused kernel.
+gate. These kernel tests alone do not establish a runtime speedup.
 
 ## Runtime integration work
 
-Before installing the hook, establish the source lifetime and command-buffer
-ownership at this boundary. Audit reserve/callback paths, context cursor versus
-published FIFO put, capacity, wrapped addresses, aliasing, MMIO, watched memory
-and SPU reservation behavior. A raw host pointer alone proves none of these.
-Unsupported cases must execute the original loop without partial native writes.
-The full function includes partial blocks and further state updates; retain
-their ordering and audit which register values the continuation actually uses.
+The build-local patch composes after the guest-pacer and job-wait patches,
+guarded by the complete `0072C368` function hash. It tries the native operation
+once before entering the full-block loop; fallback backedges do not retry the
+hook. Both routes join before the unchanged tail/remainder path. Allocation
+and capacity callbacks execute before the boundary, as in the original.
 
-Compare the integrated boundary against the extracted loop, including cursor,
-required continuation state and publication behavior. Measure call/byte volume
-and elapsed cost before attributing a whole-frame saving, then compare ordinary
-camera sweeps and squad progression. The current test proves the host packing
-operation only; the runtime boundary and direct-submission acceptance criteria
-remain open.
+The adapter accepts only main guest thread 1, TOC `E94EE0`, the expected command
+header, matching original source/count registers, 1..64 blocks and aligned,
+nonwrapping spans that fit the actual context end. The context must match the
+title's current GCM context and use the installed synchronized wrap callback.
+The FIFO walker consumes the separately published PUT, not the allocation
+cursor. Its heuristic recycling is disabled for this callback; the callback
+continues to perform the original wait/wrap when the producer needs more room.
+The game retains responsibility for serializing its command producers.
+
+SDK `ppu_native_memory_begin` checks ordinary RAM, VM bounds, the relocatable
+HLE control/label/table window, size limits and disjoint source/output/context
+spans. It rejects enabled memory probes or barrier watches. It then holds the
+SPU reservation lock while checking every covered 128-byte line and performing
+the native copy. Any reserved line rejects the operation; a new reservation
+cannot appear between validation and copying. The source is the already
+available shader payload; no new job completion or source readiness is assumed.
+No services, waits, allocation or logging occur inside the acquired scope.
+Ordinary host stores continue to participate in the existing OS write-watch.
+
+The adapter rechecks context bounds/current under that scope, emits the payload,
+and updates the allocation cursor after a release fence. Later FIFO publication
+and its ordering remain in the original code. It also reconstructs the exact
+final values of the loop's modified registers and CTR, including scratch values;
+all other context state is untouched. The original path handles rejected cases.
+
+An additional **1,024 comparisons** against the exact extracted loop verify
+the entire guest-memory fixture and complete `ppu_context` at the join point
+(1..64 blocks, all four word alignments on each side). The test links the actual
+adapter and SDK scope implementation. Stub reservation functions assert that
+checks run with the lock held and all exits release it. Mutation cases verify
+unchanged memory/context on rejection, including source, last-output-line and
+context reservations. Range tests cover low memory, wrapping, hardware windows,
+relocated HLE overlap and exact VM bounds. Patch tests verify reversibility,
+composition and refusal of changed or already patched input.
+
+The full `build.ps1 -SpuFma -Test` gate passes. Candidate
+`local/candidates/native-vp-packets/HazeRecomp.exe` has SHA256
+`D30B78B5DA44D7299F228A5894838D0998486783E17083C2668312F57022FF4E`.
+The internal `HAZE_NATIVE_VP_PACKETS` / `HAZE_VP_PACKET_FILE` selectors default
+off; no graphics setting is added. Mode events and counters expose acceptance
+and rejection. Optional `HAZE_VP_PACKET_PROFILE` times both complete loop routes
+for a separate diagnostic, outside ordinary FPS windows.
+
+Next, measure live acceptance/call/byte volume and elapsed cost, then compare
+ordinary camera sweeps and squad progression. Neither this contract fixture
+nor the host kernel oracle proves a whole-frame gain or campaign correctness.
+
+## First ordinary runtime comparison
+
+Run `20261013-022938-078`, owned PID 31188, used the candidate above with real
+audio muted, private saves/input, 2560x1440 rendering, follow-resolution shadows,
+AA off, AF 1, VSync on, no FPS cap, GPU occurrence mode 2 and native index
+preparation enabled. Vertex/geometry/VP caches, vertex workers and native job
+wait remained off. Capture `requested_011668.ppm` confirms the carrier scene.
+Before recording, a mode change reported 1,654,321 accepted native calls,
+11,252,470 packed blocks and zero rejections. This confirms runtime use,
+not a performance improvement.
+
+Four 24-second windows, each preceded by five warmup seconds, repeated the
+same absolute camera sweep (30 degrees either side, four-second period).
+No profiling, captures or builds occurred inside these windows. All present,
+mode, actual-angle and process-coverage checks pass. Only the owned Haze was
+observed, with maximum sampling gaps below 2.232 seconds. The window rectangle
+remained unchanged. These observations do not exclude other applications.
+
+| Native upload | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Off | 533 | 22.28 | 44.881 | 60.822 | 73.420 | 145.652 |
+| On | 543 | 22.64 | 44.174 | 62.289 | 76.961 | 127.587 |
+| On | 486 | 20.29 | 49.279 | 77.520 | 104.117 | 145.991 |
+| Off | 541 | 22.64 | 44.178 | 57.653 | 75.439 | 181.083 |
+
+Pooled intervals average 44.527 ms off (22.46 FPS) versus 46.585 ms on
+(21.47 FPS): the enabled windows are about 4.6% longer in this run. Intervals
+above 50 ms are 23.65% off and 30.13% on. There is no demonstrated whole-frame
+gain or pacing improvement; do not promote the replacement on these results.
+System-wide CPU busy time across the four windows is approximately 82.91%,
+82.90%, 83.44% and 77.48%. This differs from earlier sessions and prevents
+attributing the lower absolute FPS relative to those sessions to this patch.
+Within this run, both routes remain slow. World and NPC state also remain live.
+
+Normal close returned exit 0. Exit diagnostics report zero draw drops, texture
+decode failures and GPU geometry bypasses; texture write-watch is healthy.
+This is a carrier smoke test, not full campaign correctness. Separate timing
+of the replaced loop and a reverse-order confirmation remain pending.
+
+Private evidence: `local/native-vp-packets-motion-{windows,report}.json`,
+`-presents.csv`, `-processes.jsonl`, `-camera.txt.csv`, and the run log above.

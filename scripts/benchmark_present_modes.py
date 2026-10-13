@@ -27,6 +27,8 @@ The gpu_vertex_pull variant uses RSX_GPU_VERTEX_PULL_FILE and process-wide
 renderer mode events for raw geometry decoding in the vertex shader.
 The job_wait variant uses HAZE_JOB_WAIT_FILE and main-thread mode events for
 the guarded job-completion delay. Other gameplay/audio delays are unaffected.
+The vp_packets variant uses HAZE_VP_PACKET_FILE and main-thread mode events
+for the guarded vertex-program command packing operation.
 Optional --observe-pid reads another Haze process's CPU use; it must remain
 alive throughout recording. Shared CPU/GPU contention still prevents treating
 that session as an isolated performance measurement.
@@ -181,7 +183,7 @@ def report(args):
     summaries = []
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
-    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native', 'gpu_vertex_pull', 'job_wait'):
+    if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native', 'gpu_vertex_pull', 'job_wait', 'vp_packets'):
         if not args.queue_mode_log:
             raise ValueError('Native copy mode requires its process-wide mode-event log')
         worker_modes = {'process': []}
@@ -190,7 +192,8 @@ def report(args):
                     'native_cursor':'haze-native-cursor-mode',
                     'spu_float_native':'spu-float-native-mode',
                     'gpu_vertex_pull':'gpu-vertex-pull-mode',
-                    'job_wait':'haze-job-wait-mode'}[mode_column]
+                    'job_wait':'haze-job-wait-mode',
+                    'vp_packets':'haze-vp-packet-mode'}[mode_column]
             valid_modes = '[012]' if mode_column == 'gpu_vertex_pull' else '[01]'
             match = re.fullmatch(r'\[' + name + r'\] enabled=(' + valid_modes + r') qpc=(\d+)', line)
             if match: worker_modes['process'].append((int(match[2]), int(match[1])))
@@ -270,7 +273,7 @@ if __name__ == '__main__':
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
                         help='Read CPU activity of another Haze instance without modifying it')
     runner.add_argument('--flags', nargs='+', type=int, default=[259,771,259,771,259,771])
-    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','spu_float_native','gpu_vertex_pull','job_wait'], default='cpu_work',
+    runner.add_argument('--mode-column', choices=['cpu_work','shadow_compare','depth_export','window_position','depth_clear','vertex_cache','geometry_cache','vertex_workers','spurs_queue_wait','spu_idle_wait','usleep','frame_pacer','spu_triplet_copy','native_cursor','fifo_recycle_wait','spu_float_native','gpu_vertex_pull','job_wait','vp_packets'], default='cpu_work',
                         help='CSV state to validate; set the matching renderer control-file environment variable')
     runner.add_argument('--warmup', type=float, default=5)
     runner.add_argument('--seconds', type=float, default=12)
