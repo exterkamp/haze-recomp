@@ -175,3 +175,46 @@ cost separately from producer-side steady-gameplay waits.
 
 Private evidence: `local/jungle-slotfill-diagnostic-a2-{comparison-evidence,draw-analysis,slow-analysis,draw-joins}.json`
 and matching source CSVs, window manifest, exit log and resource observers.
+
+## First ordinary enabled/disabled comparison: inconclusive
+
+Both launches use the corrected executable SHA above, the same private-save
+baseline, 1440p/8192 shadows, uncapped presentation with VSync off, fixed CPU
+flags 13571, GPU occurrence mode 2, native VP consumer and worker reuse on.
+Inline reads, inline coherence, native job-wait replacement, bulk-fill counters,
+and slow FIFO/flush/draw traces are off. Only native slot fill changes. Each
+launch reaches the jungle checkpoint with a visually verified capture, detaches
+diagnostic input polling, then records two 60-second absolute camera sweeps.
+The control remained at the checkpoint longer before measurement, so initial
+settling time is another limitation. Every complete timed interval is retained.
+
+| Launch | Fill | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `jungle-slotfill-off-a1` | OFF | 8,683 | 72.385 | 13.815 | 18.115 | 21.960 | 43.809 |
+| `jungle-slotfill-on-b1` | ON | 8,332 | 71.059 | 14.073 | 18.155 | 22.897 | 2,411.222 |
+
+Both owned games and measurement scripts exited normally. Camera and mode
+validation passes, but strict process isolation fails in both. The control
+observes another Haze PID 60056, no compilers, memory 52.14-54.09%, and a maximum
+5.369-second resource sample gap. The enabled run observes PIDs 60056 and 44672,
+up to two compilers, and memory 52.04-54.28%. Its maximum resource sample gap is
+9.013 seconds, **failing the 8-second coverage requirement**. The initial report
+stops at that check; the retained diagnostic report records `coverage_passed:
+false` explicitly without discarding frames or claiming validation succeeded.
+
+The enabled run's largest pump interval spends 2,400.241 ms of 2,411.223 ms in
+FIFO processing, with 15.625 ms coarse render-thread CPU accounting. Another
+2,088.550 ms frame spends 2,046.465 ms in the outer wait; a 420.541 ms frame
+spends 414.090 ms in FIFO processing. These elapsed stalls are real observations;
+without nested traces this capture cannot identify their cause or assign them
+to the overlapping processes. They are not removed from the reported averages.
+
+There is **no demonstrated slot-fill speedup**. Host activity and settling differ,
+and the enabled run fails resource coverage. The replacement remains experimental
+and disabled by default. Follow-up should separate recurring FIFO stalls from
+producer waits and repeat the ordinary comparison under comparable conditions.
+
+Private evidence: `local/jungle-slotfill-{off-a1,on-b1}-comparison-evidence.json`,
+matching camera/present/pump CSVs, window manifests, strict/diagnostic reports,
+process/resource observations, and normal-exit logs. The original failed report
+is retained at `local/jungle-slotfill-on-b1-evidence.log`.
