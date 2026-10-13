@@ -232,3 +232,24 @@ This is a first enabled measurement, not an accepted performance gain.
 A same-binary disabled control and repeat comparisons remain outstanding.
 The earlier control's 83.458 FPS and prior binary's 94.045 FPS are retained
 above for context, not treated as matched causal comparisons with this run.
+
+### Same-binary disabled control
+
+`jungle-precise-off-a1` subsequently completed the same protocol with native
+reads disabled and the identical executable hash. Both camera/mode/process
+checks passed; 26 bracketing resource samples observed no competing Haze or
+compiler, memory use 49.79-51.54%, and maximum sample spacing 5.347s. The game
+was muted and exited normally with code 0. All 10,102 measured intervals remain:
+
+| Mode | FPS | Mean ms | p95 ms | p99 ms | Max ms | >33.333 / >50 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ON | 81.560 | 12.261 | 15.310 | 17.586 | 73.839 | 2 / 1 |
+| OFF | 84.196 | 11.877 | 15.041 | 17.426 | 38.333 | 1 / 0 |
+
+The OFF windows averaged 83.467 and 84.925 FPS. Mean pump phases were wait
+6.114 ms, FIFO 3.832 ms, and present 1.848 ms. This initial pair does not
+demonstrate a gain from precise inline reads; no promotion is justified.
+Repeated alternating trials would be required to quantify an effect reliably.
+Both modes include the larger experimental generated code, whereas ordinary
+builds exclude it completely. The next experiment targets the out-of-line
+write accessor's reservation predicate, with the read shim excluded.
