@@ -180,3 +180,76 @@ SDK implementation: `ca743b0`. The integrated ordinary build and full native
 regression suite pass, including the existing 262,144-lane GPU decoder oracle.
 Candidate `local/candidates/native-index-refs/HazeRecomp.exe` has SHA256
 `54802A22F6528D704FE5308916C7BFC44FBECE4BD049DFCEEC394C28CB3D7F07`.
+
+### First native-reference ordinary comparison
+
+Run `20261013-011603-994` holds GPU occurrence mode 2, VP caching off,
+job-wait mode zero and the earlier 1440p/follow-shadow settings. Real audio
+processing remains muted. Navigation initially left the game at the title
+screen; private input was retried and a carrier capture verified before
+measurement. A further carrier capture used CPU flags 13571. No captures,
+builds or tests ran in the eight five-second-warmup/24-second-measurement
+windows. Each covers six audited four-second yaw sweeps.
+
+| Order | Native refs | Frames | Mean ms | p95 ms | p99 ms | Max ms |
+|---|---|---:|---:|---:|---:|---:|
+| First | Off | 451 | 53.156 | 73.566 | 87.145 | 108.292 |
+| First | On | 469 | 51.082 | 70.928 | 88.292 | 105.568 |
+| First | On | 524 | 45.737 | 62.461 | 74.858 | 91.061 |
+| First | Off | 579 | 41.335 | 57.346 | 66.663 | 80.721 |
+| Reverse | On | 540 | 44.314 | 65.883 | 84.073 | 143.222 |
+| Reverse | Off | 683 | 35.082 | 49.353 | 57.749 | 80.088 |
+| Reverse | Off | 730 | 32.846 | 44.121 | 51.257 | 56.442 |
+| Reverse | On | 778 | 30.828 | 41.366 | 47.841 | 66.054 |
+
+All eight windows pass complete-present, mode, actual-camera and sampled
+Haze-process gates. Nevertheless, the strong time trend across both modes
+prevents a clean FPS claim. Process CPU use ranges from 3.786 to 5.289 cores;
+the world remains live and system-wide contention is not excluded. No outliers
+were removed. Final renderer counters show zero dropped draws, decode failures
+and GPU preparation bypasses. These counters and the capture are not proof of
+whole-campaign rendering equivalence. Keep the experiment disabled by default.
+
+Private evidence uses `local/native-index-refs-motion-` for windows, report,
+present CSV, actual-camera CSV and sampled-process JSONL. The owned game closed
+normally. Separate stage profiling is required to establish the local cost
+change independently of this inconclusive frame comparison.
+
+### Native-reference stage result
+
+Separate instrumented candidate SHA256
+`CA6BD1EB10B95BB3BF347B6748AB4E3BCA7CC0336E6519A1E04AAB23E9C3E27F`,
+run `20261013-012530-431`, uses a fresh private fixture and reaches the carrier
+with one navigation sequence. Four 24-second measured windows with five-second
+warmups compare off/on/on/off. Complete-present, mode, actual-camera and sampled
+Haze-process checks pass; the stage summarizer also verifies consecutive frames,
+CPU flags and fixed GPU occurrence mode 2. Audio processing runs muted.
+
+| Native refs | Profile frames | Reference prep ms | Vertex prep ms | Raw snapshot ms | Draw CPU ms | GPU scope ms |
+|---|---:|---:|---:|---:|---:|---:|
+| Off | 788 | 1.227 | 2.242 | 0.537 | 12.590 | 2.131 |
+| On | 767 | 0.226 | 1.265 | 0.537 | 12.430 | 2.238 |
+| On | 787 | 0.219 | 1.215 | 0.531 | 11.729 | 2.108 |
+| Off | 742 | 1.278 | 2.350 | 0.559 | 13.083 | 2.173 |
+
+The intended reference-preparation scope falls about 82%, recovering roughly
+1 ms/frame in this diagnostic. Vertex counts remain approximately 0.91-0.95
+million/frame, with 1,197-1,324 draws/frame; differing work volume does not
+explain the roughly fivefold reference-cost reduction. GPU preparation bypasses
+are zero. The GPU scope covers instrumented command-list work, not display
+latency; nested CPU scopes must not be summed.
+
+Frame partitions still show 11.18-12.24 ms before the first draw, 17.02-18.79 ms
+across the draw span (including 5.29-5.71 ms outside draw-call CPU scopes), and
+about 1.20-1.22 ms after the last draw. No-draw intervals contribute another
+0.047-0.114 ms/frame and remain included. PSO preparation is 2.82-3.03 ms/frame;
+texture decoding 0.88-1.23 ms/frame. These are overlapping diagnostic scopes,
+not additive promises of removable time.
+
+The experiment has a validated local saving, not validated consistent pacing.
+Repeat ordinary comparisons in a fresh session with settled navigation before
+considering promotion, then retain the broader campaign/squad gates. Investigate
+the persistent pre-draw and draw-span gaps without equating service elapsed time
+with wasted CPU. Private stage evidence uses `local/native-index-refs-profile-`:
+windows, validation, renderer CSV/geometry sidecar, summary, camera and process
+logs. Normal close flushes both stage and present data.
