@@ -40,3 +40,54 @@ The ordinary profiling-off/FMA diagnostic candidate builds with two jobs:
 Logs: `local/slow-fifo-drain-build.log`, `local/slow-fifo-drain-test.log`.
 This build also scopes the earlier Haze CPU-preparation startup call to its
 Windows backend, matching that backend's declaration and allocation path.
+
+## Live jungle capture
+
+Run `20261013-135746-791`, prefix `local/jungle-slow-drain`, uses the same
+copied jungle checkpoint, 1440p/8192 shadows, VSync off/uncapped, muted audio,
+fixed CPU flags 13571, VP burst 1 and worker reuse 1. The scene is visually
+verified after the tutorial. Tokens 2620/2621 select two 60-second absolute
+camera sweeps after five-second warmups. No build, screenshot, external stack
+sampling or heavy analysis overlaps those windows. Normal window close writes
+the diagnostic CSV and one balanced renderer counter report.
+
+The ring records 19,799 slow calls, retaining 16,384 and overwriting 3,415 early
+records. Retained QPC coverage is 14119705225580..14121893641043 at 10 MHz;
+this starts 87.135 seconds before the first gameplay window and ends 6.704
+seconds after the last. Thus the discarded prefix precedes both windows.
+All retained entries have unique sequences, ordered QPC boundaries, and host
+TID 40692. There are 9,400 calls wholly inside gameplay windows. Their maximum
+FIFO-lock wait is 0.0004 ms; maximum body time is 9.4899 ms (total 9.4901 ms).
+This thresholded ring does not describe calls shorter than 2 ms or identify
+which backend operation occupies body time.
+
+QPC correlation against the pump CSV identifies the two frames over 50 ms:
+
+| Pump frame | Total ms | Kick-wait ms / count | FIFO ms / drains | Present ms | Longest retained drain ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 41662 | 172.981 | 164.207 / 142 | 6.376 / 152 | 2.113 | 4.375 |
+| 33389 | 59.160 | 50.788 / 49 | 5.031 / 53 | 1.773 | 4.252 |
+
+Both retained drains have effectively uncontended FIFO-lock acquisition
+(0.0002 / 0.0001 ms). All seven pump frames above 33.333 ms predominantly
+accumulate outer kick waits. The 173 ms interval reports queued work before
+only two of its 142 waits; queued does not necessarily mean executable (a
+semaphore can stop the walker). These observations point the next capture
+toward upstream command production/job readiness. They do not reproduce or
+explain the earlier 460 ms single-drain stall, and do not prove that FIFO-lock
+contention can never occur.
+
+For context only, the instrumented windows contain 9,953 present intervals,
+12.055 ms mean / 82.95 FPS, p99 18.442 ms, maximum 172.980 ms, seven over
+33.333 ms and two over 50 ms. Do not use this as an ordinary-build speedup.
+Camera, native CPU flags and owned-process checks pass. Twenty-six resource
+samples bracket timing; physical memory is 49.41-51.12%, no compilers observed,
+maximum observer gap 5.359 seconds. Timing-buffer overhead has not been
+measured by a separate on/off comparison.
+
+Private evidence: `local/jungle-slow-drain-fifo.csv`, `-pump.csv`,
+`-presents.csv`, `-windows.json`, `-report.json`, `-pooled.json`, resource and
+process logs; correlated rows in `local/slow-fifo-capture-analysis.json`.
+The next step is a timestamped producer/job capture around command-arrival
+hitches. Remaining large drain-body stalls need backend/fence phase evidence
+if they recur. Stable pacing and 144 FPS remain unresolved.
