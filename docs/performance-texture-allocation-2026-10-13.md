@@ -81,17 +81,61 @@ this is not a claim of zero other host work. Only the owned Haze is observed
 during both timed windows. Recovery strongly implicates host pressure in the
 temporary 1-FPS collapse but does not isolate paging as the sole cause.
 
-## Next measured intervention
+## Capacity experiment: not promoted
 
 Resource creation accounts for about 93% of texture time. Of 8,418 creations,
 7,344 (87%) follow cache misses/evictions. Refresh-only reuse would miss most
-of the measured creation volume. First compare the retained 4,096-entry binary
-against an 8,192-entry native texture cache, preserving the hash-table load
-factor. Measure misses, allocations, frame tails and retained memory. Larger
-capacity increases possible GPU residency and doubles the eventual full-cache
-LRU scan; it is an experiment, not an assumed improvement. This work is tracked
-in #59. The 144-FPS/consistent-pacing goal remains unmet.
+of the measured creation volume. Run `20261013-062412-424` tests an 8,192-entry
+cache with 16,384 hash buckets, preserving the load factor. Those are the only
+behavior changes relative to SDK `54b3fde`. The candidate builds and the normal
+WARP/cache regression suite passes. Binary SHA-256:
+`3265974436CC5E5A0E134BA5FDCFD38F589C43174583C8C302D0E0127D0B8748`.
+
+The same private checkpoint and tutorial-dismissed camera sweeps produce:
+
+| Diagnostic metric | Sweep 1 | Sweep 2 |
+| --- | ---: | ---: |
+| Texture creations | 3,255 | 3,119 |
+| Descriptor-cache misses | 2,890 | 2,578 |
+| Evictions | 0 | 2,468 |
+| Content refreshes | 365 | 541 |
+| Mean resource creation | 0.822 ms | 0.764 ms |
+| Mean texture decode scope | 0.882 ms | 0.826 ms |
+| Mean FPS, with process overlap | 61.561 | 61.123 |
+| Mean present interval | 16.244 ms | 16.360 ms |
+| p95 | 21.669 ms | 21.147 ms |
+| p99 | 31.215 ms | 28.825 ms |
+| Maximum present interval | 117.143 ms | 50.910 ms |
+
+The strict process-isolation audit fails: another Haze process (PID 58116,
+`audio-balance`) starts during the first window and overlaps the second.
+The failed report is preserved; the separate `nonisolation-report` retains
+mode, consecutive-present and actual-camera checks. These FPS figures cannot
+establish a capacity-related gain or regression. All 31,411 renderer rows pass
+the phase/call-count checks and the recorder reports zero rejected records.
+
+The cache reaches 8,192 entries and resumes eviction during the second sweep.
+Even before any eviction in the first sweep, it makes 2,890 descriptor-cache
+miss allocations. Capacity alone therefore does not eliminate the observed
+allocation stream. Total creations remain 6,374 over 48 measured seconds.
+Miss identity/reuse distance needs attribution before increasing capacity
+again; the current evidence does not distinguish streaming descriptors from
+avoidable cache-identity fragmentation.
+
+Nine resource samples inside the measured windows show 43.4-45.0% physical
+memory use and 0-889 page-ins/sec. The owned process's dedicated GPU allocation
+ranges from 2,903,777,280 to 3,568,029,696 bytes (about 2.70-3.32 GiB). Its resident
+working set is only 0.81-0.88 GiB, illustrating why that process-list figure
+does not describe its GPU allocations or private commitment. GPU accounting
+was added after the 4,096-entry run, so no measured GPU-memory delta is claimed.
+
+The two cache constants are restored to 4,096/8,192; the experimental binary
+and evidence remain private for reproducibility. No capacity increase is
+promoted. Next work in #59 should target descriptor miss attribution and bounded,
+fence-safe native resource reuse. The 144-FPS/consistent-pacing goal remains
+unmet; this experiment does not change the delivered WIP.
 
 Private evidence: `local/jungle-texture-{phases,recovery}-*` CSVs, windows,
 analyses, process/resource logs and requested captures; build/test logs use
-`local/texture-phases-*`. No assets, private saves or binaries are committed.
+`local/texture-phases-*`. Capacity evidence uses `local/jungle-cache-8192-*`
+and `local/texture-cache-8192-*`. No assets, private saves or binaries are committed.
