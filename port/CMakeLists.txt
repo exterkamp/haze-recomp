@@ -89,6 +89,7 @@ endif()
 # imported one arrives without SDL2, pthreads, the Metal frameworks or the
 # Winsock/XInput imports -- the link then fails on every platform for a
 # different reason. add_subdirectory hands all of that over with the target.
+option(PS3RECOMP_NATIVE_FLOAT_RUNTIME "Build accelerated SPU arithmetic" ON)
 add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
                  EXCLUDE_FROM_ALL)
 
@@ -255,6 +256,9 @@ if(SPU_SOURCES)
         INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")
     set_source_files_properties(${SPU_SOURCES} PROPERTIES
         COMPILE_DEFINITIONS SPU_USE_DISPATCH_MT)
+    if(PS3RECOMP_NATIVE_FLOAT_RUNTIME AND WIN32 AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+        set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS SPU_FLOAT_NATIVE_RUNTIME=1)
+    endif()
     if(HAZE_SPU_BYTE_COMPARE)
         # Explicit experiment: these extra branches can change inlining.
         set_property(SOURCE ${SPU_SOURCES} APPEND PROPERTY COMPILE_DEFINITIONS SPU_COMPARE_BYTE_OPS)

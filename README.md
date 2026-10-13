@@ -211,7 +211,10 @@ than measured wall-clock sleep time.
 Diagnostic `run.ps1` sessions are **muted by default** while retaining mixing,
 device-clock pacing and game audio events. Add `-CaptureAudio` to save the original
 mix as `audio.f32le` (48 kHz stereo float32), or explicitly `-Audio` to hear a test.
-The ordinary gameplay launcher retains sound. All captures stay under ignored
+The ordinary gameplay launcher retains sound. On Windows/Clang, supported AVX-512
+CPUs use accelerated SPU arithmetic for the audio DSP; `SPU_FLOAT_NATIVE=0`
+selects the scalar reference path for comparison. See the
+[audio balance investigation](docs/audio-balance-2026-10-12.md). All captures stay under ignored
 `local/runs`. Rebuild without `-ProfileRenderer` for ordinary play.
 Native play defaults to a **30 FPS maximum**. Slow frames present when ready;
 the limiter does not try to catch up with bursts of faster frames. Diagnostics
