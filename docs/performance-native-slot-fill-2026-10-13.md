@@ -109,3 +109,69 @@ missing file is a failed capture, not evidence that no slow draws occurred.
 Private evidence: `local/jungle-slotfill-diagnostic-a1-comparison-evidence.json`,
 the matching windows, process/resource observations, FIFO/flush/pump/present
 CSVs, and `local/jungle-slotfill-diagnostic-a1-slow-analysis.json`.
+
+SDK `01f1bfc` moves the draw export into the common normal-exit path. The
+focused actual-source fixture now calls that entry, including repeated export,
+in both ordinary and profiling configurations; both pass. The draw analyzer
+also supports an explicit ring capacity, preserving its historical 256 default
+while validating the new 1,024-record recorder (10 Python tests pass).
+
+Haze integration `a7bd464` pins that SDK. The incremental two-job build exited 0;
+the preceding full suite covers unchanged code. Corrected executable SHA-256:
+`01EEFF9C814582148B475F45A82C881FFEF8BE72750F161F2D0F329D277CD47A`,
+122,752,512 bytes. Its actual gameplay export still needs confirmation.
+
+## Corrected diagnostic export verified
+
+`jungle-slotfill-diagnostic-a2` uses the corrected executable above, with the
+same native-fill/counter/trace settings and copied jungle scenario. Preparation
+was visually confirmed; input polling detached; the two 60-second camera
+windows and owned game completed normally with code 0. The seven baseline
+save files remain private and were copied, not used as the writable fixture.
+
+All 9,229 measured frames are retained: **76.933 FPS / 12.998 ms mean**,
+16.605 ms p95, 19.415 ms p99, 50.641 ms maximum. Two frames exceeded 33.333 ms
+and one exceeded 50 ms. Camera/mode checks passed, strict isolation failed
+because another Haze process (PID 60056) overlapped. Twenty-six bracketing
+resource samples observed no compiler, memory usage of 50.40–51.53%, and a
+maximum 5.376-second gap. This remains an instrumented shared-host diagnostic,
+not an enabled/disabled speedup comparison.
+
+Whole-launch fill counts: **671,430 attempts, 671,430 native successes, zero
+rejections, 3,480,693,120 native bytes**. As before, these are not isolated to
+the timing windows. No native-fill performance gain is inferred from them.
+
+The slow-draw export retained 61 callbacks at or above 4 ms, out of 6,780,019
+total callbacks, with zero overwritten records. FIFO and flush rings also had
+zero overwrites. The analyzer validated raw QPC intervals, phase conservation,
+cycle metadata and recorder counts using explicit capacity 1,024.
+
+Only one retained draw was fully inside the timing windows: 4.5325 ms,
+including 4.4252 ms geometry preparation. The largest gameplay pump frames
+were instead 50.6410 ms (44.3162 ms outer wait) and 36.3272 ms (29.6382 ms
+outer wait). Neither contained a retained draw over the 4 ms threshold.
+Subthreshold draws and upstream work remain possible costs; this run did not
+reproduce the earlier 148 ms timed FIFO body.
+
+Before the timed windows, the trace did capture expensive draw callbacks:
+
+| Draw callback | Wall ms | Geometry ms | Pipeline/constants ms | Resources ms | Recording ms |
+|---|---:|---:|---:|---:|---:|
+| 1 | 40.8637 | 0.0276 | 40.7281 | 0.0554 | 0.0526 |
+| 1244397 | 30.7068 | 0.0135 | 30.6023 | 0.0203 | 0.0707 |
+| 1243264 | 22.1049 | 0.0049 | 15.3331 | 6.7073 | 0.0596 |
+| 1272615 | 20.0380 | 0.0021 | 19.0449 | 0.9222 | 0.0688 |
+
+These startup/loading observations point to the pipeline/constants stage as
+a concrete lead for initial stalls. That stage includes `get_pso` and constant
+preparation/upload; this trace does not distinguish shader generation,
+compilation, PSO creation, upload-related waits, or descheduling. More precise
+timing is required before attributing those spikes to shader compilation.
+Raw thread cycles are retained without conversion into CPU milliseconds.
+
+Next: compare fill enabled/disabled in the same binary with all diagnostic
+counters and traces off; investigate the measured pipeline/constants startup
+cost separately from producer-side steady-gameplay waits.
+
+Private evidence: `local/jungle-slotfill-diagnostic-a2-{comparison-evidence,draw-analysis,slow-analysis,draw-joins}.json`
+and matching source CSVs, window manifest, exit log and resource observers.
