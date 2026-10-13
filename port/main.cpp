@@ -49,6 +49,7 @@
 #endif
 #include "haze_input.h"
 #include "haze_camera.h"
+#include "haze_menu.h"
 #include "haze_graphics.h"
 #include "haze_display.h"
 #include "haze_pump_profile.h"
@@ -618,6 +619,7 @@ int main(int argc, char** argv)
     g_ps3_guest_caller = harness_guest_caller;
     haze_input_initialize();
     haze_camera_initialize();
+    haze_menu_initialize();
 #if defined(__EMSCRIPTEN__) && defined(HAZE_WASM_WEBGL)
     pthread_attr_t frame_attr;
     pthread_attr_init(&frame_attr);
