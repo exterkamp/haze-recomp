@@ -103,9 +103,10 @@ silently discarded as timing outliers.
 
 ## Remaining long stalls
 
-The final candidate's 463.142 ms pump interval spends 460.562 ms in FIFO work
-and 2.565 ms in presentation. Another 434.831 ms interval spends 422.601 ms
-waiting for commands. Its other two intervals above 50 ms are 187.916 ms
+The final candidate's 463.142 ms pump interval spends 460.562 ms in one FIFO
+drain and 2.565 ms in presentation. Another 434.831 ms interval accumulates
+422.601 ms across 370 kick waits (with 398 drains); it is not one 422 ms blocking call. Its
+other two intervals above 50 ms are 187.916 ms
 (186.104 ms FIFO) and 157.262 ms (147.411 ms outer wait). The first candidate's
 744.672 ms interval similarly contains 710.406 ms FIFO, while B1's 1070.224 ms
 interval contains 925.955 ms outer wait. These categories include blocking;

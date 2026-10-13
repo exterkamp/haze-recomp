@@ -38,3 +38,37 @@ No builds, stack sampling, screenshots or heavy analysis during timing.
 Preserve all intervals and record resource/process coverage. Live NPC/world
 state and navigation timing are limitations. These tests do not replace
 attribution of the remaining long command waits or prove stable 144 FPS.
+
+## Completed comparison
+
+| Run | Fixed-setting files | Intervals | Mean ms / FPS | p99 ms | Maximum ms | Over 50 ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| A1 `20261013-133841-595` | Cleared | 4114 | 11.660 / 85.76 | 18.790 | 43.469 | 0 |
+| B1 `20261013-134242-481` | Polled | 4129 | 11.622 / 86.04 | 17.075 | 40.469 | 0 |
+| B2 `20261013-134634-432` | Polled | 4144 | 11.578 / 86.37 | 16.752 | 48.000 | 0 |
+| A2 `20261013-135050-330` | Cleared | 3342 | 14.356 / 69.66 | 26.701 | 65.423 | 2 |
+
+All windows pass native CPU-flag, VP-mode, reuse-mode, actual-camera and
+owned-process audits. Each run emits one balanced exit counter report and no
+periodic FPS lines, and closes normally. The seven immutable save files retain
+their original hashes. No compiler processes are observed in any window;
+physical memory ranges from 48.72% to 51.07%, maximum resource gaps
+5.33-5.36 seconds. No screenshots, stack sampling or builds overlap timing.
+
+Descriptively pooled fixed runs are 12.868 ms / 77.71 FPS, p99 22.400 ms;
+polled runs are 11.600 ms / 86.21 FPS, p99 16.882 ms. This experiment does not
+establish a speedup. The first fixed/control pair is nearly identical, while
+the final fixed repeat is substantially slower. All intervals remain in the
+result. Live NPC activity and timing after navigation differ between launches;
+there is no evidence attributing the final slowdown to polling removal or to
+compiler/memory pressure. Neither configuration reproduces the previous
+hundreds-of-milliseconds hitches during this comparison.
+
+Evidence: `local/startup-controls-comparison.json`, the four
+`local/jungle-{fixed,polled}-controls-*` CSV/JSON captures and process/resource
+logs. The fixed-mode recorder is exercised in all four launches, validating
+actual settings without mutating control files. This startup change eliminates
+the need for a fixed CPU-control file and enables cleaner experiments, but is
+not accepted as a performance gain. The existing WIP launcher/binary is
+unchanged. Continue direct attribution of slow drains and delayed command
+arrival rather than inferring a fix from a single clean run.
