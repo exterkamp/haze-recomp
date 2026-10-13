@@ -217,6 +217,7 @@ extern "C" {
 int rsx_live_draw_enabled(void);
 void rsx_live_draw_set_render_reference(uint32_t, uint32_t);
 void rsx_live_draw_set_shadow_reference(uint32_t);
+int rsx_live_draw_set_cpu_work(uint32_t);
 int rsx_live_draw_set_texture_write_watch(void*, size_t);
 int rsx_live_draw_init(void*, uint32_t, uint32_t,
     const uint8_t* (*)(void*, uint32_t, uint32_t, uint32_t), void*);
@@ -472,6 +473,10 @@ static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
 
 static bool alloc_guest_vm(void)
 {
+    // Haze's validated preparation paths are fixed startup policy. Registering
+    // write-watch below adds bit 4096 only when its reservation succeeds.
+    // A live RSX_CPU_WORK_FILE override is still available for experiments.
+    rsx_live_draw_set_cpu_work(1283u | 8192u);
 #ifdef __EMSCRIPTEN__
     // Preserve GUEST_EA's low-32-bit conversion. Advance the program break
     // past an aligned guest arena so later host allocations cannot overlap it.

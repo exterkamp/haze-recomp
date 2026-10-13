@@ -5,7 +5,9 @@ With --camera-control, the audited native hook supplies a repeating absolute-yaw
 trajectory. Its actual-angle CSV is mandatory when reporting. Otherwise the
 caller supplies input; --scenario only describes it.
 The selected mode's file must point to CONTROL and RSX_PRESENT_CSV must be set before
-launch. Close the owned game normally afterward, then summarize its fixed-ring
+launch. For whole-launch comparisons, --fixed-mode omits control-file writes;
+the report still validates the requested mode against native evidence.
+Close the owned game normally afterward, then summarize its fixed-ring
 CSV against the recorded QPC windows. No screenshots or profiling may run
 during these blocks. Menus/loading do not establish gameplay performance.
 Queue variants require SPURS_QUEUE_WAIT_CONTROL and native mode-event evidence
@@ -123,6 +125,8 @@ def record(args):
                   qpc_frequency=frequency.value, warmup_s=args.warmup,
                   measure_s=args.seconds, mode_column=args.mode_column,
                   observed_pids=args.observe_pid, scenario=args.scenario,
+                  fixed_mode=args.fixed_mode,
+                  control_file=str(args.control) if args.control else None,
                   blocks=[], complete=False, note=__doc__)
     observers = []
 
@@ -142,7 +146,8 @@ def record(args):
             camera_token = args.camera_token_base + block_index if args.camera_control else None
             if args.camera_control:
                 args.camera_control.write_text(f'{camera_token}\n')
-            args.control.write_text(f'{flags}\n')
+            if not args.fixed_mode:
+                args.control.write_text(f'{flags}\n')
             wait(args.warmup)
             start = qpc()
             cpu_start = cpu()
@@ -170,7 +175,8 @@ def record(args):
         for _, _, release in observers:
             release()
         close()
-        args.control.write_text(f'{args.flags[0]}\n')
+        if not args.fixed_mode:
+            args.control.write_text(f'{args.flags[0]}\n')
         if args.camera_control:
             args.camera_control.write_text('0\n')
         args.output.write_text(json.dumps(result, indent=2) + '\n')
@@ -276,7 +282,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest='action', required=True)
     runner = actions.add_parser('record')
-    runner.add_argument('control', type=Path)
+    runner.add_argument('control', type=Path, nargs='?')
+    runner.add_argument('--fixed-mode', action='store_true',
+                        help='Observe a fixed startup mode without writing a control file; reports still require native mode evidence')
     runner.add_argument('--pid', type=int, required=True)
     runner.add_argument('--exe', type=Path, required=True)
     runner.add_argument('--observe-pid', type=int, action='append', default=[],
@@ -308,6 +316,11 @@ if __name__ == '__main__':
                         help='Maximum allowed seconds between observations, default 4')
     args = parser.parse_args()
     if args.action == 'record':
+        if args.fixed_mode:
+            if args.control is not None or len(set(args.flags)) != 1:
+                parser.error('Fixed mode requires identical flags and no control-file argument')
+        elif args.control is None:
+            parser.error('Supply a control-file argument or use --fixed-mode')
         if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 16383 for f in args.flags):
             parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..16383')
         if not 0 < args.camera_token_base <= 1000000-len(args.flags):
