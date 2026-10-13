@@ -347,3 +347,22 @@ the repeated control in this pair, with a lower p99. Repeat alternating runs
 and broader gameplay acceptance remain outstanding. The first compiler-heavy
 control must not be used to claim a 19% improvement. The experimental selector
 remains off by default; no new release launcher or release setting was added.
+
+### Enabled repeat under changed host load
+
+`jungle-coh-on-b2` used the same executable and enabled predicate, with reads
+excluded, the same fixed modes, copied jungle save, and two 60-second camera
+sweeps. Preparation was visually checked, input polling detached, and both
+the measurement helper and owned game exited normally with code 0.
+
+Across 8,882 retained frames it measured **74.023 FPS / 13.509 ms mean**,
+17.574 ms p95, 21.142 ms p99, and 65.383 ms maximum. Six frames exceeded
+33.333 ms and one exceeded 50 ms. Mean pump wait / FIFO / present times were
+7.456 / 4.007 / 1.941 ms; these are wall-time phases, not exclusive CPU costs.
+
+Camera and mode validation passed, but strict isolation failed: other Haze
+PIDs 36484 and 62504 overlapped, and resource sampling observed one compiler.
+The 26 bracketing samples had a maximum gap of 5.369 seconds and memory use
+of 53.02–54.36%. This differs from the preceding comparison's background load
+and does not confirm or disprove a predicate speedup. The experiment remains
+unpromoted. Private evidence: `local/jungle-coh-on-b2-comparison-evidence.json`.
