@@ -432,3 +432,50 @@ not a demonstrated interactive gameplay speedup or proof of consistent pacing.
 The ordinary WIP launcher already omits the camera-benchmark environment.
 Queue-wake performance and long-run gameplay acceptance still need new
 comparisons using the corrected benchmark.
+
+## Render-thread stall follow-up: no recurrence
+
+Run `20261013-170437-333` (PID 21832, window/render TID 23628) used the same
+`D964EB...` camera-only candidate, original job delay, 1440p configuration,
+and 5-ms slow-flush threshold. The initial navigation missed START; a second
+navigation attempt in the same process reached the jungle and was visually
+verified before timing. The private navigation pulse was extended from 80 to
+180 ms to span the 100-ms diagnostic input poll. PAD_FILE detach was then
+acknowledged. This is a long-warmed session, not a checkpoint-loading test.
+
+The user reported pressing Print Screen before the new timing window began.
+The report is retained in `local/jungle-present-stall40-user-interruption.json`;
+the exact keypress time is unknown. No individual spike is assigned to it,
+and no frame was removed. The subsequent 90-second capture spans QPC
+`14238542170231..14239442187625` at 10 MHz, camera token 2920.
+
+| Metric | Result |
+| --- | ---: |
+| Complete presented intervals | 8,087 |
+| Mean frame time / FPS | 11.127 ms / 89.87 |
+| p95 / p99 | 13.795 / 15.808 ms |
+| Maximum | 21.659 ms |
+| Frames above 33.333 ms | 0 |
+| Mean outer wait / FIFO / presentation | 6.018 / 3.329 / 1.716 ms |
+
+Actual camera angles, native modes, present continuity and the one-Haze
+process gate pass. The camera audit retains 8,611 rows without overwrite.
+Memory use is 45.35-45.96%; up to two compiler processes are observed later
+in the capture. This remains diagnostic evidence, not an isolated speedup
+comparison or release acceptance.
+
+The 40-ms stalled-counter trigger records no episodes and no stack samples;
+measured thread suspension is zero. Its longest polling gap is 56.112 ms,
+so the trigger alone cannot establish the absence of hitches. The complete
+present and pump intervals independently show that the previous long stall
+did not recur in this window. Consequently this capture cannot distinguish
+DXGI Present from screenshot-trigger file queries or other presentation work.
+
+The FIFO ring retains 16,384 of 52,872 records; its retained extent starts
+before the timing window. The 7,540 overlapping records reach 6.633 ms total
+and 0.006 ms lock wait. The flush ring retains 4,096 records with 75 older
+records overwritten, with no retained event overlapping the timing window.
+These are thresholded events, not continuous flush tracing. All seven
+baseline save hashes remain intact. No runtime change or WIP promotion follows
+from this non-recurrence; rare-stall attribution and corrected queue-wake
+comparisons remain open.
