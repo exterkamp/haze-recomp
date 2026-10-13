@@ -13,6 +13,7 @@ import ctypes as c
 from ctypes import wintypes as w
 import sys
 import argparse
+parser_note = 'Timeline samples perturb execution and are not FPS benchmark evidence.'
 from pathlib import Path
 
 parser=argparse.ArgumentParser(description=__doc__)
@@ -34,6 +35,10 @@ parser.add_argument('--stack-depth',type=int,default=0,
 parser.add_argument('--stack-every',type=int,default=10,help='Unwind every N sampling iterations.')
 parser.add_argument('--stack-library',type=Path,
     default=Path(__file__).resolve().parents[1]/'local'/'native_stackwalk.dll')
+parser.add_argument('--timeline-output',type=Path,
+    help='Write a bounded QPC-stamped sample suffix after resuming threads; diagnostic only.')
+parser.add_argument('--timeline-limit',type=int,default=100000,
+    help='Maximum retained timeline samples; overwritten samples are counted.')
 args=parser.parse_args()
 if args.window_thread and args.tid:
     parser.error('--window-thread and --tid are mutually exclusive')
@@ -47,6 +52,8 @@ if not 0<=args.stack_depth<=64 or not 1<=args.stack_every<=1000:
     parser.error('stack-depth must be 0..64 and stack-every must be 1..1000')
 if args.stack_depth and not args.stack_library.is_file():
     parser.error('Build the native stackwalk helper DLL before requesting stacks')
+if not 1<=args.timeline_limit<=1000000:
+    parser.error('timeline-limit must be 1..1000000')
 
 k=c.WinDLL('kernel32',use_last_error=True)
 d=c.WinDLL('dbghelp',use_last_error=True)
@@ -54,6 +61,7 @@ for name in ('OpenProcess','OpenThread'):
     f=getattr(k,name); f.argtypes=[w.DWORD,w.BOOL,w.DWORD]; f.restype=w.HANDLE
 k.SuspendThread.argtypes=[w.HANDLE]; k.SuspendThread.restype=w.DWORD
 k.ResumeThread.argtypes=[w.HANDLE]
+k.ResumeThread.restype=w.DWORD
 k.CloseHandle.argtypes=[w.HANDLE]
 k.GetThreadContext.argtypes=[w.HANDLE,c.c_void_p]
 class SYMBOL_INFO(c.Structure):
@@ -78,6 +86,16 @@ def symbol(addr):
 
 
 import collections,time,json,random
+timeline=collections.deque(maxlen=args.timeline_limit)
+timeline_count=0
+k.QueryPerformanceCounter.argtypes=[c.POINTER(c.c_longlong)]
+k.QueryPerformanceFrequency.argtypes=[c.POINTER(c.c_longlong)]
+frequency=c.c_longlong()
+assert k.QueryPerformanceFrequency(c.byref(frequency)) and frequency.value>0
+def qpc():
+    value=c.c_longlong()
+    if not k.QueryPerformanceCounter(c.byref(value)): raise c.WinError(c.get_last_error())
+    return value.value
 class THREADENTRY32(c.Structure):
     _fields_=[('dwSize',w.DWORD),('cntUsage',w.DWORD),('th32ThreadID',w.DWORD),('th32OwnerProcessID',w.DWORD),('tpBasePri',w.LONG),('tpDeltaPri',w.LONG),('dwFlags',w.DWORD)]
 k.CreateToolhelp32Snapshot.argtypes=[w.DWORD,w.DWORD]; k.CreateToolhelp32Snapshot.restype=w.HANDLE
@@ -186,6 +204,7 @@ if d.SymFromName(h,b'vm_read32',syminfo):
 k.GetSystemTimeAsFileTime(c.byref(started_filetime))
 process_begin=process_cpu()
 start=time.perf_counter(); iteration=0
+timeline_begin=qpc() if args.timeline_output else None
 while time.perf_counter()-start<duration:
     if iteration%args.scan_every==0: scan()
     for tid,th in list(active.items()):
@@ -196,20 +215,35 @@ while time.perf_counter()-start<duration:
             continue
         buf=c.create_string_buffer(1250); cp=(c.addressof(buf)+15)&~15
         c.c_uint32.from_address(cp+0x30).value=0x100003  # CONTROL | INTEGER
+        sample_begin=qpc() if args.timeline_output else None
         if k.SuspendThread(th)==0xffffffff: continue
         suspended_begin=time.perf_counter()
+        addresses=()
+        stack_attempted=False
         try:
             good=k.GetThreadContext(th,cp); rip=c.c_uint64.from_address(cp+0xf8).value
             rcx=c.c_uint64.from_address(cp+0x80).value
+            context_qpc=qpc() if args.timeline_output else None
             if good and stackwalk and iteration%args.stack_every==0:
+                stack_attempted=True
                 output=(c.c_ulonglong*args.stack_depth)()
                 count=stackwalk(h,th,cp,output,args.stack_depth)
-                stacks[(tid,tuple(output[:count]))]+=1
+                addresses=tuple(output[:count])
+                stacks[(tid,addresses)]+=1
         finally:
-            k.ResumeThread(th)
+            resume_count=k.ResumeThread(th)
+            if resume_count==0xffffffff:
+                raise c.WinError(c.get_last_error())
             suspended_elapsed=time.perf_counter()-suspended_begin
             suspension_count+=1; suspension_total+=suspended_elapsed
             suspension_max=max(suspension_max,suspended_elapsed)
+        if args.timeline_output:
+            timeline_count+=1
+            timeline.append(dict(sequence=timeline_count, tid=tid[0], created_filetime=tid[1],
+                begin_qpc=sample_begin, context_qpc=context_qpc, resumed_qpc=qpc(),
+                context_valid=bool(good), rip=rip if good else 0,
+                stack_attempted=stack_attempted, addresses=addresses,
+                thread_cpu_100ns_before_suspend=ct))
         if good:
             raw[(tid,rip)]+=1
             if fast_load and rip in (fast_load,fast_load+3):
@@ -217,6 +251,7 @@ while time.perf_counter()-start<duration:
     # Avoid repeatedly sampling the same phase of a bursty per-frame job stream.
     iteration+=1; time.sleep(random.uniform(.5,1.5)*args.interval_ms/1000)
 elapsed=time.perf_counter()-start
+timeline_end=qpc() if args.timeline_output else None
 for tid,th in active.items(): last[tid]=cpu(th)
 process_ms=(process_cpu()-process_begin)/10000
 resolved={}
@@ -233,6 +268,20 @@ for tid in sorted(handles,key=lambda t:last[t]-first[t],reverse=True):
                              for (t,addresses),n in stacks.most_common() if t==tid][:(args.stack_limit or args.raw_limit)],
                      sampled_read32_addresses=[(f'0x{addr:08X}',n) for (t,addr),n in memory_reads.most_common() if t==tid][:20]))
 tracked_ms=sum(row['cpu_ms'] for row in rows)
+if args.timeline_output:
+    events=[]
+    for event in timeline:
+        event=dict(event)
+        event['rip_symbol']=sym(event['rip']) if event['context_valid'] else None
+        event['frames']=[sym(pc) for pc in event.pop('addresses')]
+        events.append(event)
+    args.timeline_output.write_text(json.dumps(dict(
+        note=parser_note+' QPC brackets SuspendThread/context/unwind/ResumeThread; '
+             'stack samples show locations, not CPU utilization or proof of causality.',
+        pid=pid,exe=pathbuf.value,qpc_frequency=frequency.value,
+        begin_qpc=timeline_begin,end_qpc=timeline_end,
+        capacity=args.timeline_limit,total_samples=timeline_count,
+        overwritten=max(0,timeline_count-len(events)),samples=events),indent=2)+'\n',encoding='utf-8')
 print(json.dumps(dict(pid=pid,exe=pathbuf.value,elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),
     scan_every=args.scan_every,selected_tids=args.tid,window_thread=window_thread_evidence,interval_ms=args.interval_ms,
     symbol_path=str(args.symbol_path.resolve()),stack_depth=args.stack_depth,stack_every=args.stack_every,
@@ -240,6 +289,7 @@ print(json.dumps(dict(pid=pid,exe=pathbuf.value,elapsed_s=elapsed,iterations=ite
     process_cpu_ms=process_ms,tracked_thread_cpu_ms=tracked_ms,
     unattributed_cpu_ms=max(0,process_ms-tracked_ms),
     thread_scan=dict(scan_stats,unique_ids=len(seen_ids)),
+    timeline_output=str(args.timeline_output) if args.timeline_output else None,
     coverage_note='Thread snapshots can miss short-lived jobs and CPU used before first observation; RIP samples include waits.',
     threads=rows),indent=2))
 for th in handles.values(): k.CloseHandle(th)
