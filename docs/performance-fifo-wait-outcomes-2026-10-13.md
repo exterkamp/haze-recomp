@@ -55,5 +55,103 @@ consume additional CPU; it is not a proposed release default without evidence.
   SHA-256 `6A1093A69AE58CB22F9BED4205275C9DFC82FC0EEE904D3206A8A1921AEA260C`.
   Build log: `local/fifo-wait-phases-build.log`.
 
-Live phase validation and the scheduling comparison are pending. No speedup,
-frame-pacing fix or release promotion is claimed by this instrumentation commit.
+## Detailed-renderer comparison and hitch attribution
+
+Run `20261013-225551-609`, PID 24972, uses that same candidate with detailed
+FIFO/draw/flush diagnostics enabled. Four 20-second windows alternate timeout
+1/0/0/1, with five-second settling periods and absolute camera sweeps at the
+copied jungle checkpoint. Graphics are 1440p, 8192 shadows, VSync off, uncapped;
+audio is muted. Every recorded interval, including the large hitch, is retained.
+
+| Timeout ms | FPS | Mean ms | p99 ms | Max ms | Wait ms/frame | FIFO ms/frame | Drains/frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 83.942 | 11.913 | 18.043 | 39.983 | 6.057 | 3.896 | 9.91 |
+| 0 | 82.872 | 12.067 | 18.232 | 181.626 | 0.127 | 9.954 | 550.30 |
+| 0 | 74.732 | 13.381 | 21.317 | 27.860 | 0.147 | 11.143 | 579.24 |
+| 1 | 78.933 | 12.669 | 19.450 | 31.634 | 6.584 | 4.138 | 10.50 |
+
+Mode and camera validation pass. Strict process-isolation checks fail because
+another Haze instance, PID 48684, overlaps. Resource sampling has a 5.441-second
+maximum gap, 52.34-54.00% physical memory use, and no observed compiler. No owned
+compilation or screenshots occurred in the timing windows. This comparison
+does not establish a causal performance gain or regression.
+
+Zero timeout replaces waiting with hundreds of FIFO calls per frame. Pump
+thread CPU rises from about 3.96/4.31 ms at timeout 1 to 10.03/11.08 ms at timeout
+0. Detailed drain diagnostics themselves perform thread-cycle queries and
+phase clocks on every call, so they can disproportionately penalize polling.
+A repeat with those diagnostics disabled is required. The release timeout
+remains unchanged.
+
+The 181.626-ms frame contains FIFO event 429200, renderer frame 39798, TID
+21468. Of its 174.4506-ms body, **174.4365 ms is inside the command walker**;
+reference-lock acquisition takes one QPC tick (0.1 microsecond). Draw callback
+5781315 is wholly inside this drain on the same thread:
+
+- Draw interval: QPC 14444006718118..14444008430722, 171.2604 ms.
+- Resource resolution: **171.2049 ms**.
+- Pipeline/constants: 0.0026 ms, existing PSO hit, zero compilation or shader
+  disk load; geometry: 0.0013 ms; command recording: 0.0516 ms.
+- Raw draw-thread cycle delta: 500,080. This is not CPU milliseconds and does
+  not distinguish a driver wait, logging delay, or descheduling.
+- No retained flush overlaps the draw. The flush ring retains all 1,247 events
+  above its 2-ms threshold without overwrite. This excludes a recorded long
+  `ld_flush` fence wait as the explanation, not sub-threshold flush activity.
+
+The draw ring retains all 74 qualifying callbacks without overwrite. The FIFO
+ring overwrites 2,834 older events; its retained extent contains all four windows,
+but that alone is not a proof of complete threshold-event retention. The
+identified event and nested callback are both present.
+
+Resource resolution includes surface creation/lookup, sampled and vertex
+textures, depth snapshots and descriptor handling. Source inspection finds no
+per-lookup cache mutex; committed-resource creation, branch logging and thread
+descheduling remain possibilities. Per-call resource attribution is the next
+step, rather than assuming the entire interval is CPU texture conversion.
+
+Evidence: `local/jungle-fifo-idle-abba-a1-{comparison-evidence,pump-report,
+slow-analysis,draw-analysis}.json`, raw CSVs, window/camera records, and process
+and resource observations. These findings narrow the next action; they do not
+establish a frame-pacing fix or release promotion.
+
+## Repeat without detailed renderer diagnostics
+
+Run `20261013-230539-172`, PID 27544, repeats the same candidate and 1/0/0/1
+sequence with `GCM_SLOW_DRAIN_CSV`, `RSX_SLOW_DRAW_CSV` and
+`RSX_SLOW_FLUSH_CSV` disabled. Lightweight pump/present recording remains
+enabled. A fresh private save and cache copy were used; the checkpoint and
+finished injection animation were visually confirmed before timing. Four
+20-second camera windows use tokens 3480-3483. All inputs detach before timing;
+the game closes normally with exit 0 and the real-save baseline hashes match.
+
+| Timeout ms | FPS | Mean ms | p99 ms | Max ms | Wait ms/frame | FIFO ms/frame | Drains/frame |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 79.291 | 12.612 | 18.353 | 25.353 | 6.898 | 3.765 | 10.73 |
+| 0 | 74.606 | 13.404 | 20.809 | 33.989 | 0.172 | 11.131 | 644.74 |
+| 0 | 76.386 | 13.091 | 20.510 | 34.242 | 0.164 | 10.830 | 646.58 |
+| 1 | 79.216 | 12.624 | 19.354 | 31.974 | 6.884 | 3.784 | 10.67 |
+
+Pooled normal-timeout windows: 3,168 frames, **79.254 FPS / 12.618 ms mean /
+18.867 ms p99**. Zero-timeout windows: 3,018 frames, **75.496 FPS / 13.246 ms
+mean / 20.771 ms p99**. Pump-thread CPU averages about 4.07/4.26 ms in the
+normal windows and 10.89/10.82 ms with zero timeout. No wait failures or fallback
+Sleep returns were recorded. All intervals, including three above 33.333 ms,
+are included; no frame exceeds 50 ms.
+
+Mode/camera checks pass. Strict isolation fails because Haze PIDs 23516 and
+43004 overlap. Twenty resource samples bracket the windows with a 5.369-second
+maximum gap, 52.36-53.89% memory use, and zero observed compilers. No owned
+compile, screenshot or heavy analysis runs during timing. This is not an
+isolated causal regression measurement. It does show that removing the detailed
+drain profiler does not make the observed polling result favorable. Both return
+windows remain close to their initial normal-timeout windows.
+
+There is no evidence here to promote zero-timeout polling. Repeated empty or
+blocked drains consume time instead of making the producer deliver commands
+earlier. Queue snapshots alone cannot distinguish those two cases. The next
+priority is resource-stall attribution and actual producer work, rather than
+counting the complete wait scope as freely recoverable time.
+
+Evidence: `local/jungle-fifo-idle-ordinary-a1-{comparison-evidence,pump-report,
+pooled-modes}.json`, raw pump/present CSVs, window/camera records and observer
+logs. The user's release launcher is unchanged.
