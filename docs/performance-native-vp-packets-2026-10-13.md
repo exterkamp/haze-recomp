@@ -168,3 +168,43 @@ of the replaced loop and a reverse-order confirmation remain pending.
 
 Private evidence: `local/native-vp-packets-motion-{windows,report}.json`,
 `-presents.csv`, `-processes.jsonl`, `-camera.txt.csv`, and the run log above.
+
+## Separate upload-route timing
+
+Run `20261013-024031-813` uses the same binary/settings with only
+`HAZE_VP_PACKET_PROFILE=1` added. Capture `requested_013094.ppm` confirms the
+carrier. Four alternating off/on/off/on camera windows pass the present,
+mode, actual-angle and process-coverage checks. Route counters cover each
+entire mode segment including its five-second warmup, so they must not be
+described as measurements restricted to the 24-second FPS windows. Aggregate
+elapsed route time is divided by presents within the same segment; it includes
+QPC and counter overhead and does not directly measure critical-path savings.
+
+| Native upload | Segment seconds | Presents | Calls | Route us/call | Route ms/present |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Off | 29.100 | 709 | 165900 | 1.593 | 0.373 |
+| On | 28.954 | 717 | 165076 | 0.353 | 0.081 |
+| Off | 28.975 | 709 | 161629 | 1.576 | 0.359 |
+| On | 29.587 | 722 | 164332 | 0.350 | 0.080 |
+
+The two native segments pack 1,139,967 and 1,132,663 blocks, with zero
+rejections. This is a measured reduction of approximately 0.28–0.29 ms of
+upload-route elapsed time per present, about 78%, not a multi-millisecond
+frame-time breakthrough. It argues against spending the next investigation
+on detailed lock instrumentation in this already small scope. The larger
+producer/consumer work still needs attribution. The candidate remains off by
+default pending broader correctness and uncontended whole-frame evidence.
+
+A read-only three-second CPU-counter scan during the diagnostic identified
+`Labyrinthine` PID 54424 alongside the owned Haze, with 4.84 CPU seconds used.
+That PID was also foreground during the earlier ordinary comparison. Two
+`ct_drive_native_shape` processes each used about 2.9 CPU seconds in the scan.
+No external process was changed. The Haze-only observer correctly validates
+absence of a second Haze instance; it does not validate absence of other
+games or shared GPU load. These runs therefore cannot establish an isolated
+absolute FPS baseline. The previously reported 20–23 FPS applies to that
+shared-load run, not a newly established isolated performance regression.
+
+Private evidence: `local/native-vp-packets-profile-route-summary.json`, its
+`-present-report.json`, `-windows.json`, `-presents.csv`, process/camera logs,
+and `local/summarize-vp-upload.py`. The game closed normally with exit 0.

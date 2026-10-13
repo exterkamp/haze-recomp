@@ -60,6 +60,8 @@ if (-not $RuntimeOnly) {
 & $cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Compilation failed.' }
 if ($Test) {
+    & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
+    if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     & $python "$root/tests/test_wait_timeline.py"
     if ($LASTEXITCODE -ne 0) { throw 'Wait timeline syscall naming and interval-union tests failed.' }
