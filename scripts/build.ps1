@@ -198,6 +198,14 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native job wait test compilation failed.' }
     & "$root/local/test_job_wait.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Native job wait scope validation failed.' }
+    & $python "$root/tests/test_vp_packet_oracle.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle guard tests failed.' }
+    & $python "$root/scripts/extract_vp_packet_oracle.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/vp_packet_reference.inc"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle extraction failed.' }
+    & $clang /nologo /EHsc /W0 /O2 /std:c++17 "/I$root/port" "/I$root/local" "/Fe$root/local/test_vp_packets.exe" "/Fo$root/local/test_vp_packets.obj" "$root/tests/test_vp_packets.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet test compilation failed.' }
+    & "$root/local/test_vp_packets.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet boundary comparison failed.' }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }
