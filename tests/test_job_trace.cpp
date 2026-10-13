@@ -177,10 +177,10 @@ int freeze_child() {
             summary = std::move(row);
             continue;
         }
-        if (row.empty() || row[0] != "event" || row.size() != 34) return 5;
+        if (row.empty() || row[0] != "event" || row.size() != 36) return 5;
         ++events;
     }
-    if (events == 0 || events > HAZE_JOB_TRACE_CAPACITY || summary.size() != 34 ||
+    if (events == 0 || events > HAZE_JOB_TRACE_CAPACITY || summary.size() != 36 ||
         number(summary, 31) == 0) return 6;
     return 0;
 }
@@ -214,10 +214,17 @@ int main(int argc, char** argv) {
     for (auto& producer : producers) producer.join();
 
     // A submit establishes a per-slot generation inherited by its nested calls.
+    LARGE_INTEGER interval_begin{}, interval_end{};
     {
         const std::uint64_t args[] = {0x11, 0x22, 0x33};
         HazeJobTraceScope submit(kSubmit, 3, 0x7000, 0x7100, args, 3);
         submit.set_slot(7);
+        submit.set_route(2);
+        submit.set_slot_base(0x12340000);
+        QueryPerformanceCounter(&interval_begin);
+        QueryPerformanceCounter(&interval_end);
+        haze_job_trace_interval(static_cast<unsigned>(HazeJobTraceKind::SpuCreateThread),
+            interval_begin.QuadPart, interval_end.QuadPart, args, 3);
         {
             HazeJobTraceScope dispatch(kDispatch, 3, 0x7200, 0x7210, nullptr, 0);
             dispatch.set_dispatch(0xdead, 0xbeef);
@@ -261,7 +268,7 @@ int main(int argc, char** argv) {
     bool first_ticket = true;
     while (std::getline(input, line)) {
         auto row = split(line);
-        assert(row.size() == 34);
+        assert(row.size() == 36);
         if (row[0] == "summary") {
             summary = std::move(row);
             continue;
@@ -286,11 +293,20 @@ int main(int argc, char** argv) {
     bool saw_submit_gen1 = false, saw_submit_gen2 = false;
     bool saw_wait_gen1 = false, saw_wait_gen2 = false;
     bool saw_dispatch_result = false, saw_missing_parent = false;
+    bool saw_external_interval = false;
     std::uint64_t submit_span = 0, dispatch_span = 0, handler_span = 0;
     std::uint64_t dispatch_parent = 0, handler_parent = 0;
     for (const auto& row : events) {
         const auto kind = number(row, 6);
         const auto guest_thread = number(row, 5);
+        if (kind == static_cast<unsigned>(HazeJobTraceKind::SpuCreateThread)) {
+            saw_external_interval = true;
+            assert(number(row, 2) == static_cast<std::uint64_t>(interval_begin.QuadPart));
+            assert(number(row, 3) == static_cast<std::uint64_t>(interval_end.QuadPart));
+            assert(number(row, 34) == 2);
+            assert(number(row, 35) == 0x12340000);
+            assert(number(row, 18) == 7 && number(row, 19) == 1);
+        }
         if (kind == kHandler && guest_thread == 8) {
             saw_invalid_slot = true;
             assert(number(row, 18) == 0xffffffffu);
@@ -310,6 +326,7 @@ int main(int argc, char** argv) {
             if (number(row, 19) == 2) saw_wait_gen2 = true;
         }
         if (kind == kDispatch && guest_thread == 3 && number(row, 20) == 0xdead) {
+            assert(number(row, 34) == 2);
             saw_dispatch_result = true;
             dispatch_span = number(row, 22);
             dispatch_parent = number(row, 23);
@@ -327,6 +344,7 @@ int main(int argc, char** argv) {
     assert(saw_invalid_slot);
     assert(saw_submit_gen1 && saw_submit_gen2 && saw_wait_gen1 && saw_wait_gen2);
     assert(saw_dispatch_result && handler_span != 0 && saw_missing_parent);
+    assert(saw_external_interval);
     assert(dispatch_parent == submit_span && handler_parent == dispatch_span);
 
     DeleteFileA(path);

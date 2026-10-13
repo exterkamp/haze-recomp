@@ -25,10 +25,14 @@ class DispatchTracePatch(unittest.TestCase):
         for address in trace.DIGESTS:
             restored = restored.replace(trace.entry(address), '', 1)
         restored = restored.replace(trace.SLOT, '', 1)
+        restored = restored.replace(trace.ROUTE, '', 1)
+        self.assertEqual(restored.count(trace.BASE), len(trace.BASE_CALLS))
+        restored = restored.replace(trace.BASE, '')
         restored = restored.replace(trace.DISPATCH_BEGIN, '', 1)
         restored = restored.replace('\n' + trace.DISPATCH_END.rstrip('\n'), '', 1)
         self.assertEqual(restored, self.source)
         self.assertIn('loc_00682740:\n' + trace.SLOT, result)
+        self.assertIn('loc_0068274C:\n' + trace.ROUTE, result)
 
     def test_rejects_changed_functions_and_repeated_patch(self):
         for address in trace.DIGESTS:

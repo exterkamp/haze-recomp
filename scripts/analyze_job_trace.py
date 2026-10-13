@@ -1,12 +1,16 @@
 """Summarize diagnostic Haze job spans without adding nested elapsed times."""
 import argparse
+from bisect import bisect_right
 import csv
 import json
 from collections import defaultdict
 from pathlib import Path
 
 KINDS = {1: 'submit', 2: 'dispatch_including_trampolines', 3: 'transform_kernel',
-         4: 'completion_wait', 5: 'transform_handler'}
+         4: 'completion_wait', 5: 'transform_handler', 6: 'state_publication',
+         7: 'spu_submit_point', 8: 'spu_create_thread', 9: 'spu_setup',
+         10: 'spu_execute', 11: 'spu_finish', 12: 'spu_cleanup',
+         13: 'spu_create_failed', 14: 'spu_setup_failed'}
 
 
 def union_ticks(intervals):
@@ -53,6 +57,178 @@ def read_trace(path):
     return events, summary
 
 
+def join_async_jobs(events):
+    """Join immutable SDK dispatch identities, allowing incomplete ring history."""
+    jobs = defaultdict(dict)
+    for row in events:
+        if row['kind'] < 7:
+            continue
+        job_id = row['arg0']
+        if not job_id or row['kind'] in jobs[job_id]:
+            raise ValueError('Invalid or duplicate SDK job phase')
+        previous = next(iter(jobs[job_id].values()), None)
+        if previous and any(previous[f'arg{i}'] != row[f'arg{i}'] for i in range(8)):
+            raise ValueError('SDK snapshot identity changed across phases')
+        jobs[job_id][row['kind']] = row
+    for phases in jobs.values():
+        if 8 in phases and 13 in phases:
+            raise ValueError('SDK job reports both successful and failed creation')
+        if 14 in phases and 10 in phases:
+            raise ValueError('Failed setup reports execution')
+        for before, after in ((9, 10), (10, 11), (11, 12)):
+            if before in phases and after in phases:
+                a, b = phases[before], phases[after]
+                if a['host_tid'] != b['host_tid'] or a['end_qpc'] > b['begin_qpc']:
+                    raise ValueError('SDK worker phase order/thread mismatch')
+        # A worker may finish before CreateThread returns; do not order it after
+        # the submitting thread's end timestamp.
+        if 8 in phases and 9 in phases and phases[9]['begin_qpc'] < phases[8]['begin_qpc']:
+            raise ValueError('SDK worker started before thread creation began')
+    return jobs
+
+
+def summarize_async(jobs, lo, hi, scale, frames):
+    images = defaultdict(lambda: {'phases': defaultdict(list), 'startup_gap_ms': []})
+    for phases in jobs.values():
+        any_row = next(iter(phases.values()))
+        image = any_row['arg1'] & 0xffffffff
+        for kind, row in phases.items():
+            if row['begin_qpc'] < hi and row['end_qpc'] >= lo:
+                images[image]['phases'][kind].append(row)
+        if 8 in phases and 9 in phases:
+            create, setup = phases[8], phases[9]
+            if lo <= create['begin_qpc'] <= setup['begin_qpc'] <= hi:
+                images[image]['startup_gap_ms'].append((setup['begin_qpc'] - create['begin_qpc']) * scale)
+    result = []
+    for image, data in images.items():
+        phases = {}
+        for kind, rows in data['phases'].items():
+            clipped = sum(min(hi, r['end_qpc']) - max(lo, r['begin_qpc']) for r in rows) * scale
+            full = [(r['end_qpc'] - r['begin_qpc']) * scale for r in rows
+                    if lo <= r['begin_qpc'] <= r['end_qpc'] <= hi]
+            phases[KINDS[kind]] = {'spans': len(rows), 'clipped_elapsed_ms_per_frame': clipped / frames,
+                                   'full_span_mean_ms': sum(full) / len(full) if full else None,
+                                   'full_span_max_ms': max(full, default=None)}
+        gaps = data['startup_gap_ms']
+        result.append({'image': image, 'phases': phases, 'startup_samples': len(gaps),
+                       'startup_gap_mean_ms': sum(gaps) / len(gaps) if gaps else None,
+                       'startup_gap_max_ms': max(gaps, default=None)})
+    return sorted(result, key=lambda r: r['phases'].get('spu_execute', {}).get('clipped_elapsed_ms_per_frame', 0), reverse=True)
+
+
+def summarize_wait_phases(events, jobs, lo, hi, scale, frames):
+    """Observed slot/time join, not an SDK-carried title generation or CPU time.
+
+    Only fully contained waits with one retained submit, SDK job, and state-2
+    publication are partitioned. Never silently reuse an older slot generation.
+    """
+    by_base, by_key, publications = defaultdict(list), {}, defaultdict(list)
+    for row in events:
+        key = (row.get('slot'), row.get('generation'))
+        if row['kind'] == 1 and row.get('slot_base') and key[0] < 512 and key[1]:
+            if key in by_key:
+                raise ValueError('Duplicate title slot generation')
+            by_key[key] = row
+            by_base[row['slot_base']].append(row)
+        elif row['kind'] == 6 and row['arg1'] == 2:
+            publications[key].append(row)
+    starts = {}
+    for base, rows in by_base.items():
+        rows.sort(key=lambda r: r['begin_qpc'])
+        starts[base] = [r['begin_qpc'] for r in rows]
+        if len(set(starts[base])) != len(rows):
+            raise ValueError('Ambiguous title submit ordering')
+    matched = defaultdict(list)
+    for phases in jobs.values():
+        sdk = phases.get(7)
+        if sdk is None or sdk['arg1'] >> 32 != 1:
+            continue
+        base = sdk['arg4']
+        index = bisect_right(starts.get(base, []), sdk['begin_qpc']) - 1
+        if index < 0:
+            continue
+        submit = by_base[base][index]
+        if submit.get('effective_route') == 2:
+            matched[(submit['slot'], submit['generation'])].append(phases)
+    groups, skipped, matched_waits = {}, defaultdict(int), defaultdict(list)
+    phase_names = ('before_sdk_submit', 'worker_startup', 'worker_setup',
+                   'abi_execution', 'after_abi', 'unattributed')
+    for wait in events:
+        if wait['kind'] != 4 or not lo <= wait['begin_qpc'] <= wait['end_qpc'] <= hi:
+            continue
+        key = (wait['slot'], wait['generation'])
+        submit = by_key.get(key)
+        candidates = matched.get(key, [])
+        pubs = publications.get(key, [])
+        reason = None
+        if submit is None:
+            reason = 'missing_title_submit'
+        elif len(candidates) != 1:
+            reason = 'missing_or_ambiguous_sdk_job'
+        elif len(pubs) != 1:
+            reason = 'missing_or_ambiguous_state2_publication'
+        elif not all(k in candidates[0] for k in (7, 9, 10)):
+            reason = 'missing_worker_phases'
+        if reason:
+            skipped[reason] += 1
+            continue
+        phases = candidates[0]
+        sdk, setup, execute = (phases[k] for k in (7, 9, 10))
+        pub = pubs[0]
+        base = submit['slot_base']
+        next_index = bisect_right(starts[base], submit['begin_qpc'])
+        next_submit = starts[base][next_index] if next_index < len(starts[base]) else float('inf')
+        if not (submit['begin_qpc'] <= wait['begin_qpc'] <= wait['end_qpc'] <= next_submit
+                and sdk['begin_qpc'] <= pub['begin_qpc'] <= pub['end_qpc'] <= wait['end_qpc']
+                and pub.get('slot_base') == base
+                and sdk['begin_qpc'] <= setup['begin_qpc'] <= setup['end_qpc'] <= execute['begin_qpc']):
+            skipped['inconsistent_observed_lifetime'] += 1
+            continue
+        # Publication may precede the end of the ABI function's epilogue.
+        identity = (wait['caller'], wait['guest_thread'], wait['host_tid'], submit['arg0'], sdk['arg1'] & 0xffffffff)
+        if identity not in groups:
+            groups[identity] = {'waits': [], **{name: [] for name in phase_names}}
+        group = groups[identity]
+        a, b = wait['begin_qpc'], wait['end_qpc']
+        group['waits'].append((a, b))
+        matched_waits[wait['host_tid']].append((a, b))
+        segments = (
+            ('before_sdk_submit', submit['begin_qpc'], sdk['begin_qpc']),
+            ('worker_startup', sdk['begin_qpc'], setup['begin_qpc']),
+            ('worker_setup', setup['begin_qpc'], setup['end_qpc']),
+            ('abi_execution', execute['begin_qpc'], execute['end_qpc']),
+            ('after_abi', execute['end_qpc'], b))
+        covered = []
+        for name, start, end in segments:
+            start, end = max(a, start), min(b, end)
+            if end > start:
+                group[name].append((start, end))
+                covered.append((start, end))
+        cursor = a
+        for start, end in sorted(covered):
+            if start > cursor:
+                group['unattributed'].append((cursor, start))
+            cursor = max(cursor, end)
+        if cursor < b:
+            group['unattributed'].append((cursor, b))
+    for intervals in matched_waits.values():
+        if union_ticks(intervals) != sum(b - a for a, b in intervals):
+            raise ValueError('Overlapping attributed waits on one host thread')
+    result = []
+    for (caller, guest, host, job_key, image), group in groups.items():
+        # Overlapping waits could attribute one interval to different jobs.
+        if union_ticks(group['waits']) != sum(b - a for a, b in group['waits']):
+            raise ValueError('Overlapping waits in an attribution group')
+        result.append({'caller': f'0x{caller:08X}', 'guest_thread': guest, 'host_tid': host,
+                       'job_key': job_key, 'image': image, 'waits': len(group['waits']),
+                       'wait_ms_per_frame': union_ticks(group['waits']) * scale / frames,
+                       'phase_ms_per_frame': {name: union_ticks(group[name]) * scale / frames
+                                              for name in phase_names}})
+    return {'note': 'Exact slot address plus latest preceding title submit, observed generation, unique SDK job and state-2 publication. Wall-time overlaps are not CPU time or removable savings. Only fully contained, validated waits are partitioned.',
+            'skipped_waits': dict(skipped),
+            'groups': sorted(result, key=lambda r: r['wait_ms_per_frame'], reverse=True)}
+
+
 def summarize_window(events, summary, block, frames):
     lo, hi = block['start_qpc'], block['end_qpc']
     if hi <= lo or frames <= 0:
@@ -89,6 +265,10 @@ def summarize_window(events, summary, block, frames):
     submissions = {(r['slot'], r['generation']) for r in events
                    if r['kind'] == 1 and r['slot'] < 512 and r['generation']}
     waits = [r for r in selected if r['kind'] == 4]
+    routes = defaultdict(int)
+    for row in selected:
+        if row['kind'] == 1:
+            routes[row.get('effective_route', 0xffffffff)] += 1
     callers = defaultdict(list)
     for row in waits:
         callers[(row['caller'], row['guest_thread'], row['host_tid'])].append(row)
@@ -98,10 +278,14 @@ def summarize_window(events, summary, block, frames):
         wait_callers.append({'caller': f'0x{caller:08X}', 'guest_thread': guest_thread,
                              'host_tid': host_tid, 'spans': len(rows),
                              'clipped_union_ms_per_frame': elapsed / frames})
+    async_jobs = join_async_jobs(events)
     return {'start_qpc': lo, 'end_qpc': hi, 'frames': frames,
             'completed_span_coverage': complete,
             'discarded_end_qpc_max': cutoff, 'incomplete_scopes_at_dump': summary['incomplete_scopes'],
             'groups': groups,
+            'submit_effective_routes': dict(routes),
+            'async_images': summarize_async(async_jobs, lo, hi, scale, frames),
+            'wait_phase_attribution': summarize_wait_phases(events, async_jobs, lo, hi, scale, frames),
             'dispatch_targets': sorted(targets, key=lambda r: r['inclusive_clipped_ms'], reverse=True),
             'wait_callers': sorted(wait_callers, key=lambda r: r['clipped_union_ms_per_frame'], reverse=True),
             'waits_with_retained_submit_generation': sum((r['slot'], r['generation']) in submissions for r in waits)}

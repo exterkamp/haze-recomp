@@ -33,6 +33,20 @@
 #include "ppu_recomp.h"
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
+#if defined(HAZE_JOB_TRACE) && defined(_WIN32)
+#include "spu_workload.h"
+static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
+                           uint64_t begin, uint64_t end)
+{
+    if (phase < 1 || phase > 8 || !job) return;
+    const uint64_t args[] = {
+        job->job_id, static_cast<uint32_t>(job->image_id) | (uint64_t(job->have_r3) << 32),
+        job->args_ea, (uint64_t(job->taskset_ea) << 32) | job->taskid,
+        job->r3[0], job->r3[1], job->r3[2], job->r3[3]
+    };
+    haze_job_trace_interval(phase + 6, begin, end, args, 8);
+}
+#endif
 
 /* The Win32 names -- Sleep, GetTickCount64, CreateThread, InterlockedIncrement,
  * VirtualAlloc, the scalar typedefs -- from one place. On Windows this is a
@@ -558,6 +572,11 @@ static void harness_guest_caller(uint32_t opd, uint64_t a0, uint64_t a1,
 
 int main(int argc, char** argv)
 {
+#if defined(HAZE_JOB_TRACE) && defined(_WIN32)
+    const char* job_trace_path = getenv("HAZE_JOB_TRACE_CSV");
+    if (job_trace_path && *job_trace_path)
+        spu_workload_set_async_trace_callback(haze_spu_trace);
+#endif
 #ifdef _WIN32
     /* Haze's normal configuration uses the measured native paths. Explicit
      * environment overrides remain available for diagnostic A/B comparisons.

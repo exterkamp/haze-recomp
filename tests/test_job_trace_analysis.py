@@ -4,10 +4,74 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from analyze_job_trace import summarize_window, union_ticks
+from analyze_job_trace import summarize_window, union_ticks, join_async_jobs, summarize_async, summarize_wait_phases
 
 
 class JobTraceAnalysis(unittest.TestCase):
+    @staticmethod
+    def reused_slot_events():
+        rows = []
+        for generation, offset in ((1, 0), (2, 100)):
+            def row(kind, begin, end, **extra):
+                return dict(kind=kind, begin_qpc=begin + offset, end_qpc=end + offset,
+                            host_tid=1, guest_thread=1, slot=3, generation=generation,
+                            slot_base=0x1000, caller=123, **extra)
+            rows.extend([row(1, 0, 2, arg0=10, effective_route=2),
+                         row(4, 3, 80), row(6, 55, 56, arg1=2),
+                         row(6, 81, 82, arg1=0)])
+            for kind, begin, end in ((7, 10, 10), (9, 20, 30), (10, 31, 60)):
+                args = (generation, (1 << 32) | 41, 0, 0, 0x1000, 0, 0, 0)
+                rows.append(row(kind, begin, end, **{f'arg{i}': v for i, v in enumerate(args)}))
+        return rows
+
+    def test_reused_slot_and_publication_before_abi_return(self):
+        rows = self.reused_slot_events()
+        result = summarize_wait_phases(rows, join_async_jobs(rows), 0, 200, 1, 2)
+        self.assertEqual(result['skipped_waits'], {})
+        group, = result['groups']
+        self.assertEqual(group['waits'], 2)
+        self.assertEqual(group['wait_ms_per_frame'], 77)
+        self.assertEqual(group['phase_ms_per_frame'], dict(before_sdk_submit=7,
+                         worker_startup=10, worker_setup=10, abi_execution=29,
+                         after_abi=20, unattributed=1))
+
+    def test_ambiguous_or_incomplete_jobs_are_not_attributed(self):
+        rows = self.reused_slot_events()
+        duplicate = next(r.copy() for r in rows if r['kind'] == 7)
+        duplicate['arg0'] = 999
+        rows.append(duplicate)
+        result = summarize_wait_phases(rows, join_async_jobs(rows), 0, 200, 1, 2)
+        self.assertEqual(result['skipped_waits'], {'missing_or_ambiguous_sdk_job': 1})
+        self.assertEqual(result['groups'][0]['waits'], 1)
+        rows = [r for r in self.reused_slot_events() if not (r['kind'] == 10 and r['generation'] == 2)]
+        result = summarize_wait_phases(rows, join_async_jobs(rows), 0, 200, 1, 2)
+        self.assertEqual(result['skipped_waits'], {'missing_worker_phases': 1})
+
+    def test_wrong_completion_address_is_not_attributed(self):
+        rows = self.reused_slot_events()
+        next(r for r in rows if r['kind'] == 6)['slot_base'] = 0x2000
+        result = summarize_wait_phases(rows, join_async_jobs(rows), 0, 200, 1, 2)
+        self.assertEqual(result['skipped_waits'], {'inconsistent_observed_lifetime': 1})
+
+    def test_async_thread_can_finish_before_create_returns(self):
+        def row(kind, lo, hi, tid):
+            return dict(kind=kind, begin_qpc=lo, end_qpc=hi, host_tid=tid,
+                        **{f'arg{i}': value for i, value in enumerate((1, 40, 123, 456, 0, 0, 0, 0))})
+        rows = [row(8, 10, 100, 1), row(9, 20, 30, 2), row(10, 30, 60, 2),
+                row(11, 60, 65, 2), row(12, 66, 70, 2)]
+        jobs = join_async_jobs(rows)
+        result = summarize_async(jobs, 0, 110, 1, 10)[0]
+        self.assertEqual(result['image'], 40)
+        self.assertEqual(result['startup_gap_mean_ms'], 10)
+        self.assertEqual(result['phases']['spu_execute']['clipped_elapsed_ms_per_frame'], 3)
+        rows[-1]['arg2'] = 999
+        with self.assertRaises(ValueError):
+            join_async_jobs(rows)
+        rows[-1]['arg2'] = 123
+        rows[-1]['begin_qpc'] = 64
+        with self.assertRaises(ValueError):
+            join_async_jobs(rows)
+
     def test_union_nested_disjoint_touching(self):
         self.assertEqual(union_ticks([(0, 20), (5, 10), (20, 25), (30, 40)]), 35)
         self.assertEqual(union_ticks([]), 0)
