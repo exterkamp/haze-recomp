@@ -33,6 +33,7 @@
 #include "ppu_recomp.h"
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
+void haze_job_wait_dump_counts();
 #include "haze_job0_capture.h"
 #include "spu_workload.h"
 #if defined(HAZE_JOB_TRACE) && defined(_WIN32)
@@ -404,6 +405,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 cellGcm_fifo_slow_drain_dump();
                 haze_job_profile_dump();
                 haze_job_trace_dump();
+                haze_job_wait_dump_counts();
                 haze_job0_capture_dump();
 #endif
                 // Closing the native game window ends the host, including its

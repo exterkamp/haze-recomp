@@ -4,9 +4,13 @@ import hashlib
 from pathlib import Path
 
 DIGESTS = {
+    '00682068': '4db74571a643edadad3b328091b0b5644e09c757dbb70c33d0fe22768dbac154',
+    '006820B0': '84b0f19b7fd30a15231dc0da959a7110f8fc915858850471fa75f062528065f7',
     '00682538': '88f6044616bbee9074fc5e8e031bf469036bda62a22de0158105d0b9a654fd1a',
     '0068EFC0': '15262821281dbc06398a4c4bc8a34ee296fe272d2d73b336e1a7cd9e322817ef',
     '0071EFE8': 'daf5d491622c7593d09754d32873daa3ff25dcf9dbce56cb3bcdfb4d9ff56897',
+    '0071F6F0': '9e9906b2cd1961ced2c59a551ae8e6afe2cabb28013507b0fcf423f530acc278',
+    '0071F648': '393db555a7bec41fe361bf2f52a0e6e2260f5255e721ed310a153848a07b03c4',
 }
 CALL = 'ctx->lr = 0x00682574; func_0068EFC0(ctx); DRAIN_TRAMPOLINE(ctx);'
 PROFILE_ENTRY = '        HazeJobProfileScope job_profile(ctx->thread_id, ctx->gpr[2], ctx->gpr[3], ctx->lr);\n'

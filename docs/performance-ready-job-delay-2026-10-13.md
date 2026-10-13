@@ -155,10 +155,47 @@ Thus the producer must observe actual queue publication to wake early; the
 static secondary flag cannot substitute for it. The native replacement must
 leave popping records and marking slots complete to this existing service.
 
-The next implementation checks a validated nonempty completion queue under
+The revised implementation checks a validated nonempty completion queue under
 the same SPU lock used by the SDK queue operations. It retains the 330-us QPC
 deadline and does not use the existing 1-ms WaitOnAddress timeout. Queue
 observation must preserve busy/index-wrap semantics and perform no guest
-writes. It remains experimental and off by default pending its own build,
-ordinary comparisons and gameplay validation. Stable 144 FPS, initial-load
+writes. It remains experimental and off by default pending ordinary comparisons
+and gameplay validation. Stable 144 FPS, initial-load
 pacing, squad conversation, transitions and long-run acceptance remain open.
+
+## Current queue-based candidate
+
+The guarded delay lazily resolves the queue once per delay when primary state
+is 1 and the routing byte is 2. The audited chain is:
+`root = read32(TOC - 0x7C1C)`, `table = read32(root - 0x7FD8)`,
+`queue = read32(table)`. Each pointer-read span is checked. The queue must be
+128-byte aligned with a valid 128-byte header. Under `spu_lockline_lock`, each
+probe validates entry size 16, pop direction 1, depth, aligned buffer RAM span,
+head/tail ranges and occupancy. One's-complement busy indices stay waiting;
+malformed metadata falls back to the original syscall. A valid nonempty queue
+ends the delay, leaving all records and indices untouched. Completed primary
+state can also end the delay. The unchanged original predicate then drains
+the queue and confirms the target slot; another slot's event is only an
+opportunity for that original service to make progress.
+
+The QPC deadline still requests at most 330 us of polling, with
+`SwitchToThread` / `YieldProcessor` between probes. Lock contention and OS
+scheduling can exceed the requested interval. No native event, waiter-list
+mutation, dequeue, guest completion write or per-probe log is added. Startup
+mode and enabled-only exit counts remain the only new log events. Source
+hash guards now cover `006820B0` and `0071F648` as well as the earlier audited
+boundaries. Memory diagnostics disable the fast path.
+
+The revised actual-boundary fixture passes with queue wraparound, busy/empty
+states, unsupported metadata, invalid pointer/range, diagnostics fallback,
+balanced locks, and byte-for-byte unchanged guest RAM. A captured final dump
+asserts exactly eight handled calls, three early returns (one primary and two
+queue), five expired deadlines and fourteen fallbacks. This ensures empty
+and busy cases cannot pass merely by returning any handled result. The two
+fail-closed patch tests pass. The fixture uses stub guest RAM and locks; it
+does not establish real-thread contention behavior or gameplay correctness.
+
+The ordinary SPU-FMA build, capped at two compiler jobs, succeeds with SHA256
+`5E5EE355970F16A0DDA97EDA775B4EFFFDF80432F5D158803B16A2E115F54199`.
+No SDK change is required. The new candidate has not yet supplied matched
+timing evidence; the tables above describe the rejected byte-flag candidate.
