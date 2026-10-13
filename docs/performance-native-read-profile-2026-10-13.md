@@ -292,3 +292,58 @@ The new candidate excludes the generated read shim entirely. Its executable
 is 122,747,392 bytes, compared with the precise-read candidate's 180,904,448.
 Same-binary enabled/disabled measurements will evaluate the predicate call
 change; they will not separately attribute the atomic-publication change.
+
+### Build and first whole-launch comparisons
+
+Haze integration `ce30279` pins SDK `17eb9d3d1e95cacce12009ea766be8166e850ef4`.
+The two-job ordinary SPU-FMA build and full regression suite passed, including
+the new store/selector/publication checks (`local/inline-coh-predicate-build-tests.log`).
+Actual Ninja rules verify that no generated translation unit includes the
+read shim. Production-object disassembly of `spu_coh_reserve` shows the bitmap
+update and armed publication without a locked instruction or hardware fence.
+
+Executable: `local/candidates/inline-coh-predicate/HazeRecomp.exe`, SHA-256
+`CED4A04F8C74BB629E8ABF5A2B7712B5A37B80E8F217E15443D431DB5FCD6AA1`.
+All runs used fresh private save copies, visually confirmed jungle/tutorial
+setup, 1440p/8192 shadows, VSync off, uncapped presentation, and the same fixed
+native modes as above. Each recorded two 60-second camera sweeps after
+five-second warmups and acknowledged input-file detach. All frames and hitches
+remain included. The owned games were muted, exited normally with code 0,
+and had no own compiler, screenshot or CPU sampler inside timing windows.
+All seven baseline save hashes still match their recorded values.
+
+| Mode / launch | Frames | FPS | Mean ms | p95 ms | p99 ms | Max ms | >33.333 / >50 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| OFF `jungle-coh-off-a1` | 8,051 | 67.105 | 14.902 | 20.664 | 28.709 | 154.049 | 46 / 10 |
+| ON `jungle-coh-on-b1` | 9,569 | 79.756 | 12.538 | 15.935 | 18.515 | 41.265 | 1 / 0 |
+| OFF repeat `jungle-coh-off-a2` | 9,147 | 76.241 | 13.116 | 16.960 | 20.123 | 40.953 | 3 / 0 |
+
+The first OFF run passed the Haze-process check but overlapped up to eight
+external compiler processes. Memory rose from 51.07% to 79.84%, so this is
+not an isolated comparison or a usable speedup baseline. Its two windows
+averaged 63.129 and 71.081 FPS.
+
+ON and repeated OFF both failed the strict Haze-process isolation gate because
+the other agent's `fix-lobo-black-screen` executable, PID 66060, overlapped.
+Their diagnostic camera/mode checks pass and neither observed a compiler.
+The same competing PID does not guarantee the same background workload.
+ON's windows averaged 80.974 and 78.538 FPS; repeated OFF averaged 77.664 and
+74.818 FPS. Other-game CPU over the resource-sample brackets was 3.62/3.97
+core equivalents for ON and 3.70/3.69 for OFF; these brackets extend outside
+the exact timing windows and do not measure GPU contention.
+
+Each run has 26 bracketing resource samples. Maximum spacing was 5.389s,
+5.356s, and 5.360s respectively; ON memory was 52.45-53.30% and repeated OFF
+53.19-53.90%. Sparse observations cannot exclude activity between samples.
+
+Mean pump wait / FIFO / present times were 7.919 / 4.805 / 2.038 ms for the
+compiler-heavy control, 6.718 / 3.866 / 1.863 ms for ON, and 6.608 / 4.499 /
+1.917 ms for repeated OFF. Thus the latter pair's 0.578 ms mean difference
+appears mainly in the FIFO wall-time phase, not a measured reduction in
+producer wait. These measurements do not identify its cause.
+
+**Provisional lead, not promotion:** ON has 4.4% lower mean frame time than
+the repeated control in this pair, with a lower p99. Repeat alternating runs
+and broader gameplay acceptance remain outstanding. The first compiler-heavy
+control must not be used to claim a 19% improvement. The experimental selector
+remains off by default; no new release launcher or release setting was added.
