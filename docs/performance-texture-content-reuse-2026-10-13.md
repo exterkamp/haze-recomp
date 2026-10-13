@@ -5,7 +5,9 @@ native content reuse. The preceding miss trace found thousands of guest
 descriptors for fewer than 100 layout/content groups per measured sweep.
 Sharing by native upload contents removes guest-address relocation from the
 allocation decision. This is implemented on the experimental branch, without
-a new user-facing option; it has not yet been promoted into the delivered WIP.
+a new user-facing option. A new normal-build WIP is available as recorded below;
+isolated whole-frame validation and promotion beyond the experimental branch
+remain pending.
 
 ## Ownership and correctness
 
@@ -115,8 +117,28 @@ passes. The ring wraps intentionally with zero rejected records.
 
 The last accepted isolated baseline remains the unchanged-binary recovery at
 66-69 FPS. Stable 144 FPS and consistent frame pacing are still unachieved.
-An isolated comparison and ordinary-build packaging remain before WIP
-promotion; the implementation and validation milestone are tracked in #59.
+An isolated comparison and broader traversal/view validation remain before
+promotion beyond the experimental branch; the milestone is tracked in #59.
+
+## Normal WIP
+
+`build.ps1 -SpuFma -Test -Jobs 2` completes successfully, including the complete
+normal-build regression suite. The resulting executable's SHA-256 is
+`47361AD91F1F9D03205C5802AACEB171C869CDDE682326402175FFB8CD8D4171`.
+Run `20261013-072725-543` visually verifies that this exact binary reaches the
+jungle Nectar tutorial on a private save copy, with muted device output and
+mixing active. Its normal-build summary reports 3,304 eligible requests and
+2,920 exact-content hits across startup/resume. No D3D failure is reported.
+This smoke run is not a settled-gameplay benchmark.
+
+The copied benchmark configuration has SHA-256
+`BD5C3020AAB5193EE9ACD439B212D62D19CCCBDF085E7AB829391F5D7E46ECAC`;
+the smoke boot log confirms 1440p, 8192 shadows, VSync off and no cap.
+The packaged executable hash matches the tested candidate. Launcher:
+`local/releases/haze-wip-2026-10-13-texture-reuse/Play-Haze.cmd`.
+It copies the prior WIP's current graphics settings (including 8192 shadows
+and VSync off), enables interactive audio, and uses the normal save/input paths.
+The previous WIP is preserved. No new performance toggle is required.
 
 Private evidence: `local/texture-content-cache-{build,tests}.log`,
 `local/jungle-texture-content-*` (including the repeat). No game data or binaries
