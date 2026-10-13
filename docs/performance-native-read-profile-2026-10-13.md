@@ -121,5 +121,72 @@ unaligned big-endian values, end bounds, low/device/ref fallback, and unchanged
 write routing. The enabled fixture also waits for a second thread to publish
 a guest word. Assembly checks require the native load/byte swap, original
 fallback call and retained polling loop. The existing 41 actual-accessor
-read checks also pass. Full-game build and ordinary FPS comparison results
-remain pending; these checks establish no frame-time gain.
+read checks also pass. These checks establish no frame-time gain. The
+subsequent ordinary two-job build and complete regression suite passed
+(`local/inline-native-reads-build-tests-v2.log`).
+
+## Ordinary whole-launch comparisons: no promotion
+
+The candidate is `local/candidates/inline-native-reads/HazeRecomp.exe`, source
+Haze `21a429a` / SDK `c61b8bd`, SHA-256
+`5855EED98BA67C0EE0F3885A174E2946B6166E47F3AC4D7BE323F8EBA4EE7AD6`.
+Each launch used a fresh copy of the seven-file private save baseline, the
+settings above, visually confirmed jungle scenery after the Nectar prompt,
+and two 60-second absolute camera sweeps with five-second warmups. Audio was
+muted with mixing active. Diagnostic PAD_FILE polling was detached and
+acknowledged before timing. No own compilation, CPU sampling or screenshots
+ran in the timed windows. All frame intervals, including hitches, remain in
+these numbers; all three runs exited normally with code 0.
+
+| Mode / launch | Frames | FPS | Mean ms | p95 ms | p99 ms | Max ms | >33.333 / >50 ms |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ON `jungle-inline-on-b1` | 9,471 | 78.947 | 12.667 | 15.548 | 17.729 | 47.260 | 3 / 0 |
+| OFF `jungle-inline-off-a1` | 9,039 | 75.345 | 13.272 | 16.708 | 19.393 | 65.348 | 2 / 1 |
+| OFF repeat `jungle-inline-off-a2` | 10,013 | 83.458 | 11.982 | 15.118 | 17.505 | 73.772 | 2 / 1 |
+
+ON passed the camera, actual-mode and process-isolation checks. Its resource
+log observed no competing Haze or compiler, memory use 48.71–49.51%, with
+26 bracketing samples and maximum 5.334-second sample spacing.
+
+The first OFF run failed process isolation because Haze PID 48352 overlapped;
+its result is retained but cannot establish a speedup. Its resource log
+observed no compiler, memory use 52.10–53.42%, and maximum spacing 5.352s.
+
+The repeated OFF run passed camera/mode/process checks and observed no other
+Haze. Its resource log nevertheless caught two compiler processes near the
+end of the second window (QPC 14318490851464..14318490984818; that window ends
+14318572930827, 10 MHz). This prevents calling the entire launch an isolated
+CPU comparison. Memory use was 50.65–51.48%, maximum spacing 5.333s. The first
+60-second window had no competing game/compiler observed: 4,983 frames,
+83.070 FPS, mean 12.038 ms, p95 15.358, p99 18.026, max 73.772. ON's first
+window was 4,753 frames, 79.240 FPS, mean 12.620 ms. No time slices or hitches
+were removed to improve either result. Sparse resource observations cannot
+exclude activity between samples.
+
+Mean pump phases (overlapping CPU/GPU work is not additive) were:
+
+| Launch | Wait ms | FIFO ms | Present ms |
+|---|---:|---:|---:|
+| ON | 7.307 | 3.442 | 1.823 |
+| OFF with Haze overlap | 7.654 | 3.624 | 1.878 |
+| OFF repeat | 6.757 | 3.338 | 1.794 |
+
+This implementation has not demonstrated a repeatable whole-frame gain.
+The last earlier clean baseline was 94.045 FPS / 10.633 ms, but it used the
+prior binary and a separate run; it is not a paired causal measurement of
+the inline change. The experimental executable grew from 122,746,368 to
+180,708,352 bytes. Extra code size and broad compiler clobbers are leads to
+investigate, not measured explanations for the frame-time differences.
+
+Normal builds therefore exclude the inline shim entirely, avoiding even its
+disabled-path overhead. Developers can reproduce the experimental build with
+`scripts/build.ps1 -SpuFma -Jobs 2 -ExperimentalInlineReads`, followed by a
+fresh launch with `PPU_INLINE_READS=ON` or `OFF`. This is an experimental build
+control, not a release graphics setting. Actual Ninja rules are checked to
+ensure only the eight generated translation units receive the shim and that
+ordinary builds receive none.
+
+A follow-up candidate is a precise volatile unaligned RAM load, which may
+preserve polling freshness without the full compiler clobber of unrelated
+host context state. It requires assembly and concurrency checks before
+building or timing; it is not implemented or promoted by these results.
