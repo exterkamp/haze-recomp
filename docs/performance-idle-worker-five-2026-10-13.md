@@ -116,3 +116,33 @@ Tracking #36, #32 and #9 remain open. Next validation: ordinary three-image
 baseline versus five-image candidate from the same checkpoint, repeated
 ordering, full intervals and resource observation, then transitions and
 broader playability. Do not promote a diagnostic result to a stable-FPS claim.
+
+## Raw dispatch follow-up: cache spill and shared completion
+
+The worst enabled frame is not just an accumulation of short executions:
+several individual image-30 ABI spans last 32–33 ms. The enabled window's
+maximum full image-30 span is 33.3944 ms; 5.5051 ms belongs to the disabled
+window. These wall spans may include waits and descheduling.
+
+For frame 35279, the raw dispatch sequence shows twelve reused image-30 jobs
+(552360–552371) and four reused image-33 jobs (552372–552375), filling all
+16 cache slots. Image 40 (552376) then takes about 32.6 ms to start a dedicated
+thread. Six additional image-30 jobs (552377–552382) also use created threads,
+starting roughly 11–32 ms after submission. Many early and late jobs end
+within the same small QPC interval. The cache has no execution queue; capacity
+limits reuse, not the number of simultaneously executing jobs.
+
+This supports two investigations: whether a larger cache reduces thread
+creation delays, and whether a shared dependency holds many jobs until a
+late participant starts. It does not prove either cause. The lifted image-30
+source contains a retry path through SPURS WAIT_SIGNAL, which can park on a
+condition variable, as well as atomic retry paths. No trace yet establishes
+which path these specific long jobs took. Next diagnostics should correlate
+repeated waits with task signals and separate running time from parked or
+descheduled wall time. Preserve all repeated wait events separately from the
+unique async lifecycle phases.
+
+Private raw extracts: `local/five-image30-tail-raw.json` and
+`local/five-image30-tail-dispatch.json`. This interpretation does not change
+the compiler-overlap limitation on the original capture or explain the
+earlier multi-second stall.

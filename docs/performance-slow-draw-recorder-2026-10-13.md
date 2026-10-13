@@ -58,7 +58,48 @@ Private evidence: `local/slowdraw-smoke.csv`,
 `local/idle-worker-five-slowdraw-build.log`, and
 `local/idle-worker-five-ordinary-build.log`.
 
-Next: ordinary three-versus-five-workload comparison first; then a controlled
-jungle capture of this diagnostic and its disabled/enabled overhead. The
-earlier 34 ms accumulated draw interval and multi-second ordinary stall remain
-unexplained. Tracking #9 and #32 remain open.
+## Isolated jungle capture
+
+Run `20261013-110406-618` used the profile candidate above, fresh disposable
+jungle save, 1440p/8192 shadows, VSync off and no cap. After dismissing the
+tutorial and activating Nectar, two 24-second absolute camera sweeps used
+five-second warmups, worker reuse enabled throughout, tokens 2160/2161.
+Audio was muted and the process exited normally. No job-phase recorder ran.
+Camera, mode, present and Haze-process audits pass. The resource observer
+brackets both windows: 12 samples, 47.80–48.28% memory, zero observed compilers,
+maximum gap 5.366 seconds. Other applications and activity between samples
+are not excluded by these observations.
+
+Across 3866 retained present intervals: mean 12.409 ms / 80.588 FPS,
+p95 15.673 ms, p99 18.095 ms, max 26.309 ms, zero gaps above 33.333 ms.
+These are instrumented results, not an ordinary-build gain or a measurement
+of diagnostic overhead. The prior large stalls did not recur in this capture.
+
+At a 1000-microsecond threshold, the recorder retained 256 of 329 qualifying
+callbacks from 9,017,227 total callbacks. Its first retained QPC predates both
+measurement windows. Ten callbacks are fully inside the first window and four
+inside the second, with no boundary-crossing callbacks. The new
+`scripts/analyze_slow_draws.py` validates CSV shape, counters, clock conversion,
+stage conservation and raw cycle deltas before reporting retained events.
+
+The largest callback is 2.6515 ms, of which 2.6164 ms is resource resolution.
+Its enclosing renderer frame records one `CreateCommittedResource` taking
+2.5238 ms within 2.5940 ms of texture decoding. Another callback takes
+2.3332 ms, including 2.3069 ms resource resolution; its enclosing frame records
+one 2.2429 ms resource creation within 2.3015 ms texture decoding. These scopes
+overlap and must not be summed. Their temporal alignment identifies resource
+creation as a concrete lead; it does not explain all frame time or earlier
+large stalls.
+
+Several 1–1.5 ms geometry/pipeline callbacks have relatively low raw thread
+cycle deltas (for example, 1.4378 ms geometry and 126,900 cycles). This supports
+investigating waits or descheduling inside those regions. Flush/fence timers
+also occur in enclosing frames, but the recorder does not yet associate a
+specific flush reason with an individual callback. No causal assignment is
+established. Join by QPC: slow-draw labels are renderer frame minus one and
+pump frame plus two in this capture, not identical frame IDs.
+
+Private evidence prefix: `local/jungle-slowdraw-stages`, including validated
+draw analysis, present report, raw CSVs and process/resource observations.
+Diagnostic overhead, per-draw flush attribution and the earlier multi-second
+stall remain open. Tracking #9 and #32 remain open.
