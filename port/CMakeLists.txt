@@ -113,6 +113,20 @@ endif()
 # ---------------------------------------------------------------------------
 # ps3recomp runtime library
 # ---------------------------------------------------------------------------
+set(HAZE_TITLE_SOURCE "${RECOMP_DIR}/ppu_recomp_002.cpp")
+if(EXISTS "${HAZE_TITLE_SOURCE}")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_TITLE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_title/ppu_recomp_002.cpp")
+    add_custom_command(OUTPUT "${HAZE_TITLE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_title_prompt.py"
+            "${HAZE_TITLE_SOURCE}" "${HAZE_TITLE_PATCHED}"
+        DEPENDS "${HAZE_TITLE_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_title_prompt.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_TITLE_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_TITLE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_title.cpp")
+    set_property(SOURCE "${HAZE_TITLE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+
 set(HAZE_MENU_SOURCE "${HAZE_MENU_PATCHED}")
 if(EXISTS "${RECOMP_DIR}/ppu_recomp_001.cpp")
     find_package(Python3 COMPONENTS Interpreter REQUIRED)

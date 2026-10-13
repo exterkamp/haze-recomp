@@ -91,6 +91,21 @@ int main() {
     assert((state.input.buttons&CELL_PAD_CTRL_CROSS) && !(state.input.buttons&CELL_PAD_CTRL_CIRCLE));
     assert(state.input.r2==255 && state.input.ry==255 && state.family==HazeInputFamily::PlayStation);
     assert(state.menu_input_valid && state.menu_recovery && (state.menu_input.buttons&CELL_PAD_CTRL_CIRCLE) && !(state.menu_input.buttons&CELL_PAD_CTRL_CROSS));
+    for (const auto& family : {std::pair{"xbox",HazeInputFamily::Xbox},
+                              std::pair{"playstation",HazeInputFamily::PlayStation},
+                              std::pair{"switch",HazeInputFamily::Switch}}) {
+        { std::ofstream file(config);
+          file<<"[ControllerBindings]\nStart=north\n[Controller]\nIconFamily="<<family.first<<"\n"; }
+        haze_gamepad_configure(config.c_str());
+        SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_START,true);
+        state=haze_gamepad_update();
+        assert(state.family==family.second && !(state.input.buttons&CELL_PAD_CTRL_START));
+        SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_START,false);
+        SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_NORTH,true);
+        assert(haze_gamepad_update().input.buttons&CELL_PAD_CTRL_START);
+        SDL_SetJoystickVirtualButton(joy,SDL_GAMEPAD_BUTTON_NORTH,false);
+        assert(!(haze_gamepad_update().input.buttons&CELL_PAD_CTRL_START));
+    }
     SDL_CloseJoystick(joy);
     assert(SDL_DetachVirtualJoystick(id));
     state=haze_gamepad_update();
