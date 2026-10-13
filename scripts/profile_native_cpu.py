@@ -39,6 +39,12 @@ parser.add_argument('--timeline-output',type=Path,
     help='Write a bounded QPC-stamped sample suffix after resuming threads; diagnostic only.')
 parser.add_argument('--timeline-limit',type=int,default=100000,
     help='Maximum retained timeline samples; overwritten samples are counted.')
+parser.add_argument('--stall-ms',type=float,
+    help='Suspend only after a uint32 frame counter stops progressing for this long; diagnostic only.')
+parser.add_argument('--stall-symbol',default='g_frames_presented',
+    help='Exact PDB name of the uint32 frame counter watched by --stall-ms.')
+parser.add_argument('--stall-samples',type=int,default=3,
+    help='Maximum sampling rounds per unchanged frame counter; requires progress to rearm.')
 args=parser.parse_args()
 if args.window_thread and args.tid:
     parser.error('--window-thread and --tid are mutually exclusive')
@@ -54,6 +60,11 @@ if args.stack_depth and not args.stack_library.is_file():
     parser.error('Build the native stackwalk helper DLL before requesting stacks')
 if not 1<=args.timeline_limit<=1000000:
     parser.error('timeline-limit must be 1..1000000')
+if args.stall_ms is not None:
+    if not 10<=args.stall_ms<=1000 or not 1<=args.stall_samples<=10:
+        parser.error('stall-ms must be 10..1000 and stall-samples must be 1..10')
+    if not args.timeline_output or not (args.window_thread or args.tid and len(args.tid)==1):
+        parser.error('stall sampling requires a timeline and exactly one selected thread')
 
 k=c.WinDLL('kernel32',use_last_error=True)
 d=c.WinDLL('dbghelp',use_last_error=True)
@@ -201,22 +212,55 @@ if d.SymFromName(h,b'vm_read32',syminfo):
     if k.ReadProcessMemory(h,address,code,len(code),c.byref(got)):
         offset=code.raw[:got.value].find(bytes.fromhex('8b04080fc8'))
         if offset>=0: fast_load=address+offset
+stall_trigger=None
+stall_address=None
+if args.stall_ms is not None:
+    from frame_stall_trigger import FrameStallTrigger
+    if not d.SymFromName(h,args.stall_symbol.encode('utf-8'),syminfo):
+        raise RuntimeError('Frame-counter symbol not found in the matching PDB')
+    if syminfo.contents.Size != 4:
+        raise RuntimeError('Frame-counter symbol must be exactly four bytes')
+    stall_address=syminfo.contents.Address
+    stall_trigger=FrameStallTrigger(frequency.value,args.stall_ms,args.stall_samples)
+
+def stall_metadata():
+    if stall_trigger is None: return None
+    return dict(stall_trigger.summary(),symbol=args.stall_symbol,address=stall_address,
+                threshold_ms=args.stall_ms,
+                note='Observed counter progress is not the exact present timestamp. Polling and triggered suspensions perturb execution; capped episodes can miss later locations.')
+
 k.GetSystemTimeAsFileTime(c.byref(started_filetime))
 process_begin=process_cpu()
 start=time.perf_counter(); iteration=0
 timeline_begin=qpc() if args.timeline_output else None
 while time.perf_counter()-start<duration:
     if iteration%args.scan_every==0: scan()
+    trigger_evidence=None
+    if stall_trigger is not None:
+        value=c.c_uint32(); got=c.c_size_t()
+        if not k.ReadProcessMemory(h,stall_address,c.byref(value),4,c.byref(got)) or got.value!=4:
+            raise RuntimeError('Could not read the frame counter; stopping without further suspensions')
+        trigger_evidence=stall_trigger.observe(value.value,qpc())
+        if trigger_evidence is None:
+            iteration+=1; time.sleep(random.uniform(.5,1.5)*args.interval_ms/1000)
+            continue
+        if not active:
+            raise RuntimeError('Stall detected without an active selected thread; capture incomplete')
     for tid,th in list(active.items()):
         ct=cpu(th); first.setdefault(tid,ct); last[tid]=ct
         if not running(th):
+            if stall_trigger is not None:
+                raise RuntimeError('Selected thread exited during a stall; capture incomplete')
             active.pop(tid,None)
             if live_ids.get(tid[0])==tid: live_ids.pop(tid[0],None)
             continue
         buf=c.create_string_buffer(1250); cp=(c.addressof(buf)+15)&~15
         c.c_uint32.from_address(cp+0x30).value=0x100003  # CONTROL | INTEGER
         sample_begin=qpc() if args.timeline_output else None
-        if k.SuspendThread(th)==0xffffffff: continue
+        if k.SuspendThread(th)==0xffffffff:
+            if stall_trigger is not None:
+                raise c.WinError(c.get_last_error())
+            continue
         suspended_begin=time.perf_counter()
         addresses=()
         stack_attempted=False
@@ -224,7 +268,7 @@ while time.perf_counter()-start<duration:
             good=k.GetThreadContext(th,cp); rip=c.c_uint64.from_address(cp+0xf8).value
             rcx=c.c_uint64.from_address(cp+0x80).value
             context_qpc=qpc() if args.timeline_output else None
-            if good and stackwalk and iteration%args.stack_every==0:
+            if good and stackwalk and (stall_trigger is not None or iteration%args.stack_every==0):
                 stack_attempted=True
                 output=(c.c_ulonglong*args.stack_depth)()
                 count=stackwalk(h,th,cp,output,args.stack_depth)
@@ -243,6 +287,7 @@ while time.perf_counter()-start<duration:
                 begin_qpc=sample_begin, context_qpc=context_qpc, resumed_qpc=qpc(),
                 context_valid=bool(good), rip=rip if good else 0,
                 stack_attempted=stack_attempted, addresses=addresses,
+                stall_trigger=trigger_evidence,
                 thread_cpu_100ns_before_suspend=ct))
         if good:
             raw[(tid,rip)]+=1
@@ -278,7 +323,8 @@ if args.timeline_output:
     args.timeline_output.write_text(json.dumps(dict(
         note=parser_note+' QPC brackets SuspendThread/context/unwind/ResumeThread; '
              'stack samples show locations, not CPU utilization or proof of causality.',
-        pid=pid,exe=pathbuf.value,qpc_frequency=frequency.value,
+        pid=pid,exe=pathbuf.value,qpc_frequency=frequency.value,selected_tids=args.tid,
+        stall_trigger=stall_metadata(),
         begin_qpc=timeline_begin,end_qpc=timeline_end,
         capacity=args.timeline_limit,total_samples=timeline_count,
         overwritten=max(0,timeline_count-len(events)),samples=events),indent=2)+'\n',encoding='utf-8')
@@ -290,6 +336,7 @@ print(json.dumps(dict(pid=pid,exe=pathbuf.value,elapsed_s=elapsed,iterations=ite
     unattributed_cpu_ms=max(0,process_ms-tracked_ms),
     thread_scan=dict(scan_stats,unique_ids=len(seen_ids)),
     timeline_output=str(args.timeline_output) if args.timeline_output else None,
+    stall_trigger=stall_metadata(),
     coverage_note='Thread snapshots can miss short-lived jobs and CPU used before first observation; RIP samples include waits.',
     threads=rows),indent=2))
 for th in handles.values(): k.CloseHandle(th)

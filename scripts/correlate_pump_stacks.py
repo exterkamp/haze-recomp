@@ -14,8 +14,14 @@ def correlate(timeline, pump_rows, limit=12):
         raise ValueError('Invalid capture clock or interval')
     if timeline['total_samples'] != timeline['overwritten'] + len(samples):
         raise ValueError('Sample counts disagree')
-    if len({(s['tid'], s['created_filetime']) for s in samples}) != 1:
+    if timeline['overwritten'] < 0 or not samples and timeline['overwritten']:
+        raise ValueError('Invalid retained sample suffix')
+    triggered = timeline.get('stall_trigger') is not None
+    if len({(s['tid'], s['created_filetime']) for s in samples}) != 1 and not (triggered and not samples):
         raise ValueError('Expected exactly one sampled thread lifetime')
+    if triggered and (not timeline.get('selected_tids') or len(timeline['selected_tids']) != 1
+                      or any(s['tid'] != timeline['selected_tids'][0] for s in samples)):
+        raise ValueError('Triggered capture must identify one selected thread')
     previous = timeline['begin_qpc']
     sequence = timeline['overwritten']
     for sample in samples:
@@ -24,8 +30,12 @@ def correlate(timeline, pump_rows, limit=12):
         if sample['sequence'] != sequence + 1:
             raise ValueError('Missing or reordered sample sequence')
         previous, sequence = sample['resumed_qpc'], sample['sequence']
-    lo = max(timeline['begin_qpc'], samples[0]['begin_qpc'])
-    hi = min(timeline['end_qpc'], samples[-1]['resumed_qpc'])
+    # Triggered captures intentionally have unsampled normal frames. Include
+    # full captured pump intervals, including the frame that first triggered
+    # sampling. If the bounded sample suffix overwrote evidence, discard that
+    # prefix conservatively just as in continuous mode.
+    lo = timeline['begin_qpc'] if triggered and not timeline['overwritten'] else samples[0]['begin_qpc']
+    hi = timeline['end_qpc'] if triggered else samples[-1]['resumed_qpc']
     eligible = []
     previous_end = None
     for row in pump_rows:
@@ -56,7 +66,10 @@ def correlate(timeline, pump_rows, limit=12):
     return dict(note='Diagnostic only: sampling perturbs these intervals. Locations include waits, '
                      'not CPU percentages or exact causal attribution. Unsampled gaps remain. '
                      'Suspension brackets include context/unwind and surrounding sampler work.',
-                pid=timeline['pid'], exe=timeline['exe'], tid=samples[0]['tid'],
+                pid=timeline['pid'], exe=timeline['exe'],
+                tid=timeline['selected_tids'][0] if triggered else samples[0]['tid'],
+                stall_trigger=timeline.get('stall_trigger'),
+                stack_evidence_status='samples present' if samples else 'no triggered samples',
                 qpc_frequency=frequency, eligible_pump_intervals=len(eligible),
                 retained_samples=len(samples), overwritten=timeline['overwritten'],
                 max_intersample_gap_ms=max((b['context_qpc']-a['context_qpc'] for a,b in zip(samples,samples[1:])),default=0)*1000/frequency,

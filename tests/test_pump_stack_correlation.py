@@ -48,5 +48,16 @@ class PumpStackTests(unittest.TestCase):
         for rows in ([pump(), pump()], [pump(),pump(30,40)], [pump(30,40),pump()]):
             with self.assertRaisesRegex(ValueError,'Overlapping'): correlate(capture(),rows)
 
+    def test_triggered_capture_includes_first_stalled_frame_and_empty_capture(self):
+        data=capture();data.update(stall_trigger={'episodes':1},selected_tids=[7])
+        row=correlate(data,[pump(0,45)])['longest_pump_intervals'][0]
+        self.assertEqual(row['context_samples'],4)
+        data.update(samples=[],total_samples=0)
+        row=correlate(data,[pump(0,45)])['longest_pump_intervals'][0]
+        self.assertEqual(row['context_samples'],0)
+        self.assertEqual(row['observed_suspend_brackets_ms'],0)
+        data['selected_tids']=[8,7]
+        with self.assertRaisesRegex(ValueError,'selected thread'):correlate(data,[pump()])
+
 
 if __name__=='__main__': unittest.main()
