@@ -245,7 +245,7 @@ if ($Test) {
     & $hazeInputTest
     if ($LASTEXITCODE -ne 0) { throw 'Haze keyboard/mouse mapping test failed.' }
     $hazeCameraTest = Join-Path $root 'local/test_haze_camera.exe'
-    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/Fe$hazeCameraTest" "/Fo$root/local/test_haze_camera.obj" "$root/tests/test_haze_camera.cpp"
+    & $clang /nologo /W0 /O1 /std:c++20 "/I$root/tests/fixtures/camera" "/I$sdk/include" "/I$sdk/libs/input" "/Fe$hazeCameraTest" "/Fo$root/local/test_haze_camera.obj" "$root/tests/test_haze_camera.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Native camera test compilation failed.' }
     & $hazeCameraTest
     if ($LASTEXITCODE -ne 0) { throw 'Native camera gating/rotation test failed.' }
