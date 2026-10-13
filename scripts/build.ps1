@@ -78,6 +78,10 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer FIFO/wrapper/diagnostic boundary tests failed.' }
     & $python "$root/tests/test_fifo_slow_drain.py" --compiler $clang --sdk $sdk --output-dir "$root/build/fifo-slow-drain"
     if ($LASTEXITCODE -ne 0) { throw 'FIFO slow-drain lock/body diagnostic regression failed.' }
+    & $python "$root/tests/test_rsx_slow_flush.py" --compiler $clang --sdk $sdk --output-dir "$root/build/rsx-slow-flush"
+    if ($LASTEXITCODE -ne 0) { throw 'RSX slow-flush phase and failure diagnostic regression failed.' }
+    & $python "$root/tests/test_analyze_slow_drains.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Slow-drain/flush QPC attribution regression failed.' }
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"
     if ($LASTEXITCODE -ne 0) { throw 'Diagnostic controller detach regression failed.' }
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null

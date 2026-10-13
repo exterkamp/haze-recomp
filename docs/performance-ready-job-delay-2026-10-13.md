@@ -257,3 +257,94 @@ Current disposition: promising typical-frame results, with neither stable
 default. Repeat enabled/disabled runs under steadier host conditions, capture
 the recurring slow-drain path separately, and validate conversation, transitions
 and longer gameplay before promotion.
+
+## Follow-up drain diagnostic
+
+An ordinary-build run of the same binary with `GCM_SLOW_DRAIN_CSV` enabled
+(`20261013-161821-180`, PID 28276) repeated the copied jungle checkpoint,
+original delay, and two 60-second camera sweeps. Camera, mode, present and
+process checks pass. It records 10,670 frames: 11.244 ms mean / 88.94 FPS,
+p95 14.024 ms, p99 15.983 ms, maximum 592.053 ms. All frames are retained.
+This is diagnostic evidence, not a new speedup comparison. Two external
+compiler processes overlap; observed memory use is 43.66–46.15%.
+
+The two worst pump frames instead spend most of their time in outer waits:
+
+| Pump frame | Total ms | Outer wait ms | FIFO ms | Present ms | Waits / drains |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 65311 | 592.053 | 578.991 | 9.036 | 1.772 | 505 / 542 |
+| 65385 | 537.562 | 522.345 | 9.486 | 2.108 | 453 / 487 |
+
+The retained FIFO ring starts before the measured windows. It contains 9,946
+slow drains wholly inside those windows, with maximum duration 6.727 ms and
+maximum lock acquisition 0.002 ms. Older startup rows were overwritten
+(43,375 recorded / 26,991 overwritten); this is not full-launch coverage.
+The earlier 128-ms single-drain stall did not recur. This capture therefore
+does not resolve that stall, nor establish the cause of the long producer
+waits. Raw thread cycles and coarse thread-CPU deltas are not converted into
+precise running-versus-blocked time.
+
+Windows Performance Recorder is installed, but a uniquely named smoke trace
+failed to start with `0xc5585011` (system-performance profiling policy could
+not be enabled). No recording started and no OS policy was changed. The
+fallback is ordinary-build in-process phase timing around graphics submission,
+fence completion, retirement and reset, joined to FIFO intervals by QPC.
+
+## Ordinary backend phase capture
+
+The SDK now has an optional `RSX_SLOW_FLUSH_CSV` bounded ring, independent of
+`YZ_PERF_PROFILE`. It times Close, ExecuteCommandLists, Signal,
+GetCompletedValue, SetEventOnCompletion, WaitForSingleObject, info-queue
+processing, retired-resource release, allocator Reset and command-list Reset.
+Rows include reason, host TID, frame, fence/completed values, retired count,
+reached-stage mask, HRESULTs, wait result/error, and unaccounted QPC ticks.
+Existing early failures retain their partial phase record. This does not
+reorder GPU calls or change the synchronous flush policy. It performs no
+hot-path file I/O or GPU timestamp queries. The environment option is for
+diagnostics, not a release graphics setting; it is disabled by default.
+
+The ordinary two-job build succeeds with SHA256
+`6FD67D99FD3B0AC621DE4B94F76BB6D9DB8B68AFC1E329B30CFC15CD8191649C`.
+Eight extracted-source fixture cases pass: disabled QPC/cycle no-op and
+unchanged call order, Close/Signal/SetEvent failures, wait/no-wait,
+WAIT_FAILED preserving last error before QPC, and reset failures. Nine
+analyzer tests pass, covering malformed metadata/partitions, sparse and
+overwritten rings, clipped intervals and same-thread versus cross-thread
+overlap. These targeted checks and the ordinary build were run; the full
+repository test suite was not rerun. Both tests are wired into `build.ps1 -Test`.
+
+Run `20261013-163036-727` (PID 20716) uses the same copied-save scenario and
+original delay, with both FIFO and flush rings enabled. Flush threshold is
+5,000 us to preserve rare-stall evidence in its 4,096-row ring. Visual
+navigation and acknowledged controller detach precede two 60-second camera
+windows. Mode, camera, present continuity and Haze-process checks pass;
+normal close produces the diagnostic dumps. This is attribution evidence,
+not a performance comparison to another binary.
+
+- 10,395 frames: 11.542 ms mean / 86.64 FPS, p95 14.574 ms, p99 17.121 ms,
+  maximum 55.570 ms; three frames over 33.333 ms and one over 50 ms.
+- External compiler count reaches two; observed memory use 45.20–56.48%.
+- FIFO ring: 17,671 recorded, 16,384 retained, 1,287 overwritten. The retained
+  event extent surrounds both timing windows. There are 9,732 wholly contained
+  slow drains, maximum 7.058 ms; maximum lock acquisition is 0.123 ms.
+- Flush ring: two records, no overwrite or failure, both presentation flushes.
+  Durations are 6.2045 and 5.2801 ms, with 6.0195 and 5.1933 ms respectively
+  inside WaitForSingleObject. Neither overlaps a retained slow FIFO drain.
+- Worst measured pump frame 35930 is 55.571 ms: 44.244 outer wait, 6.714 FIFO,
+  2.346 presentation, 39 waits and 43 drains. Neither slow flush overlaps it.
+
+The long single-drain stall did not recur. Recorded fence waits therefore do
+not explain this capture's worst hitch. Thresholded records do not describe
+all flushes, and event extents are not continuous tracing coverage. Keep
+producer-wait attribution and rare backend-stall attribution separate.
+
+Analysis command (after normal close):
+
+```powershell
+./.venv/Scripts/python.exe scripts/analyze_slow_drains.py local/jungle-flush-attribution-fifo.csv --flush local/jungle-flush-attribution-flush.csv --pump local/jungle-flush-attribution-pump.csv --windows local/jungle-flush-attribution-windows.json --output local/jungle-flush-attribution-attribution.json
+```
+
+The analyzer uses QPC intersections, reports clipped events, and keeps raw
+thread cycles separate from wall time. Its full-ring worst frames and worst
+frames wholly inside the selected windows are separate outputs. No WIP or
+native job-delay default is changed by this diagnostic work.
