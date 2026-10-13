@@ -39,7 +39,8 @@ foreach ($key in $settings.Keys) {
     [Environment]::SetEnvironmentVariable($key, $settings[$key], 'Process')
 }
 try {
-    Write-Host 'Intro videos skip automatically. Enter starts; Space confirms; arrows navigate.'
+    Write-Host 'Opening logos skip automatically by default (input.ini [Startup]). Movie playback is unavailable.'
+    Write-Host 'Current Cross/confirm binding skips manually. Default controls: Enter starts; Space confirms; arrows navigate.'
     Write-Host 'WASD moves. Click/F1 captures the mouse; Escape pauses and releases it.'
     Write-Host "Session logs: $session"
     # This is the interactive game launcher; the separate run.ps1 is bounded.

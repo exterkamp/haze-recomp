@@ -405,6 +405,13 @@ not respond. Decoded movie playback remains unimplemented.
 
 ## Verified local progress and current blockers
 
+Opening-logo skipping is configured in `config/input.ini` under `[Startup]`.
+`AutoSkipLogos=1` is the default; `0` waits for the current Cross/confirm binding
+(Space by default, or the rebound controller button). The media backend cannot
+decode these movies yet, so this is **not** a watch-logos mode. Idle attract-demo
+skipping is controlled separately by `AutoSkipAttract`; campaign movies are
+excluded. See [startup skipping](docs/startup-skipping.md) for behavior and validation.
+
 The latest native probes verified unattended startup through the undecoded
 branding videos to the Press Start screen, then loaded the campaign through
 its normal menus. A continued checkpoint allowed walking across the carrier,

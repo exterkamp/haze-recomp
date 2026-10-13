@@ -8,6 +8,7 @@
 #include "cellPad.h"
 #include "cellSail.h"
 #include "haze_startup.h"
+#include "haze_startup_prompt.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -28,6 +29,7 @@ bool controller_enabled=true;
 bool gamepad_initialized=false;
 std::mutex settings_mutex;
 HazeGamepadState controller_state;
+bool controller_sample_focused=false;
 std::atomic<HazeInputFamily> last_family{HazeInputFamily::Keyboard};
 char config_path[MAX_PATH]{};
 ULONGLONG next_input_update=0, next_config_check=0;
@@ -35,6 +37,11 @@ FILETIME config_time{};
 double sensitivity = 0.10;
 bool invert_y;
 HazeStartupSkip startup_skip;
+ULONGLONG startup_epoch=0;
+HazeStartupPrompt startup_prompt;
+std::string skip_hint;
+ULONGLONG next_hint_check=0;
+HazeInputFamily hint_family=HazeInputFamily::Keyboard;
 enum { KEY_HELD=1, KEY_PENDING=2 };
 std::atomic<unsigned> message_keys[256];
 std::atomic<bool> capture_click;
@@ -143,6 +150,10 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDOWN:
         if (!enabled) break;
         last_family=HazeInputFamily::Keyboard;
+        if (startup_skip.showing()) {
+            record_key(VK_LBUTTON,true,GetTickCount64());
+            return 0;
+        }
         if (!captured && GetForegroundWindow() == hwnd) {
             capture_click=true;
             capture(true);
@@ -190,32 +201,37 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     if (port) return 0;
     std::lock_guard<std::mutex> lock(settings_mutex);
     ULONGLONG now = GetTickCount64();
-    bool skip_pressed;
-    startup_skip.sample(now,skip_pressed);
-    if (skip_pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
     HWND foreground=GetForegroundWindow();
+    const bool focused=foreground && foreground==window.load();
+    auto finish=[&] {
+        // A stale neutral controller snapshot from focus loss must not release
+        // the transition gate before the window thread samples the held pad.
+        const bool ready=focused && (!gamepad_initialized || controller_sample_focused);
+        input->buttons=startup_skip.filter(now,input->buttons,ready,CELL_PAD_CTRL_CROSS);
+        return 1;
+    };
     if (!foreground || foreground != window.load()) {
+        controller_sample_focused=false;
         mouse_motion.clear();
         InterlockedExchange(&wheel,0);
         clear_keys();
-        return 1; // All controls neutral immediately on focus loss.
+        return finish(); // Only lifecycle-owned automatic skipping may run unfocused.
     }
     if (controller_enabled && controller_state.connected) {
-        const u16 startup_buttons=input->buttons;
         *input=controller_state.input;
-        input->buttons|=startup_buttons;
     }
-    if (!enabled) return 1;
+    if (!enabled) return finish();
     // A rebound key may drive several buttons or movement. Consume its pending
     // tap once, then share the same snapshot across all bindings in this report.
     bool sampled[256]={}, states[256]={};
+    const bool movie=startup_skip.showing();
     auto key_down=[&](int vk) {
         if (vk <= 0 || vk >= 256) return false;
         if (!sampled[vk]) { states[vk]=down(vk); sampled[vk]=true; }
         return states[vk];
     };
     for (const auto& b : bindings) {
-        if (b.vk >= VK_LBUTTON && b.vk <= VK_XBUTTON2 && !captured) continue;
+        if (b.vk >= VK_LBUTTON && b.vk <= VK_XBUTTON2 && !captured && !movie) continue;
         if (b.vk == VK_LBUTTON && capture_click) continue;
         if (key_down(b.vk)) input->buttons |= b.button;
     }
@@ -230,11 +246,22 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     }
     if ((input->buttons & CELL_PAD_CTRL_L2) && !input->l2) input->l2=255;
     if ((input->buttons & CELL_PAD_CTRL_R2) && !input->r2) input->r2=255;
-    return 1;
+    return finish();
 }
 void playback(u32 player, const char* uri, int started, void*) {
-    if (startup_skip.playback(player,uri,started!=0,GetTickCount64()))
-        fprintf(stderr,"[startup] Skipping undecoded startup video: %s\n",uri);
+    const auto now=GetTickCount64();
+    startup_skip.playback(player,uri,started!=0,now);
+    if (HazeStartupSkip::known_video(uri))
+        fprintf(stderr,"[startup] %s %s at +%llu ms: %s\n",
+                HazeStartupSkip::opening_logo(uri) ? "logo" : "attract",
+                started ? "start" : "stop",(unsigned long long)(now-startup_epoch),uri);
+}
+bool startup_setting(const char* name) {
+    char value[32];
+    GetPrivateProfileStringA("Startup",name,"1",value,sizeof(value),config_path);
+    if (!strcmp(value,"0")) return false;
+    if (strcmp(value,"1")) fprintf(stderr,"[startup] Invalid %s=%s; using 1\n",name,value);
+    return true;
 }
 void load_keyboard_config() {
     const char* path=config_path;
@@ -258,10 +285,15 @@ void load_keyboard_config() {
     if (end!=value && !*end && std::isfinite(requested) && requested > 0 && requested <= 10) sensitivity=requested;
     else fprintf(stderr,"[input] Invalid Mouse.Sensitivity=%s; using 0.10\n",value);
     invert_y=GetPrivateProfileIntA("Mouse","InvertY",0,path)!=0;
+    const bool logos=startup_setting("AutoSkipLogos"), demo=startup_setting("AutoSkipAttract");
+    startup_skip.configure(logos,demo);
+    fprintf(stderr,"[startup] Automatic logos=%s, idle demo=%s; movies are not decoded. Confirm skips manually.\n",
+            logos ? "on" : "off",demo ? "on" : "off");
     clear_keys(); mouse_motion.clear();
 }
 }
 void haze_input_initialize() {
+    startup_epoch=GetTickCount64();
     const char* mode=getenv("HAZE_INPUT");
     enabled=!(mode && !_stricmp(mode,"controller"));
     controller_enabled=!(mode && !_stricmp(mode,"keyboard"));
@@ -324,12 +356,36 @@ void haze_input_update() {
             last_family=state.family;
         if (focused && state.activity) { last_family=state.family; capture(false); }
         std::lock_guard<std::mutex> lock(settings_mutex);
-        controller_state=focused ? state : HazeGamepadState{};
+        controller_state=state;
+        controller_sample_focused=focused;
     }
     haze_prompts_update(last_family.load());
+    if (startup_skip.showing()) {
+        const auto family=last_family.load();
+        if (now>=next_hint_check || family!=hint_family) {
+            hint_family=family; next_hint_check=now+500;
+            char value[128];
+            const bool kb=family==HazeInputFamily::Keyboard;
+            GetPrivateProfileStringA(kb ? "Bindings" : "ControllerBindings","Cross",
+                                     kb ? "Space" : "south",value,sizeof(value),config_path);
+            const char* label=value;
+            if (!kb) {
+                const char* positions[]={"south","east","west","north","start","back"};
+                const char* xbox[]={"A","B","X","Y","Menu","View"};
+                const char* ps[]={"Cross","Circle","Square","Triangle","Start / Options","Select / Share"};
+                const char* sw[]={"B","A","Y","X","+","-"};
+                for (int i=0;i<6;i++) if (!_stricmp(value,positions[i]))
+                    label=family==HazeInputFamily::Xbox ? xbox[i] : family==HazeInputFamily::Switch ? sw[i] : ps[i];
+            }
+            skip_hint=!_stricmp(value,"none") ? "Skip is unbound. Enable automatic logo skipping in input.ini."
+                : std::string("Press ")+label+" to skip (movie playback unavailable)";
+        }
+    }
+    startup_prompt.update(window.load(),startup_skip.showing(),skip_hint);
 }
 HazeInputFamily haze_input_family() { return last_family.load(); }
 void haze_input_shutdown() {
+    startup_prompt.close();
     capture(false);
     haze_gamepad_shutdown(); gamepad_initialized=false;
 }
@@ -351,8 +407,7 @@ int browser_poll(u32 port, CellPadHostInput* input, void*) {
     const uint32_t axes = browser_axes.load();
     *input = {(u16)buttons, (u8)axes, (u8)(axes >> 8), (u8)(axes >> 16), (u8)(axes >> 24),
               (u8)((buttons & CELL_PAD_CTRL_L2) ? 255 : 0), (u8)((buttons & CELL_PAD_CTRL_R2) ? 255 : 0)};
-    bool pressed;
-    if (browser_startup.sample(GetTickCount64(), pressed) && pressed) input->buttons |= CELL_PAD_CTRL_CROSS;
+    input->buttons=browser_startup.filter(GetTickCount64(),input->buttons,true,CELL_PAD_CTRL_CROSS);
     return 1;
 }
 void browser_playback(u32 player, const char* uri, int started, void*) {
