@@ -229,6 +229,7 @@ void* rsx_null_backend_get_hwnd(void);
 void rsx_null_backend_suppress_present(int);
 uint32_t cellGcmResolveLocated(int, uint32_t);
 uint32_t cellGcmResolveIO(uint32_t);
+void cellGcm_fifo_slow_drain_dump(void);
 }
 static bool s_rsx_live = false;
 static const uint8_t* live_guest_ptr(void*, uint32_t location, uint32_t offset, uint32_t size)
@@ -400,6 +401,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 spu_float_native_summary();
                 haze_vp_upload_summary();
                 g_pump_profile.dump();
+                cellGcm_fifo_slow_drain_dump();
                 haze_job_profile_dump();
                 haze_job_trace_dump();
                 haze_job0_capture_dump();
@@ -473,10 +475,6 @@ static LONG WINAPI vm_commit_veh(EXCEPTION_POINTERS* ep)
 
 static bool alloc_guest_vm(void)
 {
-    // Haze's validated preparation paths are fixed startup policy. Registering
-    // write-watch below adds bit 4096 only when its reservation succeeds.
-    // A live RSX_CPU_WORK_FILE override is still available for experiments.
-    rsx_live_draw_set_cpu_work(1283u | 8192u);
 #ifdef __EMSCRIPTEN__
     // Preserve GUEST_EA's low-32-bit conversion. Advance the program break
     // past an aligned guest arena so later host allocations cannot overlap it.
@@ -486,6 +484,10 @@ static bool alloc_guest_vm(void)
     fprintf(stderr, "[wasm-vm] aligned guest arena at 0x%llX, heap break 0x%llX\n",
             (unsigned long long)(uintptr_t)vm_base, (unsigned long long)(uintptr_t)sbrk(0));
 #elif defined(_WIN32)
+    // Haze's validated preparation paths are fixed startup policy. Registering
+    // write-watch below adds bit 4096 only when its reservation succeeds.
+    // A live RSX_CPU_WORK_FILE override is still available for experiments.
+    rsx_live_draw_set_cpu_work(1283u | 8192u);
     AddVectoredExceptionHandler(1, vm_commit_veh);
     const char* watch_option = getenv("HAZE_TEXTURE_WRITE_WATCH");
     const bool watch = watch_option && *watch_option == '1';
