@@ -667,9 +667,13 @@ path and replacing service dependencies where necessary. Adding a generic
 socket transport by itself does not connect Haze's campaign state machines.
 
 `scripts/run.ps1` returns errors for unregistered firmware imports and writes
-logs, milestone counts, shader dumps, and optional frame captures to a unique
+logs, shader dumps, and optional frame captures to a unique
 `local/runs/<UTC timestamp>` directory. `local/boot-result.json` points to the
 latest run. `-FrameSkip` and `-FrameEvery` select later frames. The runner
+leaves milestone logging disabled by default; `-Milestones` enables the
+boot milestone/count log for bring-up diagnostics. Keep it disabled when
+measuring gameplay performance. The chosen mode is recorded in `boot-result.json`.
+The runner
 terminates its process after the chosen timeout; `gameplay_validated` remains
 false. The executable and runner default to `PS3_VERBOSE=0` because verbose
 SDK logs cause thread contention and severely slow native execution; set it
