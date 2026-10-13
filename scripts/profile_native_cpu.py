@@ -21,6 +21,8 @@ parser.add_argument('seconds',type=float,nargs='?',default=20)
 parser.add_argument('--scan-every',type=int,default=100,
     help='Thread snapshot cadence in sampling iterations; 1 helps find short jobs but adds overhead.')
 parser.add_argument('--tid',type=int,action='append',help='Sample only these thread IDs, after checking process ownership.')
+parser.add_argument('--window-thread',action='store_true',
+    help='Select the thread owning this process\'s ps3recomp_null window (the native render pump).')
 parser.add_argument('--interval-ms',type=float,default=9,
     help='Mean randomized interval between sample rounds; use separately from FPS benchmarks.')
 parser.add_argument('--raw-limit',type=int,default=20,help='Maximum individual instruction locations per thread.')
@@ -33,6 +35,8 @@ parser.add_argument('--stack-every',type=int,default=10,help='Unwind every N sam
 parser.add_argument('--stack-library',type=Path,
     default=Path(__file__).resolve().parents[1]/'local'/'native_stackwalk.dll')
 args=parser.parse_args()
+if args.window_thread and args.tid:
+    parser.error('--window-thread and --tid are mutually exclusive')
 if not 1<=args.scan_every<=1000:
     parser.error('scan-every must be 1..1000')
 if not .5<=args.interval_ms<=100 or not 1<=args.raw_limit<=1000:
@@ -143,6 +147,27 @@ pathbuf=c.create_unicode_buffer(32768); pathlen=w.DWORD(len(pathbuf))
 k.QueryFullProcessImageNameW.argtypes=[w.HANDLE,w.DWORD,w.LPWSTR,c.POINTER(w.DWORD)]
 assert k.QueryFullProcessImageNameW(h,0,pathbuf,c.byref(pathlen)),c.get_last_error()
 assert Path(pathbuf.value).name.lower()=='hazerecomp.exe', 'PID must identify HazeRecomp.exe'
+window_thread_evidence=None
+if args.window_thread:
+    user=c.WinDLL('user32',use_last_error=True)
+    callback_type=c.WINFUNCTYPE(w.BOOL,w.HWND,w.LPARAM)
+    user.EnumWindows.argtypes=[callback_type,w.LPARAM]
+    user.GetWindowThreadProcessId.argtypes=[w.HWND,c.POINTER(w.DWORD)]
+    user.GetWindowThreadProcessId.restype=w.DWORD
+    user.GetClassNameW.argtypes=[w.HWND,w.LPWSTR,c.c_int]
+    matches=[]
+    @callback_type
+    def visit(window,param):
+        owner=w.DWORD()
+        tid=user.GetWindowThreadProcessId(window,c.byref(owner))
+        name=c.create_unicode_buffer(256)
+        if owner.value==pid and user.GetClassNameW(window,name,len(name)) and name.value=='ps3recomp_null':
+            matches.append(dict(hwnd=int(window),tid=int(tid),pid=int(owner.value),window_class=name.value))
+        return True
+    if not user.EnumWindows(visit,0):raise c.WinError(c.get_last_error())
+    if len(matches)!=1:raise RuntimeError(f'Expected one owned renderer window, found {len(matches)}')
+    window_thread_evidence=matches[0]
+    args.tid=[window_thread_evidence['tid']]
 assert 1<=duration<=120, 'Duration must be between 1 and 120 seconds'
 # Recognize this build's ordinary vm_read32 load/bswap pair. RCX holds the
 # guest address at these instructions. Do not interpret registers at arbitrary
@@ -209,7 +234,7 @@ for tid in sorted(handles,key=lambda t:last[t]-first[t],reverse=True):
                      sampled_read32_addresses=[(f'0x{addr:08X}',n) for (t,addr),n in memory_reads.most_common() if t==tid][:20]))
 tracked_ms=sum(row['cpu_ms'] for row in rows)
 print(json.dumps(dict(pid=pid,exe=pathbuf.value,elapsed_s=elapsed,iterations=iteration,fast_read32_recognized=bool(fast_load),
-    scan_every=args.scan_every,selected_tids=args.tid,interval_ms=args.interval_ms,
+    scan_every=args.scan_every,selected_tids=args.tid,window_thread=window_thread_evidence,interval_ms=args.interval_ms,
     symbol_path=str(args.symbol_path.resolve()),stack_depth=args.stack_depth,stack_every=args.stack_every,
     suspension=dict(count=suspension_count,total_ms=suspension_total*1000,max_ms=suspension_max*1000),
     process_cpu_ms=process_ms,tracked_thread_cpu_ms=tracked_ms,
