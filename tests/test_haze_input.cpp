@@ -79,6 +79,13 @@ HazeGamepadState haze_gamepad_update() { return fake_pad; }
 void haze_gamepad_shutdown() {}
 void haze_prompts_initialize(const char*) {}
 void haze_prompts_update(HazeInputFamily) {}
+static bool native_menu_active;
+bool haze_menu_active() { return native_menu_active; }
+bool haze_menu_has_focus() { return false; }
+void haze_menu_update(void*,const HazeGamepadState&) {}
+void haze_menu_shutdown() {}
+void haze_video_menu_register() {}
+void haze_audio_menu_register() {}
 static CellPadHostInput sample() {
     CellPadHostInput input{0,128,128,128,128,0,0};
     assert(poll(0,&input,nullptr)==1);
@@ -94,6 +101,30 @@ int main() {
     for (auto& b : bindings) b.vk=key_code(b.fallback);
     assert(key_code("w")=='W'); assert(key_code("Mouse2")==VK_RBUTTON);
     assert(sample().lx==128);
+    native_menu_active=true; keys['W']=keys[VK_SPACE]=keys[VK_LBUTTON]=true;
+    auto blocked=sample(); assert(!blocked.buttons && blocked.lx==128 && blocked.ly==128);
+    native_menu_active=false; keys[VK_NUMLOCK]=keys[VK_CAPITAL]=keys[VK_SCROLL]=true;
+    haze_input_menu_return();
+    assert(!sample().buttons && menu_return_pending);
+    assert(!haze_input_take_pointer().back); // Closing keys must be released.
+    keys['W']=keys[VK_SPACE]=keys[VK_LBUTTON]=false;
+    for (int i=0;i<100;++i) assert(!sample().buttons);
+    assert(menu_return_pending); // Arbitrary GetInfo/backend polls cannot lose Back.
+    focused=false;
+    assert(!haze_input_take_pointer().back && menu_return_pending);
+    focused=true; gamepad_initialized=true; controller_sample_focused=false;
+    assert(!haze_input_take_pointer().back && menu_return_pending);
+    controller_sample_focused=true;
+    auto back=haze_input_take_pointer();
+    assert(back.active && back.back && !back.pressed && !back.held && !back.released);
+    assert(!menu_return_pending && !haze_input_take_pointer().back);
+    // Lock keys are unrelated to the close action and must not strand Back.
+    assert(keys[VK_NUMLOCK] && keys[VK_CAPITAL] && keys[VK_SCROLL]);
+    keys[VK_NUMLOCK]=keys[VK_CAPITAL]=keys[VK_SCROLL]=false;
+    gamepad_initialized=false;
+    haze_input_menu_return(); haze_input_menu_state(false);
+    assert(!menu_return_pending && !haze_input_take_pointer().back);
+    assert(!sample().buttons);
     keys['W']=keys['D']=keys[VK_SPACE]=true;
     auto p=sample(); assert(p.lx==255 && p.ly==1 && (p.buttons&CELL_PAD_CTRL_CROSS));
     keys['S']=keys['A']=true;

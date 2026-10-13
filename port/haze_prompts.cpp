@@ -103,7 +103,7 @@ std::string pad_icon(HazeInputFamily family,std::string name) {
     const char* positions[]={"south","east","west","north","leftshoulder","rightshoulder",
         "lefttrigger","righttrigger","leftstick","rightstick","start","back","dpup","dpdown","dpleft","dpright"};
     const char* xbox[]={"button_a","button_b","button_x","button_y","lb","rb","lt","rt",
-        "stick_l_press","stick_r_press","button_start","button_back","dpad_up","dpad_down","dpad_left","dpad_right"};
+        "stick_l_press","stick_r_press","button_menu","button_view","dpad_up","dpad_down","dpad_left","dpad_right"};
     const char* ps[]={"button_cross","button_circle","button_square","button_triangle","trigger_l1","trigger_r1","trigger_l2","trigger_r2",
         "stick_l_press","stick_r_press","3_button_start","3_button_select","dpad_up","dpad_down","dpad_left","dpad_right"};
     const char* sw[]={"button_b","button_a","button_y","button_x","button_l","button_r","button_zl","button_zr",
@@ -262,4 +262,22 @@ void haze_prompts_update(HazeInputFamily family) {
         for (const auto& [path,time]:watched) if (!(stamp(path)==time)) { changed=true; break; }
     }
     if (changed) { first=false; current=family; rebuild(family); }
+}
+bool haze_prompts_draw_icon(void* context,int slot,int x,int y,int size) {
+    const auto atlas=std::atomic_load(&published);
+    if (!atlas || slot<0 || slot>=24) return false;
+    std::array<unsigned char,64*60*4> bgra{};
+    for (int py=0;py<60;++py) for (int px=0;px<64;++px) {
+        const size_t source=((slot/6*60+py)*width+slot%6*64+px)*4;
+        const size_t target=(py*64+px)*4;
+        const unsigned alpha=(*atlas)[source+3];
+        for (int channel=0;channel<3;++channel)
+            bgra[target+channel]=static_cast<unsigned char>(((*atlas)[source+2-channel]*alpha+(channel==2 ? 18:20)*(255-alpha))/255);
+    }
+    BITMAPINFO bitmap{}; bitmap.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+    bitmap.bmiHeader.biWidth=64; bitmap.bmiHeader.biHeight=-60;
+    bitmap.bmiHeader.biPlanes=1; bitmap.bmiHeader.biBitCount=32;
+    bitmap.bmiHeader.biCompression=BI_RGB;
+    StretchDIBits((HDC)context,x,y,size,size,0,0,64,60,bgra.data(),&bitmap,DIB_RGB_COLORS,SRCCOPY);
+    return true;
 }

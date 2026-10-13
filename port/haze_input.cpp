@@ -1,7 +1,8 @@
 #include "haze_input.h"
 #include "haze_graphics_reload.h"
-#include "haze_mouse.h"
 #include "haze_menu.h"
+#include "haze_audio_settings.h"
+#include "haze_mouse.h"
 #include "haze_capture.h"
 #ifdef _WIN32
 #include "haze_prompts.h"
@@ -33,6 +34,7 @@ bool gamepad_initialized=false;
 std::mutex settings_mutex;
 HazeGamepadState controller_state;
 bool controller_sample_focused=false;
+std::atomic<bool> menu_return_pending{false};
 std::atomic<HazeInputFamily> last_family{HazeInputFamily::Keyboard};
 char config_path[MAX_PATH]{};
 ULONGLONG next_input_update=0, next_config_check=0;
@@ -342,6 +344,14 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     ULONGLONG now = GetTickCount64();
     HWND foreground=GetForegroundWindow();
     const bool focused=foreground && foreground==window.load();
+    if (haze_menu_active()) {
+        *input=CellPadHostInput{0,128,128,128,128,0,0};
+        clear_keys(); mouse_motion.clear(); InterlockedExchange(&wheel,0); return 1;
+    }
+    if (menu_return_pending.load()) {
+        *input=CellPadHostInput{0,128,128,128,128,0,0}; clear_keys(); mouse_motion.clear();
+        return 1; // Host polls cannot acknowledge delivery to the guest GUI.
+    }
     auto finish=[&] {
         // A stale neutral controller snapshot from focus loss must not release
         // the transition gate before the window thread samples the held pad.
@@ -465,6 +475,8 @@ void haze_input_initialize() {
 void haze_input_attach(void* hwnd) {
     if (!hwnd) return;
     window=(HWND)hwnd;
+    haze_video_menu_register();
+    haze_audio_menu_register();
     if (controller_enabled) gamepad_initialized=haze_gamepad_initialize(config_path);
     RAWINPUTDEVICE device{0x01,0x02,0,window};
     if (!RegisterRawInputDevices(&device,1,sizeof(device))) {
@@ -482,7 +494,8 @@ bool haze_input_take_mouse(double& x, double& y, double& speed, bool& invert) {
     std::lock_guard<std::mutex> lock(settings_mutex);
     mouse_motion.take(x,y);
     speed=sensitivity; invert=invert_y;
-    return enabled && captured && !menu_active && !pause_requested && GetForegroundWindow()==window.load();
+    return enabled && captured && !haze_menu_active() && !menu_return_pending &&
+        !menu_active && !pause_requested && GetForegroundWindow()==window.load();
 }
 void haze_input_update() {
     const auto now=GetTickCount64();
@@ -507,7 +520,7 @@ void haze_input_update() {
     }
     if (gamepad_initialized) {
         const auto state=haze_gamepad_update();
-        const bool focused=GetForegroundWindow()==window.load();
+        const bool focused=GetForegroundWindow()==window.load() || haze_menu_has_focus();
         if (focused && state.connected && (!enabled || last_family!=HazeInputFamily::Keyboard))
             last_family=state.family;
         if (focused && state.activity) {
@@ -523,6 +536,8 @@ void haze_input_update() {
     capture_policy.pause_pending=pause_requested;
     capture(capture_policy.wants_capture());
     haze_prompts_update(last_family.load());
+    if (haze_menu_active()) capture(false);
+    haze_menu_update(window.load(),controller_state);
     if (startup_skip.showing()) {
         const auto family=last_family.load();
         if (now>=next_hint_check || family!=hint_family) {
@@ -548,6 +563,7 @@ void haze_input_update() {
 }
 void haze_input_menu_state(bool active) {
     if (active) pause_requested=false;
+    else menu_return_pending=false; // The guest already left its menu stack.
     if (menu_active.exchange(active)==active) return;
     mouse_motion.clear();
     InterlockedExchange(&wheel,0);
@@ -561,7 +577,32 @@ void haze_input_menu_state(bool active) {
     menu_pointer.scroll=0;
 }
 HazeMenuPointer haze_input_take_pointer() {
-    std::lock_guard lock(pointer_mutex);
+    std::scoped_lock lock(settings_mutex,pointer_mutex);
+    if (haze_menu_active() || menu_return_pending) {
+        // This consumer runs after the guest's normal GUI input update, unlike
+        // host pad polls (which GetInfo can consume before GetData is used).
+        // Discard queued pointer clicks as well as pad input while the PC page
+        // owns focus, then deliver exactly one Back through the GUI's packet.
+        menu_pointer={}; menu_delivered={}; menu_right_held=false;
+        if (haze_menu_active() || GetForegroundWindow()!=window.load() ||
+            (gamepad_initialized && !controller_sample_focused)) return {};
+        bool held=controller_state.input.buttons || controller_state.input.lx!=128 || controller_state.input.ly!=128 ||
+            controller_state.input.rx!=128 || controller_state.input.ry!=128;
+        auto key_held=[](int key) {
+            return key>0 && key<256 && (GetAsyncKeyState(key)&0x8000);
+        };
+        // Wait only for inputs that can act in the menu or game. Scanning all
+        // Windows keys can strand Back on an unrelated lock/system key.
+        for (int key : {VK_ESCAPE,VK_RETURN,VK_SPACE,VK_TAB,VK_UP,VK_DOWN,VK_LEFT,VK_RIGHT,
+                        VK_LBUTTON,VK_RBUTTON,VK_MBUTTON,VK_XBUTTON1,VK_XBUTTON2})
+            held|=key_held(key);
+        for (const auto& binding:bindings) held|=key_held(binding.vk);
+        for (int key:movement) held|=key_held(key);
+        if (held) return {};
+        menu_return_pending=false;
+        HazeMenuPointer back; back.active=true; back.back=true;
+        return back;
+    }
     auto result=menu_pointer;
     result.active=(result.active || menu_pointer.scroll!=0) && enabled && menu_active &&
         GetForegroundWindow()==window.load();
@@ -591,7 +632,16 @@ HazeMenuPointer haze_input_take_pointer() {
     return result;
 }
 HazeInputFamily haze_input_family() { return last_family.load(); }
+void haze_input_menu_return() { menu_return_pending=true; }
+unsigned haze_input_menu_button(int virtual_key) {
+    std::lock_guard<std::mutex> lock(settings_mutex);
+    last_family=HazeInputFamily::Keyboard;
+    unsigned buttons=0;
+    for (const auto& b:bindings) if (b.vk==virtual_key) buttons|=b.button;
+    return buttons;
+}
 void haze_input_shutdown() {
+    haze_menu_shutdown();
     startup_prompt.close();
     capture_policy.ready=false;
     capture(false);
