@@ -10,6 +10,12 @@ STAGES = ('geometry_preparation_ms', 'pipeline_constants_ms',
           'resource_resolution_ms', 'command_recording_ms')
 FLOATS = ('wall_ms', *STAGES)
 MASKS = ('texture_mask', 'vertex_texture_mask')
+PSO_LOOKUP_UNCALLED = 0
+PSO_LOOKUP_HIT = 1
+PSO_LOOKUP_MISS = 2
+PSO_DETAIL_PHASES = {'build_pso_ms', 'shader_disk_load_ms',
+                     'd3d_compile_ms', 'create_graphics_pso_ms'}
+ELAPSED_FIELDS = set(FLOATS) | {'get_pso_ms'} | PSO_DETAIL_PHASES
 
 
 def validate_rows(rows):
@@ -31,6 +37,36 @@ def validate_rows(rows):
             raise ValueError('QPC and reported wall time disagree')
         if abs(sum(row[key] for key in STAGES) - row['wall_ms']) > 0.000003:
             raise ValueError('Stages do not partition callback wall time')
+        has_pso_ms = 'get_pso_ms' in row
+        has_pso_lookup = 'pso_lookup' in row
+        if has_pso_ms != has_pso_lookup:
+            raise ValueError('Incomplete nested PSO detail fields')
+        present_phases = PSO_DETAIL_PHASES.intersection(row)
+        if present_phases and present_phases != PSO_DETAIL_PHASES:
+            raise ValueError('Incomplete nested PSO phase fields')
+        if has_pso_ms:
+            pso_ms = row['get_pso_ms']
+            if not math.isfinite(pso_ms) or pso_ms < 0:
+                raise ValueError('Invalid nested get_pso time')
+            if pso_ms > row['pipeline_constants_ms'] + 0.000003:
+                raise ValueError('Nested get_pso interval exceeds pipeline/constants stage')
+            if row['pso_lookup'] not in (PSO_LOOKUP_UNCALLED,
+                                         PSO_LOOKUP_HIT,
+                                         PSO_LOOKUP_MISS):
+                raise ValueError('Invalid PSO lookup outcome')
+            if present_phases:
+                phase_names = ('build_pso_ms', 'shader_disk_load_ms',
+                               'd3d_compile_ms', 'create_graphics_pso_ms')
+                phases = [row[name] for name in phase_names]
+                if any(not math.isfinite(value) or value < 0 for value in phases):
+                    raise ValueError('Invalid nested PSO phase time')
+                build_ms, disk_ms, compile_ms, create_ms = phases
+                if build_ms > pso_ms + 0.000003:
+                    raise ValueError('Nested build_pso interval exceeds get_pso interval')
+                if disk_ms + compile_ms + create_ms > build_ms + 0.000003:
+                    raise ValueError('Nested PSO phases exceed build_pso interval')
+        elif present_phases:
+            raise ValueError('PSO phase fields require get_pso detail fields')
         if row['thread_cycles_valid'] not in (0, 1):
             raise ValueError('Invalid cycle validity flag')
         if row['thread_cycles_valid']:
@@ -50,7 +86,7 @@ def analyze(csv_path, windows_path, log_path, capacity=256):
         for raw in csv.DictReader(stream):
             if None in raw or any(value is None for value in raw.values()):
                 raise ValueError('Nonrectangular CSV')
-            rows.append({key: float(value) if key in FLOATS else
+            rows.append({key: float(value) if key in ELAPSED_FIELDS else
                          int(value, 16) if key in MASKS else int(value)
                          for key, value in raw.items()})
     frequency = validate_rows(rows)
@@ -83,7 +119,7 @@ def analyze(csv_path, windows_path, log_path, capacity=256):
                            retained_edge_callbacks=len(edges),
                            longest_retained_callbacks=sorted(selected, key=lambda r:r['wall_ms'], reverse=True)[:12]))
     return dict(note='Filtered retained callbacks only, not complete-frame costs or an isolation audit. '
-                     'Stages partition each callback but can contain existing nested timers. '
+                     'Stages partition each callback; PSO detail timers are nested and must not be added to them. '
                      'Raw thread cycles are not CPU milliseconds; absence from this ring does not rule out a stall.',
                 saved=saved, overwritten=overwritten, callbacks=callbacks, capacity=capacity,
                 threshold_us=threshold,

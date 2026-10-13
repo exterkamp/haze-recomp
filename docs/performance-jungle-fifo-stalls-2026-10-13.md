@@ -81,3 +81,45 @@ the corresponding FIFO/flush/pump/present CSVs, windows manifest and process/
 resource observers. `scripts/analyze_slow_drains.py` validates the rings and
 joins QPC intervals; the private summary retains raw phase values for the
 worst timed frames.
+
+## Ordinary PSO attribution follow-up
+
+The ordinary draw recorder and normal-exit export are now verified; see the
+[slot-fill report](performance-native-slot-fill-2026-10-13.md) for the initial
+failed export, its fix, and the actual 61-row gameplay capture. Startup draws
+spent 15-41 ms in pipeline/constants. The first pair of shaders already hit
+the bytecode disk cache, so shader compilation cannot be assumed to explain
+that draw. Later ordinary captures also retain long FIFO intervals without
+enough detail to establish their cause.
+
+SDK `b852879` extends the existing opt-in recorder with:
+
+- `get_pso_ms`, nested inside pipeline/constants;
+- `pso_lookup`: 0 before the actual lookup is reached, 1 for an in-memory key
+  hit (including a cached failed PSO), 2 for a miss (including cache-full or
+  subsequent build failure);
+- `build_pso_ms`, nested inside `get_pso_ms`;
+- `shader_disk_load_ms`, `d3d_compile_ms`, and `create_graphics_pso_ms`,
+  nonoverlapping subscopes inside `build_pso_ms`.
+
+The four original stages still partition draw elapsed time. Nested values
+must not be added to that partition. Explicit scope arguments associate work
+with the current draw; disabled diagnostics add no QPC/cycle queries. The
+1,024-record ring, threshold, overwrite reporting, and normal-exit export
+remain unchanged. Timings include blocking and descheduling inside each scope.
+
+The analyzer accepts historical, lookup-only, and full-detail CSVs. It rejects
+incomplete detail schemas, invalid outcomes, nonfinite durations, and nested
+durations exceeding their parents. Twelve Python tests pass, including actual
+decimal-valued full-schema CSV parsing. Actual-source ordinary/profile fixtures
+pass with disabled-clock, early-return, retention/overwrite, phase conservation,
+and nested export checks. The first extended fixture needed a floating-point
+comparison tolerance for 0.1 + 0.1 + 0.1 versus 0.3; the corrected test uses the
+same rounding tolerance as the analyzer. Runtime scope placement was reviewed;
+the fixture does not execute a real D3D12 pipeline creation.
+
+The incremental ordinary build with two jobs exited 0. Candidate
+`local/candidates/slow-pso-detail/HazeRecomp.exe` has SHA-256
+`691B0D8B732F4D21ABFC78812D0118A8A03D840F6C66CFC3FF78DBE611FE71BF`.
+The next live capture will establish which nested phases actually dominate;
+this instrumentation is not itself a frame-rate improvement.

@@ -49,6 +49,37 @@ class SlowDrawAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'partition'):
             validate_rows([bad])
 
+    def test_nested_get_pso_detail_and_lookup_outcomes(self):
+        for outcome in (0, 1, 2):
+            detail = row()
+            detail.update(get_pso_ms=0.4, pso_lookup=outcome,
+                          build_pso_ms=0.3, shader_disk_load_ms=0.1,
+                          d3d_compile_ms=0.1, create_graphics_pso_ms=0.1)
+            validate_rows([detail])
+        too_long = row()
+        too_long.update(get_pso_ms=0.500004, pso_lookup=1)
+        with self.assertRaisesRegex(ValueError, 'exceeds pipeline'):
+            validate_rows([too_long])
+        nonfinite = row()
+        nonfinite.update(get_pso_ms=float('nan'), pso_lookup=2)
+        with self.assertRaisesRegex(ValueError, 'nested get_pso'):
+            validate_rows([nonfinite])
+        for bad in ({'get_pso_ms': 0.1}, {'pso_lookup': 1},
+                    {'get_pso_ms': 0.1, 'pso_lookup': 3}):
+            detail = row(); detail.update(bad)
+            with self.assertRaises(ValueError):
+                validate_rows([detail])
+        phase_exceeds_build = row()
+        phase_exceeds_build.update(get_pso_ms=0.4, pso_lookup=2,
+                                   build_pso_ms=0.2, shader_disk_load_ms=0.1,
+                                   d3d_compile_ms=0.1, create_graphics_pso_ms=0.1)
+        with self.assertRaisesRegex(ValueError, 'exceed build_pso'):
+            validate_rows([phase_exceeds_build])
+        partial_phases = row()
+        partial_phases.update(get_pso_ms=0.4, pso_lookup=0, build_pso_ms=0.2)
+        with self.assertRaisesRegex(ValueError, 'Incomplete nested PSO phase'):
+            validate_rows([partial_phases])
+
     def test_nan_and_qpc_mismatch_rejected(self):
         for key, value in [('wall_ms', float('nan')), ('qpc_end', 50_000)]:
             bad = row(); bad[key] = value
@@ -96,6 +127,38 @@ class SlowDrawAnalysisTests(unittest.TestCase):
             log.write_text('[slow-draw] saved=2 overwritten=0 callbacks=2 threshold_us=1000')
             with self.assertRaisesRegex(ValueError, 'counts'):
                 analyze(source, windows, log)
+
+    def test_analyze_reads_full_pso_schema_and_legacy_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, windows, log = (root / name for name in ('draw.csv', 'windows.json', 'stderr.log'))
+            windows.write_text(json.dumps(dict(
+                complete=True, qpc_frequency=10_000_000,
+                blocks=[dict(start_qpc=0, end_qpc=50_000, flags=1)])))
+            log.write_text('[slow-draw] saved=1 overwritten=0 callbacks=1 threshold_us=1000')
+
+            full = row()
+            full.update(threshold_us=1000, get_pso_ms=0.4, pso_lookup=2,
+                        build_pso_ms=0.3, shader_disk_load_ms=0.1,
+                        d3d_compile_ms=0.1, create_graphics_pso_ms=0.1)
+            with source.open('w', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=full)
+                writer.writeheader()
+                writer.writerow(full)
+            report = analyze(source, windows, log)
+            self.assertEqual(report['blocks'][0]['retained_full_callbacks'], 1)
+            with source.open(newline='') as stream:
+                parsed = next(csv.DictReader(stream))
+            self.assertEqual(float(parsed['shader_disk_load_ms']), 0.1)
+
+            legacy = row()
+            legacy.update(threshold_us=1000)
+            with source.open('w', newline='') as stream:
+                writer = csv.DictWriter(stream, fieldnames=legacy)
+                writer.writeheader()
+                writer.writerow(legacy)
+            report = analyze(source, windows, log)
+            self.assertEqual(report['blocks'][0]['retained_full_callbacks'], 1)
 
     def test_legacy_256_capacity_default_remains_compatible(self):
         with tempfile.TemporaryDirectory() as directory:

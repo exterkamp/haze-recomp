@@ -125,6 +125,12 @@ static void sink_end_impl(void*, const rsx_dispatch*, ld_slow_draw_scope* scope)
     scope->event.source_refs = 6;
     scope->event.vertices = 4;
     scope->event.topology_count = 2;
+    scope->event.get_pso_ticks = 500;
+    scope->event.pso_lookup = (u32)(scope->event.callback_id % 3u);
+    scope->event.build_pso_ticks = 300;
+    scope->event.shader_disk_load_ticks = 100;
+    scope->event.d3d_compile_ticks = 100;
+    scope->event.create_graphics_pso_ticks = 100;
     ld_slow_draw_advance(scope, LD_SLOW_DRAW_PIPELINE_CONSTANTS);
     ld_slow_draw_advance(scope, LD_SLOW_DRAW_RESOURCE_RESOLUTION);
     scope->event.target = 5;
@@ -170,6 +176,9 @@ int main(int argc, char** argv) {
         if (!e->callback_id || e->qpc_end < e->qpc_begin ||
             stages != e->qpc_end - e->qpc_begin || e->target != 5 ||
             e->primitive != 7 || e->texture_mask != 0x21 ||
+            e->get_pso_ticks != 500 || e->pso_lookup > LD_SLOW_DRAW_PSO_MISS ||
+            e->build_pso_ticks != 300 || e->shader_disk_load_ticks != 100 ||
+            e->d3d_compile_ticks != 100 || e->create_graphics_pso_ticks != 100 ||
             e->stage != LD_SLOW_DRAW_COMMAND_RECORDING) return 15;
     }
     g.ready = 1;
@@ -208,6 +217,30 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
     if stages != ["LD_SLOW_DRAW_PIPELINE_CONSTANTS", "LD_SLOW_DRAW_RESOURCE_RESOLUTION",
                   "LD_SLOW_DRAW_COMMAND_RECORDING"]:
         raise AssertionError(f"unexpected stage boundary sequence: {stages}")
+    get_pso = extract_function(text, "static ID3D12PipelineState* get_pso(")
+    if not re.search(r"if\s*\(g\.psos\[i\]\.key\s*==\s*key\)\s*\{\s*"
+                     r"if\s*\(slow_draw\s*&&\s*slow_draw->active\)\s*"
+                     r"slow_draw->event\.pso_lookup\s*=\s*LD_SLOW_DRAW_PSO_HIT;",
+                     get_pso):
+        raise AssertionError("actual PSO cache-hit return does not record hit")
+    if not re.search(r"if\s*\(slow_draw\s*&&\s*slow_draw->active\)\s*"
+                     r"slow_draw->event\.pso_lookup\s*=\s*LD_SLOW_DRAW_PSO_MISS;\s*"
+                     r"#if defined\(YZ_PERF_PROFILE\)", get_pso):
+        raise AssertionError("actual post-lookup path does not record miss")
+    if "ld_vertex_compact_payload(), slow_draw);" not in body:
+        raise AssertionError("draw path does not pass the explicit scope to get_pso")
+    build_pso = extract_function(text, "static ID3D12PipelineState* build_pso(")
+    if "ld_slow_draw_scope* slow_draw" not in build_pso:
+        raise AssertionError("build_pso does not receive the explicit diagnostic scope")
+    if build_pso.count("shader_disk_cache_load(") != 2 or \
+            "shader_disk_cache_load('V', vs_hlsl, vs_length, vs_hash, slow_draw)" not in build_pso or \
+            "shader_disk_cache_load('P', ps_hlsl, ps_length, ps_hash, slow_draw)" not in build_pso:
+        raise AssertionError("shader disk loads do not receive the explicit scope")
+    if build_pso.count("slow_draw->event.d3d_compile_ticks +=") != 2 or \
+            "slow_draw->event.create_graphics_pso_ticks +=" not in build_pso:
+        raise AssertionError("compile/PSO creation phases are not individually timed")
+    if "slow_draw->event.build_pso_ticks +=" not in get_pso:
+        raise AssertionError("build_pso nested duration is not recorded")
     output_dir.mkdir(parents=True, exist_ok=True)
     mode = "profile" if profile else "ordinary"
     fixture = output_dir / f"slow_draw_{mode}.cpp"
@@ -234,11 +267,23 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
             raise AssertionError("phase wall-time conservation failed")
         if row["thread_cycles_valid"] != "1" or int(row["thread_cycles_delta_not_ms"]) <= 0:
             raise AssertionError("raw thread-cycle metadata missing")
+        pso_ms = float(row["get_pso_ms"])
+        pipeline_ms = float(row["pipeline_constants_ms"])
+        if not (0 <= pso_ms <= pipeline_ms) or int(row["pso_lookup"]) not in (0, 1, 2):
+            raise AssertionError("nested PSO interval/outcome is inconsistent")
+        build_ms = float(row["build_pso_ms"])
+        nested = sum(float(row[k]) for k in ("shader_disk_load_ms", "d3d_compile_ms",
+                                             "create_graphics_pso_ms"))
+        if nested > build_ms + 0.000003 or build_ms > pso_ms + 0.000003:
+            raise AssertionError("nested PSO phase intervals are inconsistent")
+    if {int(row["pso_lookup"]) for row in rows} != {0, 1, 2}:
+        raise AssertionError("uncalled, hit, and miss outcomes were not all retained")
     subprocess.run([str(exe), str(output_dir / f"disabled_{mode}.csv"), "0"], check=True)
     if (output_dir / f"disabled_{mode}.csv").exists():
         raise AssertionError("disabled recorder unexpectedly dumped a file")
     disabled_clock_note = "disabled diagnostic clocks=0" if not profile else "disabled diagnostic cycles=0 (profile QPC preserved)"
-    print(f"PASS {mode}: {disabled_clock_note}; retained=1024 overwritten=4; early-return and phases conserved")
+    print(f"PASS {mode}: {disabled_clock_note}; retained=1024 overwritten=4; "
+          "early-return, phase partition, and nested PSO outcomes valid")
 
 
 def main() -> None:
