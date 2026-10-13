@@ -81,6 +81,62 @@ Private evidence: `local/jungle-cache32-a1` (run `20261013-115115-395`, tokens
 presents/pump/camera/process/resource data and validated reports. Combined
 raw-interval result: `local/worker-capacity-ordinary-comparison.json`.
 
-Next: verify live dispatch spill/startup changes at 32 slots, investigate the
-independent long stalls, and validate broader transitions/output behavior.
+## Live dispatch verification
+
+Separate muted profiling launches compare the 32-slot candidate with the
+16-slot control, each using a fresh copy of the same checkpoint, the same
+graphics/input settings, and two 18-second camera sweeps after five-second
+warmups. Both normal closes retain all measured trace windows. Each trace has
+2,097,152 contiguous retained events, with zero missing tickets, dropped spans,
+incomplete scopes, missing parents, or skipped matched wait spans. The discarded
+prefix ends before the first measurement. These are diagnostic runs; the
+ordinary four-launch comparison above remains the FPS evidence.
+
+| Workload image | New-thread spans, 16 slots | New-thread spans, 32 slots | Mean startup, 16 slots (us) | Mean startup, 32 slots (us) |
+|---|---:|---:|---:|---:|
+| 30 (transform jobs) | 4827 | 6 | 51.183 | 15.893 |
+| 32 | 0 | 0 | 10.561 | 10.787 |
+| 33 | 811 | 0 | 41.583 | 17.306 |
+| 41 | 0 | 0 | 14.113 | 13.534 |
+| 43 | 0 | 0 | 9.830 | 9.972 |
+
+Counts include phase spans overlapping either measurement window. Startup means
+are weighted by fully contained dispatch-to-setup samples. Image 30 has 55,626
+such samples at 16 slots and 56,679 at 32; image 33 has 11,980 and 12,240.
+Eligible new-thread spans total **5638 versus 6**, while worker-reuse spans total
+103,900 versus 111,739. Workload counts differ with live gameplay and throughput;
+the samples are not an identical job replay. This confirms that the larger cache
+nearly eliminates eligible creation in this capture. It does not eliminate
+creation for other, ineligible images or all scheduling delays.
+
+Image-30 maximum startup is 4.4892 versus 2.4272 ms; maximum execution span is
+7.3456 versus 4.8106 ms. These are elapsed spans, not CPU time, and shorter maxima
+do not establish a reliable reduction in rare stalls. In the 32-slot run, the
+slowest one percent of pump frames average 18.973 and 18.412 ms in the two
+windows. Matched worker-startup unions account for only 0.103 and 0.199 ms of
+those frame groups; execution unions account for 3.062 and 2.639 ms. These
+overlap other threads and cannot be added to pump-thread scopes or treated as
+removable frame cost. The earlier hundreds-of-milliseconds FIFO stalls did not
+recur in either diagnostic run.
+
+Camera/mode/present/Haze-process checks pass for both captures. Ten resource
+observations bracket each run, with maximum gaps below 5.366 seconds: memory
+48.35-48.78% for 32 slots and 48.93-49.32% for 16. No compilers were observed;
+only the owned Haze was observed. No own builds, heavy offline analysis, or
+screenshots ran during either measured capture. Offline traces were parsed
+sequentially after both games closed. All seven baseline save hashes remain
+unchanged. These host-memory snapshots do not isolate the cache's physical
+memory footprint.
+
+Private evidence: `local/jungle-cache32-phases`, run `20261013-121827-294`,
+tokens 2360/2361, candidate `idle-worker-32-profile`, SHA256
+`B1E2434CDD286703214976336AA45308E2406A9A5F38059E52665968B5C61121`;
+and `local/jungle-cache16-phases`, run `20261013-122654-247`, tokens 2380/2381,
+candidate `idle-worker-five-slowdraw`, SHA256
+`33A985770A362B0C83EDCEFD32C3D258F29148FC172B94DA28CA1D54E7CFFB3A`.
+The slow-draw recorder was disabled in both. Combined checked results:
+`local/worker-capacity-phase-comparison.json`.
+
+Next: investigate the independent long stalls and validate broader
+transitions/output behavior.
 Existing user WIP remains unchanged; tracking #36, #32 and #9 remain open.
