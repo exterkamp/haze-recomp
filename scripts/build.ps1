@@ -78,6 +78,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer FIFO/wrapper/diagnostic boundary tests failed.' }
     & $python "$root/tests/test_fifo_slow_drain.py" --compiler $clang --sdk $sdk --output-dir "$root/build/fifo-slow-drain"
     if ($LASTEXITCODE -ne 0) { throw 'FIFO slow-drain lock/body diagnostic regression failed.' }
+    & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"
+    if ($LASTEXITCODE -ne 0) { throw 'Diagnostic controller detach regression failed.' }
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
     & $python "$root/tests/test_wait_timeline.py"
     if ($LASTEXITCODE -ne 0) { throw 'Wait timeline syscall naming and interval-union tests failed.' }
