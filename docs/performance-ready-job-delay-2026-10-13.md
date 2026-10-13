@@ -197,5 +197,63 @@ does not establish real-thread contention behavior or gameplay correctness.
 
 The ordinary SPU-FMA build, capped at two compiler jobs, succeeds with SHA256
 `5E5EE355970F16A0DDA97EDA775B4EFFFDF80432F5D158803B16A2E115F54199`.
-No SDK change is required. The new candidate has not yet supplied matched
-timing evidence; the tables above describe the rejected byte-flag candidate.
+No SDK change is required. The following results use this queue-based candidate;
+the earlier table describes the rejected byte-flag candidate.
+
+## Queue-policy gameplay measurements
+
+All three runs use the same ordinary binary, copied jungle save, 1440p/8192
+shadows, uncapped/VSync-off settings and fixed native modes above. Each has
+two 60-second absolute-camera sweeps after visually confirmed tutorial
+clearance and acknowledged PAD_FILE detach. Camera, CPU mode, actual job-wait
+startup mode, present continuity and Haze-process coverage checks pass. All
+close normally, with one final draw-counter report and no periodic FPS output.
+
+| Policy | Run | Frames | Mean ms | FPS | p95 ms | p99 ms | Max ms | >33.333 ms / >50 ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Queue wake enabled | `20261013-155159-207` | 11,188 | 10.725 | 93.24 | 13.792 | 16.241 | 81.681 | 2 / 1 |
+| Original delay, Print Screen reported | `20261013-155736-621` | 10,309 | 11.637 | 85.93 | 15.383 | 18.590 | 47.469 | 6 / 0 |
+| Original delay, repeat | `20261013-160349-416` | 9,495 | 12.635 | 79.15 | 16.124 | 19.214 | 130.291 | 6 / 3 |
+
+These are provisional comparisons, not isolated performance acceptance. No
+other Haze instance is observed, but external builds overlap all three runs
+(maximum 2, 4 and 2 compiler processes). Memory ranges are 49.25-55.83%,
+44.12-46.85% and 45.33-54.56%, respectively. Whole-process CPU core equivalents
+for the two windows are 4.059/4.008 enabled, 4.054/3.965 original, and
+4.184/4.185 repeated original. Host interference is observed but is not proven
+to cause any particular frame dip. The differing controls prevent a precise
+causal speedup claim; only one enabled launch is measured here.
+
+The user reported pressing Print Screen during the first original-policy run.
+The report was recorded at 16:02:56 UTC; the action's exact timestamp is unknown.
+Every sample remains included, and no outlier is attributed to that action.
+The complete original-policy run was repeated rather than deleting selected
+frames. No intervention was reported for the repeat.
+
+The enabled candidate records 527,290 handled delays over the full launch:
+435,426 queue-ready returns, zero primary-state returns, 91,864 deadline
+expirations and zero fallbacks. These are whole-launch counts, not counts
+restricted to the timing windows. They confirm that the routing flag alone
+no longer causes every delay to return immediately. The observed gameplay
+and normal close are a smoke check, not scene-transition or long-run validation.
+
+Mean pump phases (wait / FIFO / present / other, ms) are:
+
+- Enabled: 5.389 / 3.399 / 1.844 / 0.092.
+- First original run: 5.699 / 4.000 / 1.862 / 0.076.
+- Repeated original run: 6.564 / 3.973 / 2.013 / 0.084.
+
+The enabled run's worst pump frame, 24622, takes 81.681 ms: 72.270 ms outer
+wait, 5.485 FIFO, 1.978 presentation and 1.948 other, across 48 waits and 53
+drains. The repeated control's worst frame, 27716, instead takes 130.292 ms:
+128.245 ms in one FIFO drain, 2.032 presentation and 0.0006 outer wait. Its
+coarse Windows thread-CPU delta is zero; that alone cannot distinguish driver
+wait, lock wait or descheduling. The earlier rare long single-drain stall has
+therefore recurred and needs backend/fence and scheduling attribution, alongside
+the separate producer-wait stalls. Do not attribute both to the job timer.
+
+Current disposition: promising typical-frame results, with neither stable
+144 FPS nor consistent pacing established. Keep the experiment disabled by
+default. Repeat enabled/disabled runs under steadier host conditions, capture
+the recurring slow-drain path separately, and validate conversation, transitions
+and longer gameplay before promotion.

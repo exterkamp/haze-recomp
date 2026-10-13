@@ -31,8 +31,9 @@ The spu_float_native variant uses SPU_FLOAT_NATIVE_FILE and process-wide
 mode events; its hardware arithmetic must be built and supported by the CPU/OS.
 The gpu_vertex_pull variant uses RSX_GPU_VERTEX_PULL_FILE and process-wide
 renderer mode events for raw geometry decoding in the vertex shader.
-The job_wait variant uses HAZE_JOB_WAIT_FILE and main-thread mode events for
-the guarded job-completion delay. Other gameplay/audio delays are unaffected.
+The job_wait variant uses startup HAZE_NATIVE_JOB_WAIT=0/1 with --fixed-mode
+and main-thread mode events for the guarded job-completion delay. Its former
+live control file is removed. Other gameplay/audio delays are unaffected.
 The vp_packets variant uses HAZE_VP_PACKET_FILE and main-thread mode events
 for the guarded vertex-program command packing operation.
 The vp_consumer variant uses RSX_VP_BURST_FILE and FIFO-thread mode events
