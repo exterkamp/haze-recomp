@@ -265,8 +265,8 @@ static void present_guest_frame(void)
                     presents, flip, duplicates, g_fifo_drains);
     }
     present_frame();
-    g_pump_profile.present += g_pump_profile.now()-profile_begin;
-    ++g_pump_profile.presents;
+    g_pump_profile.finish_present(profile_begin,(unsigned)g_frames_presented+1,
+                                 cellGcm_flip_request_count());
     /* This thread increments and guest threads read, so interlocked rather
      * than a volatile ++, which on arm64 is neither atomic nor a fence. */
     InterlockedIncrement(&g_frames_presented);
@@ -278,8 +278,7 @@ static void profile_fifo_drain(void)
 {
     const auto begin=g_pump_profile.now();
     cellGcm_rsx_process_fifo();
-    g_pump_profile.fifo+=g_pump_profile.now()-begin;
-    ++g_pump_profile.drains;
+    g_pump_profile.add_fifo(g_pump_profile.now()-begin);
 }
 static void drain_and_present(void)
 {
@@ -345,11 +344,10 @@ static DWORD WINAPI frame_clock(LPVOID)
          * a four-millisecond host delay to every producer/consumer round trip. */
         const auto wait_begin=g_pump_profile.now();
         if (g_pump_profile.enabled) {
-            ++g_pump_profile.waits;
-            g_pump_profile.queued_waits+=cellGcm_fifo_has_queued_work()!=0;
+            g_pump_profile.note_wait(cellGcm_fifo_has_queued_work()!=0);
         }
         cellGcm_fifo_kick_wait(g_pump_profile.wait_ms);
-        g_pump_profile.wait+=g_pump_profile.now()-wait_begin;
+        g_pump_profile.add_wait(g_pump_profile.now()-wait_begin);
 #endif
         ULONGLONG now = GetTickCount64();
         spu_float_native_update();
@@ -359,7 +357,7 @@ static DWORD WINAPI frame_clock(LPVOID)
             const auto tick_begin=g_pump_profile.now();
             cellGcmTickVBlank();
             cellGcmTickFlip();
-            g_pump_profile.tick+=g_pump_profile.now()-tick_begin;
+            g_pump_profile.add_tick(g_pump_profile.now()-tick_begin);
             /* Drain the FIFO every tick. This is what writes the RSX sync-fence
              * labels the game's per-frame logic blocks on, so it has to keep
              * advancing at 60 Hz even while present() throttles. */
@@ -383,6 +381,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
                 spu_float_native_summary();
                 haze_vp_upload_summary();
+                g_pump_profile.dump();
 #endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.

@@ -188,6 +188,15 @@ if ($Test) {
     & $fmaTest $floatVectors
     if ($LASTEXITCODE -ne 0) { throw 'SPU extended single-precision arithmetic regression failed.' }
     $frameTest = Join-Path $root 'local/test_frame_pump.exe'
+    $pumpTest = Join-Path $root 'local/test_pump_intervals.exe'
+    & $clang /nologo /W0 /O1 /std:c++20 "/Fe$pumpTest" "/Fo$root/local/test_pump_intervals.obj" "$root/tests/test_pump_intervals.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Pump interval test compilation failed.' }
+    & $pumpTest
+    if ($LASTEXITCODE -ne 0) { throw 'Pump interval accounting test failed.' }
+    & $python "$root/tests/test_pump_summary.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Pump interval summary test failed.' }
+    & $python "$root/tests/test_pump_waits.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Pump/PPU wait correlation test failed.' }
     & $clang /nologo /W0 /O1 /std:c++20 "/Fe$frameTest" "/Fo$root/local/test_frame_pump.obj" "$root/tests/test_frame_pump.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Frame-pump test compilation failed.' }
     & $frameTest
