@@ -123,3 +123,72 @@ The incremental ordinary build with two jobs exited 0. Candidate
 `691B0D8B732F4D21ABFC78812D0118A8A03D840F6C66CFC3FF78DBE611FE71BF`.
 The next live capture will establish which nested phases actually dominate;
 this instrumentation is not itself a frame-rate improvement.
+
+## Live nested capture: shader-cache loads and non-draw stalls
+
+Run `jungle-pso-detail-a1` / `20261013-215131-381` uses the candidate above,
+native fill/read/coherence/job-wait experiments off, and FIFO/flush/draw
+diagnostics on. Automated menu navigation initially stopped at Continue Campaign;
+the same owned process was navigated successfully afterward. A confirmation
+marker records QPC 14405057124131 at 10 MHz. The tutorial briefly entered the
+strong Nectar effect; neutral input and a subsequent capture verified the
+settled jungle before timing. This is not a matched performance comparison.
+
+Two 60-second camera windows retain all 7,867 complete intervals: **65.574 FPS /
+15.250 ms mean**, p95 20.480 ms, p99 27.424 ms, maximum 818.050 ms; 34 frames
+exceed 33.333 ms and 10 exceed 50 ms. Both owned game and measurement script
+exit 0. Camera/mode checks pass; strict isolation fails. Twenty-five resource
+samples bracket timing, with maximum gap 5.353 seconds, memory 52.82-53.75%,
+up to two compilers, and other Haze PIDs 44672/48508. There was no owned
+compilation or screenshot during timing. The seven private baseline hashes
+remain intact.
+
+The new draw CSV validates all nested durations and retains 106 slow draws
+out of 6,912,959 callbacks, with zero overwrites. Fifteen occur before the
+confirmation marker, 91 between confirmation and timing, and **none inside
+either timing window**. This is a 4-ms threshold, not proof that drawing costs
+nothing. Representative pre-timing loading draws are:
+
+| Callback | Draw ms | get_pso ms | Shader disk-load scope ms | D3DCompile ms | Driver PSO creation ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 531841 | 1961.256 | 1961.148 | 1946.636 | 0 | 14.344 |
+| 954186 | 1582.092 | 1581.979 | 1568.012 | 0 | 13.858 |
+| 530103 | 1290.264 | 1288.795 | 1280.047 | 0 | 8.661 |
+| 532480 | 1280.509 | 1280.422 | 1271.364 | 0 | 8.973 |
+| 530061 | 1185.247 | 1182.162 | 1170.261 | 0 | 11.776 |
+
+All five are in-memory PSO lookup misses. Across the 91 retained loading draws,
+the shader disk-load scope totals **36,272.809 ms**, compared with 215.277 ms
+in D3DCompile and 659.581 ms in driver PSO creation. These are filtered elapsed
+scopes, not a complete loading budget or CPU cost. The load helper includes
+file open/read/close, allocation, blob creation, validation, progress logging,
+and scheduling. Split those subphases before choosing a disk preload, archive,
+or logging fix; do not label the entire interval physical storage latency.
+
+Steady-gameplay stalls have a separate shape. FIFO retains 16,384 events with
+78 older overwrites; its retained extent starts before confirmation and covers
+both timing windows. Flush retains 2,118 events with zero overwrites. In the
+818.051-ms pump frame, FIFO event 307159 spends 814.597 ms in the body and
+0.0001 ms waiting for its lock. No retained draw or flush overlaps that event.
+The 625.683-ms frame contains event 289959, a 620.183-ms FIFO body, again with
+0.0001-ms lock wait and no retained draw. Its 2.851-ms flush starts after the
+drain. Many subthreshold operations or descheduling remain possible.
+
+Both long drains enter with GET equal to PUT. Existing periodic statistics
+provide a concrete non-draw lead on the same FIFO thread:
+
+| FIFO event | Begin QPC | VP-count print QPC | Difference |
+| --- | ---: | ---: | ---: |
+| 289959 | 14407265200308 | 14407265200429 | 12.1 microseconds |
+| 307159 | 14407505204764 | 14407505204784 | 2.0 microseconds |
+
+`gcm_vp_burst_poll` calls `fprintf(stderr, ...)` every two seconds while holding
+the FIFO consumer lock, including fixed normal mode with profiling disabled.
+This correlation does not time the print itself, but identifies avoidable
+synchronous diagnostic output in the relevant path. Follow-up under #71/#35
+will remove periodic reporting from fixed normal mode, preserve final totals,
+test the actual header, and compare the resulting executable. Shader-cache
+subphase attribution remains separate.
+
+Private evidence: `local/jungle-pso-detail-a1-{comparison-evidence,draw-analysis,slow-analysis,draw-joins,pso-detail-analysis}.json`,
+the load marker, matching original CSVs/logs/windows/observers, and setup captures.
