@@ -12,11 +12,22 @@ using System.Runtime.InteropServices;
 public static class HazeObservation {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left, top, right, bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct FileTime { public uint low, high; }
+    [StructLayout(LayoutKind.Sequential)] public struct MemoryStatus {
+        public uint length, memoryLoad;
+        public ulong totalPhysical, availablePhysical, totalPageFile, availablePageFile;
+        public ulong totalVirtual, availableVirtual, availableExtendedVirtual;
+    }
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr window);
     [DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out FileTime idle, out FileTime kernel, out FileTime user);
+    [DllImport("kernel32.dll")] public static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
+    public static MemoryStatus NewMemoryStatus() {
+        var status = new MemoryStatus();
+        status.length = (uint)Marshal.SizeOf(typeof(MemoryStatus));
+        return status;
+    }
     public static ulong Ticks(FileTime time) { return ((ulong)time.high << 32) | time.low; }
 }
 '@
@@ -28,9 +39,15 @@ do {
         Select-Object ProcessId, ExecutablePath, CreationDate)
     foreach ($observed in $processes) {
         $windowState = $null
+        $processMemory = $null
         $hostProcess = $null
         try {
             $hostProcess = Get-Process -Id $observed.ProcessId -ErrorAction Stop
+            $processMemory = [ordered]@{
+                working_set_bytes = $hostProcess.WorkingSet64
+                private_bytes = $hostProcess.PrivateMemorySize64
+                cpu_ms = $hostProcess.TotalProcessorTime.TotalMilliseconds
+            }
             $window = $hostProcess.MainWindowHandle
             $rect = New-Object HazeObservation+Rect
             if ($window -ne [IntPtr]::Zero -and [HazeObservation]::GetWindowRect($window, [ref]$rect)) {
@@ -47,6 +64,20 @@ do {
             if ($null -ne $hostProcess) { $hostProcess.Dispose() }
         }
         $observed | Add-Member -NotePropertyName window -NotePropertyValue $windowState
+        $observed | Add-Member -NotePropertyName resources -NotePropertyValue $processMemory
+    }
+    $memoryStatus = [HazeObservation]::NewMemoryStatus()
+    $systemMemory = $null
+    if ([HazeObservation]::GlobalMemoryStatusEx([ref]$memoryStatus)) {
+        # Physical memory pressure is distinct from a process's resident set.
+        # This snapshot does not establish hard faults or their cause.
+        $systemMemory = [ordered]@{
+            physical_load_percent = $memoryStatus.memoryLoad
+            physical_total_bytes = $memoryStatus.totalPhysical
+            physical_available_bytes = $memoryStatus.availablePhysical
+            commit_limit_bytes = $memoryStatus.totalPageFile
+            commit_available_bytes = $memoryStatus.availablePageFile
+        }
     }
     $foreground = [HazeObservation]::GetForegroundWindow()
     [uint32]$foregroundPid = 0
@@ -70,6 +101,7 @@ do {
         processes = $processes
         foreground_pid = $foregroundPid
         system_cpu = $systemCpu
+        system_memory = $systemMemory
     } | ConvertTo-Json -Depth 5 -Compress | Add-Content -LiteralPath $destination -Encoding UTF8
     Start-Sleep -Seconds $IntervalSeconds
 } while ([DateTime]::UtcNow -lt $deadline)
