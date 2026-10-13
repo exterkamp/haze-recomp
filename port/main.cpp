@@ -232,6 +232,7 @@ void rsx_null_backend_suppress_present(int);
 uint32_t cellGcmResolveLocated(int, uint32_t);
 uint32_t cellGcmResolveIO(uint32_t);
 void cellGcm_fifo_slow_drain_dump(void);
+void cellGcm_vp_burst_dump(void);
 }
 static bool s_rsx_live = false;
 static const uint8_t* live_guest_ptr(void*, uint32_t location, uint32_t offset, uint32_t size)
@@ -405,6 +406,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 haze_vp_upload_summary();
                 g_pump_profile.dump();
                 cellGcm_fifo_slow_drain_dump();
+                cellGcm_vp_burst_dump();
                 haze_job_profile_dump();
                 haze_job_trace_dump();
                 haze_job_wait_dump_counts();

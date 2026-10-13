@@ -88,6 +88,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'RSX slow-flush phase and failure diagnostic regression failed.' }
     & $python "$root/tests/test_rsx_slow_draw_ordinary.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/rsx-slow-draw-ordinary"
     if ($LASTEXITCODE -ne 0) { throw 'Ordinary/profile slow-draw diagnostic regression failed.' }
+    & $python "$root/tests/test_vp_burst_reporting.py" --compiler $clang --sdk $sdk --output-dir "$root/build/vp-burst-reporting"
+    if ($LASTEXITCODE -ne 0) { throw 'VP burst reporting regression failed.' }
     & $python "$root/tests/test_analyze_slow_drains.py"
     if ($LASTEXITCODE -ne 0) { throw 'Slow-drain/flush QPC attribution regression failed.' }
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"
