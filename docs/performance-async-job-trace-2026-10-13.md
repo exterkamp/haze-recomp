@@ -114,7 +114,8 @@ Runtime image 30 is registered as `spu_0029_at_00EC9A80`, entry
 `spu_func_00003080`, full fingerprint `DB819079AF1D1346`, text fingerprint
 `0C500CA64A044D04`. Taskset TI_ARGS are captured as four BE32 words and passed
 unchanged through the R3 override. The lifted entry derives an EA at R3[0] +
-`0x1440` and issues a one-byte GET there. That is inside the title's `0x1450`
+`0x1440` and issues a one-byte PUT there (MFC opcode `0x20`; GET is `0x40`).
+The earlier description incorrectly called this a GET. That is inside the title's `0x1450`
 slot, outside its payload copy at `+0x10` of size `0x1410`. This proves
 slot-relative addressing; it does not establish the whole payload contract.
 

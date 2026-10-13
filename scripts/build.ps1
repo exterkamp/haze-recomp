@@ -10,7 +10,7 @@ param(
     [switch]$NativeSpuFloat = $true,
     [ValidateSet('Debug', 'Release', 'RelWithDebInfo')][string]$Configuration = 'RelWithDebInfo',
     [string]$OutputDirectory,
-    [int]$Jobs = 8
+    [int]$Jobs = 2
 )
 $ErrorActionPreference = 'Stop'
 if ($CompareSpuByteOps -and (-not $ProfileRenderer -or $RuntimeOnly)) {
@@ -147,6 +147,24 @@ if ($Test) {
         if ($LASTEXITCODE -ne 0) { throw 'Native cursor boundary oracle failed.' }
         & $python "$root/tests/test_native_cursor_patch.py"
         if ($LASTEXITCODE -ne 0) { throw 'Native cursor patch guard tests failed.' }
+        $job0Oracle = Join-Path $root 'local/job0_oracle.c'
+        & $python "$root/scripts/prepare_job0_oracle.py" "$assets/generated/spu/spu_0029_at_00EC9A80/spu_recomp.c" $job0Oracle
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 compute oracle extraction failed.' }
+        $job0Flags = @('/DSPU_FLOAT_NATIVE_RUNTIME=1', '/clang:-ffp-contract=off') + $fiFlags
+        & $clang /nologo /W0 /O2 /Ob1 @job0Flags "/I$sdk/runtime/spu" "/I$root/port" "/Fe$root/local/test_job0_compute.exe" "/Fo$root/local/" "$root/tests/test_job0_compute.c" $job0Oracle "$sdk/runtime/spu/spu_float_native.c"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 compute oracle compilation failed.' }
+        & "$root/local/test_job0_compute.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 full-state compute oracle failed.' }
+        & $clang /nologo /W0 /O2 /Ob1 @job0Flags "/I$sdk/runtime/spu" "/I$root/port" "/Fe$root/local/test_job0_arithmetic.exe" "/Fo$root/local/" "$root/tests/test_job0_arithmetic.c" "$sdk/runtime/spu/spu_float_native.c"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 arithmetic oracle compilation failed.' }
+        & "$root/local/test_job0_arithmetic.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 arithmetic oracle failed.' }
+        & $clang /nologo /EHsc /W0 /O2 /std:c++20 /DHAZE_JOB_TRACE "/Fe$root/local/test_job0_capture.exe" "/Fo$root/local/" "$root/tests/test_job0_capture.cpp" "$root/port/haze_job0_capture.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 fixture recorder compilation failed.' }
+        & "$root/local/test_job0_capture.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 fixture recorder test failed.' }
+        & $python "$root/tests/test_job0_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Job-0 patch guard tests failed.' }
     }
     $abiStorageTest = Join-Path $root 'local/test_abi_storage.exe'
     & $clang /nologo /W0 /O2 /clang:-msse4.1 "/I$sdk/include" "/Fe$abiStorageTest" "/Fo$root/local/test_abi_storage.obj" "$sdk/runtime/spu/tests/test_abi_storage.c"

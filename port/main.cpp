@@ -33,6 +33,7 @@
 #include "ppu_recomp.h"
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
+#include "haze_job0_capture.h"
 #if defined(HAZE_JOB_TRACE) && defined(_WIN32)
 #include "spu_workload.h"
 static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
@@ -400,6 +401,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 g_pump_profile.dump();
                 haze_job_profile_dump();
                 haze_job_trace_dump();
+                haze_job0_capture_dump();
 #endif
                 // Closing the native game window ends the host, including its
                 // guest workers, rather than leaving an invisible game running.

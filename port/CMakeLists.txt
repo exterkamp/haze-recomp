@@ -236,6 +236,24 @@ if(PORT_ENABLE_SPU)
             set_property(SOURCE "${HAZE_CURSOR_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES
                 "${SPU_DIR}/spu_0039_at_00F1C100" "${CMAKE_CURRENT_SOURCE_DIR}")
         endif()
+        set(HAZE_JOB0_SOURCE "${SPU_DIR}/spu_0029_at_00EC9A80/spu_recomp.c")
+        if(EXISTS "${HAZE_JOB0_SOURCE}")
+            find_package(Python3 COMPONENTS Interpreter REQUIRED)
+            set(HAZE_JOB0_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_job0_capture/spu_recomp.c")
+            add_custom_command(OUTPUT "${HAZE_JOB0_PATCHED}"
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job0_kernel.py"
+                    "${HAZE_JOB0_SOURCE}" "${HAZE_JOB0_PATCHED}"
+                    --registration "${SPU_DIR}/spu_workloads.c"
+                DEPENDS "${HAZE_JOB0_SOURCE}" "${SPU_DIR}/spu_workloads.c"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job0_capture.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job0_kernel.py"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/prepare_job0_oracle.py"
+                VERBATIM)
+            list(REMOVE_ITEM SPU_LIFTED "${HAZE_JOB0_SOURCE}")
+            list(APPEND SPU_LIFTED "${HAZE_JOB0_PATCHED}")
+            set_property(SOURCE "${HAZE_JOB0_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES
+                "${SPU_DIR}/spu_0029_at_00EC9A80" "${CMAKE_CURRENT_SOURCE_DIR}")
+        endif()
         list(LENGTH SPU_LIFTED SPU_IMAGE_COUNT)
         message(STATUS "Lifted SPU:      ${SPU_IMAGE_COUNT} image(s)")
         # The musttail indirect-branch fast path. Excluded from the runtime
@@ -270,6 +288,8 @@ add_executable(${PROJECT_NAME}
     haze_job_trace.cpp
     haze_vp_upload.cpp
     haze_native_cursor.cpp
+    haze_job0_capture.cpp
+    haze_job0_kernel.cpp
     haze_spu_triplet_copy.cpp
     haze_graphics.cpp
     haze_display.cpp
@@ -348,6 +368,7 @@ if(HAZE_RSX_PROFILE)
     set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" main.cpp haze_job_profile.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
     set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" main.cpp haze_job_trace.cpp
+        haze_job0_capture.cpp "${HAZE_JOB0_PATCHED}"
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_TRACE)
 endif()
 
