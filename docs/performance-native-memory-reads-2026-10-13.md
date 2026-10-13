@@ -49,6 +49,15 @@ FIFO parsing and hashing, which support investigating consumer batch dispatch.
 RIP/stack sample counts include waits and are not CPU utilization percentages.
 No whole-frame speedup is established for the byte/halfword change yet.
 
+The matching candidate disassembly identifies sampled `vm_read8+0x1EE` as
+the ordinary VM byte load followed by return, confirming runtime use of the
+new path. Renderer PDB/disassembly mapping also identifies
+`rsx_process_method+0x6B8/+0x6CD/+0x6E8/+0x6F5` as VP instruction-word
+upload bounds/stores/cursor updates, and `rsx_dispatch_method+0xD3` as its
+VP instruction upload path. Other samples hit texture dispatch, transform
+constants and generic bookkeeping. These are evidence of executed paths,
+not a measured CPU share or promised gain from batching them.
+
 Private evidence: `local/native-memory-reads-build-tests.log`,
 `local/native-memory-reads-thread-scan.json`,
 `local/native-memory-reads-cpu-sample.json` (UTF-16), and the run above.

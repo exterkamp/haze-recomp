@@ -208,3 +208,24 @@ shared-load run, not a newly established isolated performance regression.
 Private evidence: `local/native-vp-packets-profile-route-summary.json`, its
 `-present-report.json`, `-windows.json`, `-presents.csv`, process/camera logs,
 and `local/summarize-vp-upload.py`. The game closed normally with exit 0.
+
+## Consumer-side prototype
+
+The existing FIFO walker already retains packet boundaries, so the next
+experiment can specialize an exact type-0, subchannel-0, method `0x0B80`,
+32-word packet without a new producer sideband. Existing command bytes,
+GET/PUT ordering and publication can remain authoritative. A local prototype
+in `local/vp-consumer-prototype/` links the unchanged, hash-pinned SDK generic
+handlers and passes 2,200 complete dispatch-state comparisons and 16,432
+complete `rsx_state` comparisons. Four overflowing cursors are rejected without
+mutation; the unsafe original path is deliberately not invoked for those.
+Unrelated side-effect stubs abort if reached. This is not integrated into the
+game, and no runtime speedup is established.
+
+Integration must prevalidate mappings and cursor state before changing any
+mirror, preserve diagnostics and the live/movie guard, forward to the optional
+draw engine, and advance GET exactly once after completion. Ordinary live
+rendering already skips wrapper locks/atomics; expected ordinary savings are
+fewer function/dispatch calls and duplicate reads, not removal of nonexistent
+synchronization. The remaining snapshot-boundary and runtime performance checks
+belong to #35 before promotion.
