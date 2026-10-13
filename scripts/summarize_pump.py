@@ -68,6 +68,12 @@ def summarize(path, start=None, end=None, renderer=None):
     if renderer:
         with Path(renderer).open(newline='') as f:
             render_rows = list(csv.DictReader(f))
+        if not render_rows:
+            raise ValueError('No renderer samples')
+        # Retain every available timing scope. A narrow hardcoded selection
+        # previously hid a 144-ms pso_prepare interval already in the capture.
+        render_fields += tuple(k for k in render_rows[0]
+                               if k.endswith('_ms') and k != 'dt_ms' and k not in render_fields)
         qpcs = [int(r['qpc']) for r in render_rows]
         if qpcs != sorted(set(qpcs)):
             raise ValueError('Nonmonotonic renderer timestamps')
@@ -80,6 +86,8 @@ def summarize(path, start=None, end=None, renderer=None):
             if int(rr['qpc_frequency']) != row['qpc_frequency']:
                 raise ValueError('Renderer QPC frequency mismatch')
             row['renderer'] = {k: float(rr[k]) for k in render_fields}
+            if not all(math.isfinite(v) for v in row['renderer'].values()):
+                raise ValueError('Nonfinite renderer timing')
 
     def group(items):
         if not items:

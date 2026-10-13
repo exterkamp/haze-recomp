@@ -79,6 +79,19 @@ class PumpSummaryTests(unittest.TestCase):
         self.assertEqual(result["all"]["nested_renderer_means_ms"]["draw_cpu_ms"], 1.0)
         self.assertEqual([r["frame"] for r in result["slowest"]], [2, 1])
 
+    def test_retains_additional_renderer_scopes(self):
+        self.write_csv(self.pump_path, PUMP_FIELDS, self.pump_rows)
+        fields=RENDER_FIELDS+['pso_prepare_ms','shader_disk_load_ms']
+        rows=[dict(r,pso_prepare_ms=140,shader_disk_load_ms=130) for r in self.renderer_rows]
+        self.write_csv(self.renderer_path,fields,rows)
+        result=summarize(self.pump_path,renderer=self.renderer_path)
+        self.assertEqual(result['all']['nested_renderer_means_ms']['pso_prepare_ms'],140)
+        self.assertEqual(result['slowest'][0]['renderer']['shader_disk_load_ms'],130)
+        rows[0]['shader_disk_load_ms']=float('nan')
+        self.write_csv(self.renderer_path,fields,rows)
+        with self.assertRaisesRegex(ValueError,'Nonfinite renderer'):
+            summarize(self.pump_path,renderer=self.renderer_path)
+
     def test_rejects_overlapping_scopes(self):
         rows = [dict(r) for r in self.pump_rows]
         rows[0]["fifo_ms"] = 4  # Pump scopes now sum to 11ms inside a 10ms row.
