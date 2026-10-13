@@ -86,6 +86,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'FIFO slow-drain lock/body diagnostic regression failed.' }
     & $python "$root/tests/test_rsx_slow_flush.py" --compiler $clang --sdk $sdk --output-dir "$root/build/rsx-slow-flush"
     if ($LASTEXITCODE -ne 0) { throw 'RSX slow-flush phase and failure diagnostic regression failed.' }
+    & $python "$root/tests/test_rsx_slow_draw_ordinary.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/rsx-slow-draw-ordinary"
+    if ($LASTEXITCODE -ne 0) { throw 'Ordinary/profile slow-draw diagnostic regression failed.' }
     & $python "$root/tests/test_analyze_slow_drains.py"
     if ($LASTEXITCODE -ne 0) { throw 'Slow-drain/flush QPC attribution regression failed.' }
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"
@@ -300,6 +302,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native job wait test compilation failed.' }
     & "$root/local/test_job_wait.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Native job wait scope validation failed.' }
+    & $python "$root/tests/test_bulk_fill.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/bulk-fill-tests"
+    if ($LASTEXITCODE -ne 0) { throw 'Native slot-fill source/boundary differential regression failed.' }
     & $python "$root/tests/test_vp_packet_oracle.py"
     if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle guard tests failed.' }
     & $python "$root/scripts/extract_vp_packet_oracle.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/vp_packet_reference.inc"

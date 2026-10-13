@@ -116,6 +116,24 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
     set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
+# Bounded native fill at an audited game boundary; original source stays local
+# and untouched, and changed generated function bodies fail closed.
+set(HAZE_BULK_FILL_SOURCE "${RECOMP_DIR}/ppu_recomp_006.cpp")
+if(EXISTS "${HAZE_BULK_FILL_SOURCE}")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_BULK_FILL_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_bulk_fill/ppu_recomp_006.cpp")
+    add_custom_command(OUTPUT "${HAZE_BULK_FILL_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_bulk_fill.py"
+            "${HAZE_BULK_FILL_SOURCE}" "${HAZE_BULK_FILL_PATCHED}"
+            --caller-source "${RECOMP_DIR}/ppu_recomp_003.cpp"
+        DEPENDS "${HAZE_BULK_FILL_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_bulk_fill.py"
+            "${RECOMP_DIR}/ppu_recomp_003.cpp"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_BULK_FILL_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_BULK_FILL_PATCHED}")
+    set_property(SOURCE "${HAZE_BULK_FILL_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+
 # ---------------------------------------------------------------------------
 # Native GUI pointer bridge
 # ---------------------------------------------------------------------------
@@ -317,6 +335,7 @@ add_executable(${PROJECT_NAME}
     haze_menu.cpp
     haze_guest_pacer.cpp
     haze_job_wait.cpp
+    haze_bulk_fill.cpp
     haze_job_profile.cpp
     haze_job_trace.cpp
     haze_vp_upload.cpp
