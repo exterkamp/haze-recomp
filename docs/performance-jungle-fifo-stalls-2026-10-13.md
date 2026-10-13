@@ -192,3 +192,37 @@ subphase attribution remains separate.
 
 Private evidence: `local/jungle-pso-detail-a1-{comparison-evidence,draw-analysis,slow-analysis,draw-joins,pso-detail-analysis}.json`,
 the load marker, matching original CSVs/logs/windows/observers, and setup captures.
+
+## Standalone cache-I/O probe
+
+After the owned game exits, a read-only C/CRT probe reads 128 existing shader
+cache files twice. It uses `fopen`/`fread`/`fclose` and `D3DCreateBlob`, separates
+their elapsed scopes, retains per-file rows, and has a 60-second limit per pass.
+All 128 files complete both passes with no I/O, header, or allocation errors.
+The OS cache is not flushed: "first pass" does not mean a verified cold disk.
+
+| Scope | First pass ms | Second pass ms |
+| --- | ---: | ---: |
+| Whole pass | 2629.392 | 9.850 |
+| File opens | 2414.917 | 6.198 |
+| Header reads | 138.325 | 1.265 |
+| Source allocation | 0.083 | 0.028 |
+| Source reads | 9.267 | 0.324 |
+| Blob creation | 0.474 | 0.074 |
+| Blob reads | 13.600 | 0.747 |
+| Cleanup | 0.176 | 0.062 |
+| File closes | 50.741 | 0.596 |
+
+The first pass's largest per-file sum is 70.517 ms; its largest individual open
+is 70.428 ms. This reproduces substantial first-open cost independently of
+game logging, but not the 1.947-second in-game load. It omits source comparison,
+progress/error logging, the full game workload, and concurrent resource
+observation. It therefore supports testing a validated aggregate shader-cache
+file, while in-game open/read/close/progress timing is still needed to attribute
+the extreme tail. Moving the same file opens to startup could merely move the
+delay and must not be presented as eliminating it.
+
+The cache inventory contains 1,996 files totaling 21,220,829 bytes; only the
+128-file subset is probed. No cache file is modified or removed. Private source
+and results: `local/rsx_shader_cache_io_probe.c` and
+`local/rsx-shader-cache-io-probe.csv`. No shader source/blob is committed.
