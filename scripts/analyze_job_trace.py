@@ -89,11 +89,21 @@ def summarize_window(events, summary, block, frames):
     submissions = {(r['slot'], r['generation']) for r in events
                    if r['kind'] == 1 and r['slot'] < 512 and r['generation']}
     waits = [r for r in selected if r['kind'] == 4]
+    callers = defaultdict(list)
+    for row in waits:
+        callers[(row['caller'], row['guest_thread'], row['host_tid'])].append(row)
+    wait_callers = []
+    for (caller, guest_thread, host_tid), rows in callers.items():
+        elapsed = union_ticks((max(lo, r['begin_qpc']), min(hi, r['end_qpc'])) for r in rows) * scale
+        wait_callers.append({'caller': f'0x{caller:08X}', 'guest_thread': guest_thread,
+                             'host_tid': host_tid, 'spans': len(rows),
+                             'clipped_union_ms_per_frame': elapsed / frames})
     return {'start_qpc': lo, 'end_qpc': hi, 'frames': frames,
             'completed_span_coverage': complete,
             'discarded_end_qpc_max': cutoff, 'incomplete_scopes_at_dump': summary['incomplete_scopes'],
             'groups': groups,
             'dispatch_targets': sorted(targets, key=lambda r: r['inclusive_clipped_ms'], reverse=True),
+            'wait_callers': sorted(wait_callers, key=lambda r: r['clipped_union_ms_per_frame'], reverse=True),
             'waits_with_retained_submit_generation': sum((r['slot'], r['generation']) in submissions for r in waits)}
 
 
