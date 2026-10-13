@@ -80,9 +80,12 @@ conflicts, then **Apply**. **Back** discards edits; **Defaults** requires Apply.
 **Game control options** opens the original controller layout and toggle/hold
 settings.
 
-Main and pause menus offer **Quit to Desktop** through the current Select
-binding (Tab by default) or a mouse click. Confirmation defaults to Cancel;
-quitting waits for active saves and settings before shutting down.
+The main-menu footer opens **Desktop Options** through the current Select
+binding (Tab by default) or a mouse click. **Add to Steam** lets you select a
+local account and confirm registration with the executable launcher and artwork;
+close Steam first. The pause-menu footer opens **Quit to Desktop** directly.
+Quit confirmation defaults to Cancel and waits for active saves and settings
+before shutting down.
 
 Open **Video Setup** or **Sound Setup** from the main or pause menu for PC
 Video and Audio settings. Changes are staged until **Apply**; **Back** discards

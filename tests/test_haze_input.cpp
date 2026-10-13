@@ -88,6 +88,7 @@ void haze_menu_shutdown(bool exiting_process) { menu_exiting_process=exiting_pro
 void haze_video_menu_register() {}
 void haze_audio_menu_register() {}
 void haze_controls_menu_register() {}
+void haze_steam_menu_register() {}
 static bool quit_active=false,close_accepted=false;
 bool haze_quit_menu_active() { return quit_active; }
 bool haze_quit_menu_has_focus() { return false; }
