@@ -296,8 +296,8 @@ if __name__ == '__main__':
                         help='Maximum allowed seconds between observations, default 4')
     args = parser.parse_args()
     if args.action == 'record':
-        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 8191 for f in args.flags):
-            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..8191')
+        if args.warmup < 5 or args.seconds < 10 or any(not 0 <= f <= 16383 for f in args.flags):
+            parser.error('Use at least 5 warmup seconds, 10 measured seconds, and flags 0..16383')
         if not 0 < args.camera_token_base <= 1000000-len(args.flags):
             parser.error('Camera trajectory tokens must fit the range 1..1000000')
         allowed_modes = ((0,1,2,3) if args.mode_column == 'vertex_workers' else

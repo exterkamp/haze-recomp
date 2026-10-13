@@ -154,3 +154,29 @@ records use the prefix `local/gpu-occurrences-reverse-` plus the run captures/lo
   the measured preparation-versus-lookup costs above.
 
 The experiment remains off by default; stable pacing and 144 FPS are unproven.
+
+## Native index-reference preparation follow-up
+
+The measured reference-gathering scope still costs about 1.3 ms/frame after
+CPU deduplication is removed. A follow-up under #34 batches contiguous big-endian
+16/32-bit index decoding into native reference records with SSE2, retaining a
+portable scalar implementation. The batch keeps the base index separate and
+preserves occurrence order. It only publishes its reference count after all
+indices pass restart-marker detection; a marker returns to the existing scalar
+cut builder, overwriting any speculative partial output. Noncontiguous or
+wrapped source spans retain the existing resolver path.
+
+An internal CPU-work bit 8192 selects this comparison (5379 versus 13571 with
+the current GPU-occurrence baseline). The default remains off pending in-game
+measurements; no user-facing graphics option is added. The numerical/bounds
+fixture passes 8,580 cases in each SIMD and forced-scalar build, including all
+source alignments, output alignment offsets, short tails, every restart lane,
+nontruncated 32-bit restart values on 16-bit indices, high base indices, empty
+input and protected pages immediately after the source and destination spans.
+These tests do not establish an FPS improvement; integrated profiling and
+ordinary camera comparisons remain required.
+
+SDK implementation: `ca743b0`. The integrated ordinary build and full native
+regression suite pass, including the existing 262,144-lane GPU decoder oracle.
+Candidate `local/candidates/native-index-refs/HazeRecomp.exe` has SHA256
+`54802A22F6528D704FE5308916C7BFC44FBECE4BD049DFCEEC394C28CB3D7F07`.

@@ -317,6 +317,15 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler test compilation failed.' }
     & $fpTest
     if ($LASTEXITCODE -ne 0) { throw 'Fragment decompiler regression failed.' }
+    foreach ($refsScalar in @(0,1)) {
+        $refsTest = Join-Path $root "local/test_vertex_refs_$refsScalar.exe"
+        $refsFlags = @()
+        if ($refsScalar) { $refsFlags += '/DRSX_REFS_SCALAR=1' }
+        & $clang /nologo /W0 /O2 /std:c17 @refsFlags "/I$sdk/include" "/Fe$refsTest" "/Fo$root/local/test_vertex_refs_$refsScalar.obj" "$sdk/libs/video/tests/test_vertex_refs.c"
+        if ($LASTEXITCODE -ne 0) { throw 'Native index-reference test compilation failed.' }
+        & $refsTest
+        if ($LASTEXITCODE -ne 0) { throw 'Native index-reference oracle failed.' }
+    }
     $vertexPullTest = Join-Path $root 'local/test_vertex_pull.exe'
     & $clang /nologo /EHsc /W0 /O2 /Gy /clang:-msse4.1 "/I$sdk/include" "/Fe$vertexPullTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_vertex_pull.cpp" "$sdk/libs/video/rsx_vertex_compact.c" "$sdk/libs/video/rsx_dispatch.c" /link d3d11.lib d3dcompiler.lib
     if ($LASTEXITCODE -ne 0) { throw 'GPU vertex decoder oracle compilation failed.' }
