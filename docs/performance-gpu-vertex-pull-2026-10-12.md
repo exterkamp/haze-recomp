@@ -191,12 +191,35 @@ The owned game closed normally with exit 0. The recording helper requires
 actual-angle evidence whenever camera control is used. Focused camera and
 present-mode tests pass; the camera diagnostic builds successfully.
 
+### Reverse-order confirmation after the log fix
+
+Run `20261012-235959-995` uses the rebuilt candidate hash `471B8CA...` above,
+the same settings and GPU/CPU/CPU/GPU ordering, with five-second warmups and
+24-second measured sweeps. All present, mode, camera and sampled process
+coverage checks pass, including the final window after camera disable.
+Actual yaw error is at most 1.19e-7 radians; pitch error is zero. The scene was
+visually confirmed before measuring; no captures occurred inside the windows.
+
+| Mode | Frames | FPS | Mean ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| GPU | 742 | 30.95 | 32.308 | 44.642 | 48.171 | 113.779 |
+| CPU | 673 | 28.06 | 35.639 | 50.440 | 59.816 | 111.690 |
+| CPU | 710 | 29.60 | 33.787 | 47.984 | 53.227 | 58.814 |
+| GPU | 738 | 30.83 | 32.440 | 44.072 | 48.204 | 64.473 |
+
+Both reversed GPU windows improve mean and p95/p99 relative to both CPU
+windows, supporting a modest gain in this scene. Large isolated stalls remain
+in both paths; this does not establish stable pacing. The final log has zero
+dropped draws, texture decode failures and GPU preparation bypasses, with
+6,245,256 GPU-prepared draws across the full run. Normal close exits 0.
+Private records use the prefix `local/gpu-pull-camera-confirm-` (report,
+windows, presents, camera audit, process observer and logs).
+
 ## Remaining work
 
 - Reference gathering and remapping still consume about 3.3 ms per frame;
   use #34 to investigate eliminating those operations and repeated uploads.
-- Repeat the reverse-order absolute-angle comparison after the final audit
-  flush correction. Keep interruption annotations and validate complete coverage.
+- Extend the audited camera comparison to other scenes and larger tail samples.
 - Validate more of the campaign and squad conversation and coordinate visual
   coverage with #22 before making this the automatic release path.
 - Use measured remaining costs to select persistent GPU geometry (#34),
