@@ -260,6 +260,7 @@ add_executable(${PROJECT_NAME}
     haze_camera.cpp
     haze_guest_pacer.cpp
     haze_job_wait.cpp
+    haze_job_profile.cpp
     haze_vp_upload.cpp
     haze_native_cursor.cpp
     haze_spu_triplet_copy.cpp
@@ -336,6 +337,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${PS3RECOMP_DIR}/libs/codec"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+if(HAZE_RSX_PROFILE)
+    set_property(SOURCE "${HAZE_VP_UPLOAD_PATCHED}" main.cpp haze_job_profile.cpp
+        APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
+endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ps3recomp_runtime

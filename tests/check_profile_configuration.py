@@ -32,6 +32,15 @@ def check(build, enabled):
         if profiled != enabled:
             raise ValueError(f'{target}/{source}: profiling flag is {profiled}, expected {enabled}')
     print(f'Actual compile rules: profiling={int(enabled)} verified on all {len(sources)} PPU/SPU/RSX sources')
+    for source in ('main.cpp', 'haze_job_profile.cpp', 'ppu_recomp_003.cpp'):
+        blocks = [block for block in ninja.split('\n\n') if block.startswith('build ')
+                  and re.search(r'[\\/]' + re.escape(source) + r'\.obj:', block.splitlines()[0])
+                  and '__HazeRecomp_' in block.splitlines()[0]]
+        if len(blocks) != 1:
+            raise ValueError(f'Expected one completion-profile rule for {source}')
+        defines = next((line for line in blocks[0].splitlines() if line.startswith('  DEFINES = ')), '')
+        if bool(re.search(r'(?:-D|/D)HAZE_JOB_PROFILE(?:\s|$)', defines)) != enabled:
+            raise ValueError(f'{source}: completion profiler compile gate mismatch')
 
 
 if __name__ == '__main__':

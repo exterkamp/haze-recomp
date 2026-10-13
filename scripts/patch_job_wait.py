@@ -9,6 +9,11 @@ DIGESTS = {
     '0071EFE8': 'daf5d491622c7593d09754d32873daa3ff25dcf9dbce56cb3bcdfb4d9ff56897',
 }
 CALL = 'ctx->lr = 0x00682574; func_0068EFC0(ctx); DRAIN_TRAMPOLINE(ctx);'
+PROFILE_ENTRY = '        HazeJobProfileScope job_profile(ctx->thread_id, ctx->gpr[2], ctx->gpr[3], ctx->lr);\n'
+PROFILE_CALLS = ('ctx->lr = 0x00682560; func_00682510(ctx); DRAIN_TRAMPOLINE(ctx);',
+                 CALL.replace('func_0068EFC0', 'haze_job_wait_call'),
+                 'ctx->lr = 0x0068257C; func_00722ED8(ctx); DRAIN_TRAMPOLINE(ctx);',
+                 'ctx->lr = 0x00682590; func_00723198(ctx); DRAIN_TRAMPOLINE(ctx);')
 
 def patch(source):
     bodies = {}
@@ -24,13 +29,17 @@ def patch(source):
     changed = body.replace('{\n', '{\n        extern void haze_job_wait_call(ppu_context*);\n', 1)
     assert body.count(CALL) == 1
     changed = changed.replace(CALL, CALL.replace('func_0068EFC0', 'haze_job_wait_call'), 1)
+    changed = changed.replace('{\n', '{\n' + PROFILE_ENTRY, 1)
+    for phase, call in enumerate(PROFILE_CALLS):
+        assert changed.count(call) == 1
+        changed = changed.replace(call, f'job_profile.start({phase}); {call} job_profile.stop({phase});', 1)
     source = source.replace(body, changed, 1)
     body = bodies['0071EFE8']
     changed = body.replace('{\n', '{\n        extern bool haze_job_wait_usleep(ppu_context*);\n', 1)
     assert body.count('        lv2_syscall(ctx);') == 1
     changed = changed.replace('        lv2_syscall(ctx);',
         '        if (!haze_job_wait_usleep(ctx)) lv2_syscall(ctx);', 1)
-    return source.replace(body, changed, 1)
+    return '#include "haze_job_profile.h"\n' + source.replace(body, changed, 1)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

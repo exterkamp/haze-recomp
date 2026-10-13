@@ -211,6 +211,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
     & $python "$root/tests/test_job_wait_patch.py"
     if ($LASTEXITCODE -ne 0) { throw 'Job completion patch guard validation failed.' }
+    & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_profile.exe" "/Fo$root/local/test_job_profile.obj" "$root/tests/test_job_profile.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler test compilation failed.' }
+    & "$root/local/test_job_profile.exe" "$root/local/test-job-profile.csv"
+    if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler accounting failed.' }
+    & $python "$root/tests/test_job_completion_summary.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Job completion summary validation failed.' }
     & $clang /nologo /EHsc /W0 /O2 "/I$assets/generated/ppu" "/Fe$root/local/test_job_wait.exe" "/Fo$root/local/" "$root/tests/test_job_wait.cpp" "$root/port/haze_job_wait.cpp"
     if ($LASTEXITCODE -ne 0) { throw 'Native job wait test compilation failed.' }
     & "$root/local/test_job_wait.exe"

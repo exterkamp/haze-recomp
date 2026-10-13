@@ -5,7 +5,7 @@ import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
-from patch_job_wait import patch,CALL,DIGESTS
+from patch_job_wait import patch,CALL,DIGESTS,PROFILE_ENTRY,PROFILE_CALLS
 from patch_guest_pacer import patch as patch_pacer
 
 class JobWaitPatch(unittest.TestCase):
@@ -18,7 +18,10 @@ class JobWaitPatch(unittest.TestCase):
     def test_only_two_boundaries_change_and_composes(self):
         for source in (self.source,patch_pacer(self.source)):
             result=patch(source)
-            restored=result.replace('        extern void haze_job_wait_call(ppu_context*);\n','',1)
+            restored=result.replace('#include "haze_job_profile.h"\n','',1).replace(PROFILE_ENTRY,'',1)
+            for phase, call in enumerate(PROFILE_CALLS):
+                restored=restored.replace(f'job_profile.start({phase}); {call} job_profile.stop({phase});',call,1)
+            restored=restored.replace('        extern void haze_job_wait_call(ppu_context*);\n','',1)
             restored=restored.replace('        extern bool haze_job_wait_usleep(ppu_context*);\n','',1)
             restored=restored.replace(CALL.replace('func_0068EFC0','haze_job_wait_call'),CALL,1)
             restored=restored.replace('if (!haze_job_wait_usleep(ctx)) lv2_syscall(ctx);','lv2_syscall(ctx);',1)
