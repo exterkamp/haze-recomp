@@ -55,10 +55,10 @@ not a claim that the whole repository test suite has run.
 
 ## Remaining validation
 
-- Build the integrated ordinary executable with at most two compiler jobs.
-- Verify the native copy executes during the private jungle save run.
-- Measure recycle acknowledgement intervals and retain coverage limitations.
-- Compare ordinary copy-off/on camera sweeps before choosing a release default.
+- Build, live native-copy use, recycle attribution and the initial ordinary A/B
+  are completed below. The A/B does not justify enabling the native path.
+- Establish the copy's direct operation cost or repeatable same-state benefit
+  before revisiting promotion.
 - Verify consistent pacing and unlocked/VSync behavior across gameplay; 144 FPS
   remains unachieved.
 
@@ -111,3 +111,52 @@ The game exits normally with code zero; all seven immutable baseline save
 hashes match. Evidence prefix: `local/jungle-slot-copy-recycle-a1-*`, including
 all present intervals, resources, per-window recycle reports, raw sidecar and
 worst-frame QPC correlation. Next measure ordinary copy-off/on with tracing off.
+
+## First ordinary-copy A/B: not promoted
+
+Both runs use the exact same candidate above, the private baseline save/cache,
+1440p configuration, fixed existing CPU/GPU modes and two 45-second camera
+sweeps after the tutorial effects settle. Recycle/detailed-renderer/stack traces
+are off, diagnostic input is detached, and every present interval is retained.
+The run order is OFF then ON; simulation/NPC state is not replayed exactly.
+
+| Native slot copy | Frames | FPS | Mean ms | p95 ms | p99 ms | Worst ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| OFF | 8,598 | 95.559 | 10.465 | 13.154 | 15.097 | 22.454 |
+| ON | 7,815 | 86.861 | 11.513 | 14.591 | 16.584 | 22.853 |
+
+There are no frames above 33.333 ms in either pair of windows. Copy ON's mean
+is **1.048 ms higher**, not an improvement. The shutdown snapshot confirms
+856,700 native copies, no rejections, 4,400,011,200 bytes; OFF has no copy
+summary. The producer-wait/FIFO/present means are OFF 5.479/3.114/1.806 ms,
+ON 5.872/3.679/1.895 ms. Changes span multiple phases, so this pair does not
+isolate a causal cost to the copy helper. It does fail promotion: keep the
+experimental native path disabled and do not call its implementation a speedup.
+
+Both captures pass camera/mode/present and sampled process checks. Each has
+20 resource samples; maximum gaps are 5.355/5.369 seconds. Memory is
+52.65-53.15% OFF and 52.63-53.14% ON; no competing Haze or compiler is observed.
+No owned build, screenshot or heavy analysis overlaps either timed window.
+Both runs exit normally with code zero; all seven immutable baseline save hashes
+still match. Evidence:
+
+- OFF: `local/jungle-slot-copy-off-a1-*`, run `20261014-012413-387`, PID 42176,
+  camera tokens 3700/3701.
+- ON: `local/jungle-slot-copy-on-a1-*`, run `20261014-012945-888`, PID 14232,
+  camera tokens 3720/3721.
+
+Audit found one shared launcher limitation: `scripts/run.ps1` enables
+`HAZE_BOOT_REPORT` unconditionally in these captures (also in the earlier
+diagnostic). That background thread prints guest registers and flushes stdout
+and stderr every five seconds. Both sides retain this identical condition;
+neither is a fully logging-free release-like measurement. No timing evidence
+here establishes the reporter's cost. The runner now makes it explicit through
+`-BootReport`, clears inherited enablement by default and records the effective
+choice. This launcher change has not yet been measured live.
+
+The next copy-specific evidence should measure the original/native operation
+cost directly or use a repeatable same-state comparison before another
+promotion attempt. Merely repeating noisy whole-game runs cannot establish
+which operation caused the difference. The larger unresolved target remains
+main-thread command production/job completion and the inconsistent frame tail;
+the recorded recycle cost is too small to explain that tail by itself.
