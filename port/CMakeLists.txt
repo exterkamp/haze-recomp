@@ -178,6 +178,14 @@ add_subdirectory("${PS3RECOMP_DIR}" "${CMAKE_BINARY_DIR}/ps3recomp_sdk"
                  EXCLUDE_FROM_ALL)
 
 option(HAZE_RSX_PROFILE "Collect native renderer CPU/GPU timing counters" OFF)
+option(HAZE_JOB_DIAGNOSTICS "Collect Haze SPU job timing and trace diagnostics" OFF)
+if(HAZE_RSX_PROFILE OR HAZE_JOB_DIAGNOSTICS)
+    # Keep asynchronous SPU job hooks available without enabling the broader
+    # PPU, queue, and renderer instrumentation used by ProfileRenderer.
+    set_property(SOURCE "${PS3RECOMP_DIR}/runtime/spu/spu_workload.c"
+        DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
+        COMPILE_DEFINITIONS YZ_PERF_PROFILE)
+endif()
 if(HAZE_RSX_PROFILE)
     set_property(SOURCE "${PS3RECOMP_DIR}/runtime/ppu/ppu_loader.cpp"
         "${PS3RECOMP_DIR}/runtime/ppu/ppu_hle.cpp"
@@ -185,8 +193,7 @@ if(HAZE_RSX_PROFILE)
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)
     # PPU sources belong to HazeRecomp in this directory; the SPU and RSX
     # sources belong to the SDK target. Source properties are directory scoped.
-    set_property(SOURCE "${PS3RECOMP_DIR}/runtime/spu/spu_workload.c"
-        "${PS3RECOMP_DIR}/libs/spurs/cellSpursQueue.c"
+    set_property(SOURCE "${PS3RECOMP_DIR}/libs/spurs/cellSpursQueue.c"
         DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)
     set_property(SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c"
@@ -436,7 +443,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${PS3RECOMP_DIR}/libs/codec"
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
-if(HAZE_RSX_PROFILE)
+if(HAZE_RSX_PROFILE OR HAZE_JOB_DIAGNOSTICS)
     set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" main.cpp haze_job_profile.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
     set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" main.cpp haze_job_trace.cpp
