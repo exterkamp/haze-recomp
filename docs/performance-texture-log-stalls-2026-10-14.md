@@ -89,6 +89,44 @@ refresh branches, verifies their messages are absent before the dump, then
 checks event ordering and exact summary totals afterward. Build-script `-Test`
 includes the new regression fixture. A live game run remains a separate check.
 
+## Live replacement validation
+
+Candidate `deferred-texture-logs` builds successfully, SHA-256
+`FAEAF863B41475F3206A5B3E1A7BA0B341F95797223E0BDC23704FA4B4A430CF`,
+122,776,576 bytes. Run `20261014-002346-576`, PID 9756, uses the same private
+fixture/config/cache starting point and diagnostic controls. The settled scene
+is checked before PAD_FILE detach and two 45-second sweeps, tokens 3620/3621.
+
+A saved pre-timing log check finds no full-cache, decode-failure, refresh or
+texture-summary messages. Normal close emits one summary and all **102 queued
+events, without overwrite**: 26 throttled full-cache records and 76 refresh
+records. Complete counters report **18,687 full-cache events, 3,269 refreshes
+and zero decode failures**. The first full-cache record belongs to frame 43920,
+well before the sweeps. The retained event order and counts validate. All 57
+slow-draw records are retained without overwrite and have zero direct texture
+log time; their maximum callback is 16.263 ms, in pipeline preparation. Original
+save hashes match and exit code is zero.
+
+All 7,222 measured intervals: **80.266 FPS / 12.459 ms mean**, 15.844 ms p95,
+18.352 ms p99, 25.356 ms maximum, none above 33.333 ms. Individual windows
+average 80.346 / 80.187 FPS. Pump means: 6.218 ms wait, 4.272 ms FIFO,
+1.877 ms present and 0.091 ms other. Another Haze PID 11976 overlaps, so strict
+isolation fails; no compiler overlaps. Twenty resource samples have a maximum
+5.374-second gap, memory 52.33-52.78%. No owned builds/screenshots/heavy analysis
+overlap measurement. This does not prove an average FPS gain or regression.
+
+The post-close pump ring retains frames 45018-61401 and therefore does not
+cover the first full-cache burst at 43920. Its maximum also includes an earlier
+pre-measurement presentation interval during scene-capture preparation. Do not
+use that ring as a complete, unperturbed startup before/after comparison.
+The established result is removal of synchronous output from these confirmed
+renderer paths, with event data retained; consistently paced frames and the
+remaining producer/command waits are still open.
+
+Evidence prefix: `local/jungle-deferred-texture-logs-a1`, including
+`-before-close.json`, `-deferred-validation.json`, diagnostic reports and failed
+isolation gates. Build/identity records use `local/deferred-texture-logs-*`.
+
 Evidence prefix: `local/jungle-texture-hash-reasons-a1`, including raw draw,
 FIFO/flush, pump/present/camera records; windows and process/resource observations;
 comparison/slow-draw reports; and `-logging-attribution.json` with full callback
