@@ -1,0 +1,78 @@
+# Texture diagnostic output stalls rendering
+
+Tracking: #71, #59 and #32. This capture identifies a concrete synchronous
+logging path; it does not establish the FPS gain from a fix.
+
+## Run and measured windows
+
+Candidate `texture-hash-reasons`, Haze `b671053` / SDK `dabb8b4`, SHA-256
+`E2FE060A3BE06D0343AA1263C616BFFCA4370B2883B07DD161A4431699A2A458`,
+122,775,552 bytes. The two-job build completes before launch; identity and build
+log are retained under `local/texture-hash-reasons-*`.
+
+Muted run `20261014-001154-680`, PID 58396, uses the private real-save jungle
+fixture and copied shader cache, 2560x1440, 8192 shadows, uncapped/VSync off.
+Fixed CPU 13571, GPU pull 2, VP burst 1 and worker reuse 1 are unchanged;
+native job wait, inline read/coherency, bulk fill and milestones are off.
+Deferred slow-renderer diagnostics are enabled. The settled rifle scene is
+checked after Nectar effects end, then PAD_FILE is detached. Two 45-second
+camera sweeps use tokens 3600/3601.
+
+All 7,543 measured intervals are retained: **83.821 FPS / 11.930 ms mean**,
+15.193 ms p95, 17.589 ms p99, 28.351 ms maximum. Neither window has a frame
+above 33.333 ms. Individual windows average 83.940 and 83.703 FPS. Mean pump
+scopes are 6.060 ms wait, 3.945 ms FIFO, 1.841 ms present and 0.084 ms other.
+
+Another Haze PID 55012 overlaps, so strict isolation fails. No compiler overlaps;
+20 resource samples have a 5.343-second maximum gap, memory 52.38-52.78%.
+No owned compile, screenshot or heavy analysis runs during timing. Added clocks
+and host/scene variation preclude a causal FPS comparison. The game exits
+normally and original save hashes match.
+
+## Large pre-window stalls are diagnostic prints
+
+All 63 slow callbacks are retained without overwrite; the new schema and nested
+partitions validate. None fall within the two settled measurement windows.
+The records before measurement show these cache-miss calls:
+
+| Callback / renderer frame | Texture call ms | Direct diagnostic log ms | Hash / decode ms | Containing pump frame / total ms |
+| --- | ---: | ---: | ---: | --- |
+| 3229062 / 42992 | 382.5533 | 382.5168 | 0.0054 / 0.0114 | 42990 / 397.8248 |
+| 3222021 / 42975 | 173.9171 | 173.8240 | 0.0214 / 0.0448 | 42973 / 189.1459 |
+| 3222348 / 42976 | 54.8819 | 54.8524 | 0.0035 / 0.0059 | 42974 / 85.1404 |
+
+All three are successful decodes on a full texture cache. The corresponding
+source branch prints `[texture-cache] FULL cap=4096 lru-evictions=...` via
+`fprintf(stderr, ...)`. The log includes the first 16 full-cache events and
+subsequent powers of two. Whole-callback raw thread-cycle deltas are only
+488,800 / 817,800 / 380,230; they are not CPU milliseconds. The exact blocking
+mechanism (shared CRT stream lock, output backpressure, scheduling, or sink)
+is not identified, but the measured intervals are inside synchronous output
+on the renderer. No decoding or hashing replacement can eliminate this call.
+
+QPC containment, rather than equal frame counters, links these callbacks to
+pump intervals. Their FIFO scopes are 387.1657 / 179.9583 / 76.5745 ms. Frame
+42974 contains further direct-log intervals of 6.1962, 5.3569 and 5.2947 ms.
+These are real pre-window hitches, not excluded bad frames from the settled
+benchmark. Resource observations bracket the sweeps, not these earlier events.
+
+## Hash recurrence and next action
+
+A separate pre-window cache hit at renderer frame 49738 takes 4.1712 ms in the
+hash scope, with 363,310 valid raw hash thread cycles. Its skip rejection mask
+is exactly 8: write tracking and the prior baseline are valid, hash kinds match,
+and the page stamp changed. Thus this full check follows tracked writes rather
+than a missing baseline or disabled tracker. It does not prove 4 ms of hash CPU
+computation; no hash optimization is promoted from this observation.
+
+The next implementation defers routine texture cache/refresh/decode-failure
+diagnostic records to shutdown with bounded storage and explicit overflow,
+preserving counters and event data without synchronous formatting or output
+from texture binding. Audit/race modes remain explicit diagnostics. Validation
+must include exact-source recording/flush checks and a real checkpoint run.
+
+Evidence prefix: `local/jungle-texture-hash-reasons-a1`, including raw draw,
+FIFO/flush, pump/present/camera records; windows and process/resource observations;
+comparison/slow-draw reports; and `-logging-attribution.json` with full callback
+records and QPC-containing pump intervals. No assets or generated code are
+committed.
