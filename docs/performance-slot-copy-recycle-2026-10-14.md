@@ -120,10 +120,10 @@ sweeps after the tutorial effects settle. Recycle/detailed-renderer/stack traces
 are off, diagnostic input is detached, and every present interval is retained.
 The run order is OFF then ON; simulation/NPC state is not replayed exactly.
 
-| Native slot copy | Frames | FPS | Mean ms | p95 ms | p99 ms | Worst ms |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| OFF | 8,598 | 95.559 | 10.465 | 13.154 | 15.097 | 22.454 |
-| ON | 7,815 | 86.861 | 11.513 | 14.591 | 16.584 | 22.853 |
+| Native slot copy | Frames | FPS | Mean ms | Median ms | p95 ms | p99 ms | Worst ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| OFF | 8,598 | 95.559 | 10.465 | 10.206 | 13.154 | 15.097 | 22.454 |
+| ON | 7,815 | 86.861 | 11.513 | 11.289 | 14.591 | 16.584 | 22.853 |
 
 There are no frames above 33.333 ms in either pair of windows. Copy ON's mean
 is **1.048 ms higher**, not an improvement. The shutdown snapshot confirms

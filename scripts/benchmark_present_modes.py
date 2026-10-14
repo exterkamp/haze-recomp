@@ -269,6 +269,7 @@ def report(args):
             first_frame=selected[0][1]['guest_frame'], last_frame=selected[-1][1]['guest_frame'],
             fps=1000 / statistics.mean(intervals),
             frame_ms=dict(mean=statistics.mean(intervals), min=min(intervals),
+                          p50=statistics.median(intervals),
                           p95=percentile(intervals, .95), p99=percentile(intervals, .99), max=max(intervals)),
             frames_over_33_333_ms=sum(value > 1000 / 30 for value in intervals),
             frames_over_50_ms=sum(value > 50 for value in intervals)))

@@ -185,10 +185,10 @@ The two 20-second windows use camera tokens 3780/3781:
 - `14564727252796..14564927256016`
 - `14564977267051..14565177270187`
 
-| Instrumented policy | Frames | FPS | Mean ms | p95 ms | p99 ms | Worst ms |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Original delay | 3,684 | 92.154 | 10.851 | 13.721 | 15.745 | 20.245 |
-| Early completion | 3,817 | 95.472 | 10.474 | 13.207 | 15.455 | 23.449 |
+| Instrumented policy | Frames | FPS | Mean ms | Median ms | p95 ms | p99 ms | Worst ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Original delay | 3,684 | 92.154 | 10.851 | 10.608 | 13.721 | 15.745 | 20.245 |
+| Early completion | 3,817 | 95.472 | 10.474 | 10.180 | 13.207 | 15.455 | 23.449 |
 
 All frames are retained; neither run has a frame over 33.333 ms. Mean frame
 time is 0.377 ms lower with early completion, but the worst frame is higher.
