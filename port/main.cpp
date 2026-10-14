@@ -676,6 +676,9 @@ int main(int argc, char** argv)
         {"HAZE_SPU_IDLE_WAIT", "1"},
         {"SPU_FLOAT_NATIVE", "1"},
         {"SPU_WORKER_REUSE", "1"},
+        {"SPU_TASKSET_WAKE", "1"},
+        {"RSX_GPU_VERTEX_PULL", "2"},
+        {"RSX_VP_BURST", "1"},
         {"RSX_PROFILE_LIGHT", "1"},
     };
     for (const auto& setting : native_defaults)

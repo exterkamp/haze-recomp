@@ -336,3 +336,21 @@ do not count the first attempt as a successful load. The owned window then
 closed normally: `boot-result.json` records `timed_out=false`, `exit_code=0`
 at `2026-10-14T04:41:02.9440965Z`. No performance claim is derived from this
 correctness run.
+
+### Wake-enabled reload and orderly exit
+
+Fresh muted ON run `20261014-044115-692` (PID 43464), prefix
+`local/jungle-taskset-wake-reload-on-c3-*`, verifies startup
+`enabled=1 requested=1 event=1`. Captures show initial jungle gameplay
+(`requested_077176.ppm`), Quit confirmation (`094722`), main menu after teardown
+(`105656`), Continue confirmation (`134306`), reloaded jungle (`169514`), and
+responsive pause menu after reload (`172752`). Stdout records Shutdown/Join
+followed by creation of taskset `0x014E1600` at the same address. The same four
+queue-detach warnings occur, as in the polling control. This validates the
+observed taskset reuse flow; it is not a proof of every finalize race.
+
+The owned window closed normally before the deadline:
+`timed_out=false`, `exit_code=0`, timestamp `2026-10-14T04:50:44.6505691Z`.
+The earlier ON timeout remains retained above. These correctness runs add no
+new frame-time measurements. Broader squad progression and testing after
+integration with current main remain outstanding for the checkpoint PR.

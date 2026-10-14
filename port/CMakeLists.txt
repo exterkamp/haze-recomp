@@ -143,6 +143,7 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PRODUCER_PROFILE_PATCHED}")
     list(APPEND RECOMP_SOURCES "${HAZE_SAVE_PATCHED}")
     set_property(SOURCE "${HAZE_SAVE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    set(HAZE_MAIN_LOOP_PATCHED "${HAZE_SAVE_PATCHED}")
     if(WIN32)
         set(HAZE_MOVIE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_movie/ppu_recomp_003.cpp")
         add_custom_command(OUTPUT "${HAZE_MOVIE_PATCHED}"
@@ -153,6 +154,7 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
         list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_SAVE_PATCHED}")
         list(APPEND RECOMP_SOURCES "${HAZE_MOVIE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_movie_guest.cpp")
         set_property(SOURCE "${HAZE_MOVIE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+        set(HAZE_MAIN_LOOP_PATCHED "${HAZE_MOVIE_PATCHED}")
     endif()
 
 endif()
@@ -582,9 +584,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 if(HAZE_RSX_PROFILE OR HAZE_JOB_DIAGNOSTICS)
-    set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" main.cpp haze_job_profile.cpp
+    set_property(SOURCE "${HAZE_MAIN_LOOP_PATCHED}" main.cpp haze_job_profile.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
-    set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" main.cpp haze_job_trace.cpp
+    set_property(SOURCE "${HAZE_MAIN_LOOP_PATCHED}" main.cpp haze_job_trace.cpp
         haze_job0_capture.cpp "${HAZE_JOB0_PATCHED}"
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_TRACE)
 endif()
