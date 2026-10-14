@@ -318,6 +318,39 @@ def analyze(path: Path, qpc_begin: int | None = None, qpc_end: int | None = None
     call_groups.sort(key=lambda g: g["window_inclusive_wall_ms"], reverse=True)
     worst_scopes.sort(key=lambda s: s["window_ms"], reverse=True)
 
+    # Include nested dispatcher calls without folding their inclusive time
+    # into root totals. Parent function identity separates identical targets
+    # reached from different enclosing phases.
+    nested_groups = {}
+    for row in rows:
+        if row["kind"] != 1 or not row["completed"] or not row["qpc_valid"]:
+            continue
+        lo, hi = clip(row["qpc_begin"], row["qpc_end"])
+        if hi <= lo:
+            continue
+        parent = by_id.get(row["parent_id"])
+        parent_ea = (parent["guest_ea"] if parent["kind"] == 0 else parent["callee_ea"]) if parent else None
+        key = (parent_ea, row["callsite_lr"], row["callee_ea"])
+        group = nested_groups.setdefault(key, {
+            "parent_function_ea": parent_ea, "callsite_lr": row["callsite_lr"],
+            "callee_ea": row["callee_ea"], "calls": 0,
+            "window_inclusive_wall_ms": 0.0, "whole_scope_wall_ms": [],
+            "cycles_delta_raw_whole_scope_sum": 0, "cycles_valid_calls": 0,
+        })
+        group["calls"] += 1
+        group["window_inclusive_wall_ms"] += (hi-lo) * scale
+        group["whole_scope_wall_ms"].append((row["qpc_end"]-row["qpc_begin"]) * scale)
+        if row["cycles_valid"]:
+            group["cycles_valid_calls"] += 1
+            group["cycles_delta_raw_whole_scope_sum"] += row["cycles_delta"]
+    for group in nested_groups.values():
+        values = group.pop("whole_scope_wall_ms")
+        group["whole_scope_distribution_ms"] = {
+            "mean": sum(values)/len(values), "p95": _percentile(values, .95),
+            "p99": _percentile(values, .99), "max": max(values),
+        }
+    all_call_groups = sorted(nested_groups.values(), key=lambda g: g["window_inclusive_wall_ms"], reverse=True)
+
     pump_report = None
     if pump_path is not None:
         pumps = _read_pump(Path(pump_path), frequency)
@@ -400,6 +433,8 @@ def analyze(path: Path, qpc_begin: int | None = None, qpc_end: int | None = None
                      "max": max((r["window_ms"] for r in frame_rows), default=None)},
                   "per_frame": sorted(frame_rows, key=lambda r: r["window_ms"], reverse=True)[:50]},
         "direct_calls_grouped_by_lr_callee": call_groups,
+        "all_calls_grouped_by_parent_lr_callee": all_call_groups,
+        "all_calls_note": "Inclusive nested groups overlap: never sum them as frame cost. Cycle deltas and distribution samples cover whole scopes even at clipped window boundaries.",
         "worst_scopes": worst_scopes[:50],
         "orphan_calls": {"count": len(orphans),
                          "ids": [r["id"] for r in orphans[:50]],

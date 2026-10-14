@@ -110,6 +110,27 @@ class ProducerProfileAnalyzerTests(unittest.TestCase):
         self.assertEqual(result["pump_qpc_overlap"]["matched_pump_intervals"], 2)
         self.assertAlmostEqual(result["pump_qpc_overlap"]["root_qpc_union_ms"], .1)
 
+    def test_nested_targets_are_partitioned_by_parent_without_changing_root_cost(self):
+        path = self.root / "targets.csv"
+        rows = [root_row(1, 100, 400),
+                call_row(2, 1, 120, 220, callee=0x006869F0),
+                call_row(3, 2, 140, 200, lr=0x00686AC8, callee=0x00123450, cycles=25),
+                call_row(4, 1, 240, 360, callee=0x00697C70),
+                call_row(5, 4, 250, 350, lr=0x00686AC8, callee=0x00123450, cycles=55)]
+        make_capture(path, rows, dump_qpc=500)
+        result = analyzer.analyze(path, 160, 300)
+        groups = [g for g in result["all_calls_grouped_by_parent_lr_callee"]
+                  if g["callee_ea"] == 0x00123450]
+        self.assertEqual(len(groups), 2)
+        by_parent = {g["parent_function_ea"]: g for g in groups}
+        first = by_parent[0x006869F0]
+        self.assertAlmostEqual(first["window_inclusive_wall_ms"], .04)
+        self.assertAlmostEqual(first["whole_scope_distribution_ms"]["mean"], .06)
+        self.assertEqual(first["cycles_delta_raw_whole_scope_sum"], 25)
+        self.assertAlmostEqual(by_parent[0x00697C70]["window_inclusive_wall_ms"], .05)
+        self.assertAlmostEqual(result["roots"]["inclusive_sum_ms"], .14)
+        self.assertAlmostEqual(result["roots"]["direct_child_union_ms_no_nested_double_count"], .12)
+
     def test_nested_frame_is_not_summed_as_an_independent_root(self):
         path = self.root / "nested-frames.csv"
         rows = [root_row(1, 100, 300), root_row(2, 150, 250, parent=1),
