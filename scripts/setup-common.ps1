@@ -1,4 +1,40 @@
 $ErrorActionPreference = 'Stop'
+function Receive-HazeDownload([string]$Url, [string]$Sha256, [string]$Destination) {
+    if ($Sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid download checksum.' }
+    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile "$Destination.partial" -TimeoutSec 600
+    if ((Get-FileHash -LiteralPath "$Destination.partial" -Algorithm SHA256).Hash -ne $Sha256) {
+        throw 'Setup download checksum mismatch. The downloaded file was not used.'
+    }
+    Move-Item -LiteralPath "$Destination.partial" -Destination $Destination
+}
+function Test-HazeSystemRuntime([version]$Minimum) {
+    foreach ($name in @('msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
+        $file = Join-Path ([Environment]::SystemDirectory) $name
+        if (-not (Test-Path -LiteralPath $file)) { return $false }
+        $version = (Get-Item -LiteralPath $file).VersionInfo.FileVersion
+        if ([version]$version -lt $Minimum) { return $false }
+    }
+    return $true
+}
+function Install-HazeSystemRuntime([string]$LockFile, [string]$Directory) {
+    $runtime = Get-Content -LiteralPath $LockFile -Raw | ConvertFrom-Json
+    if (Test-HazeSystemRuntime ([version]$runtime.version)) { return }
+    Write-Output 'Installing the Microsoft Visual C++ runtime (Windows may ask for administrator approval)...'
+    $installer = Join-Path $Directory 'VC_redist.x64.exe'
+    Receive-HazeDownload $runtime.url $runtime.sha256 $installer
+    $signature = Get-AuthenticodeSignature -LiteralPath $installer
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        throw 'The Microsoft runtime download has an invalid publisher signature.'
+    }
+    $process = Start-Process -FilePath $installer -ArgumentList '/install /quiet /norestart' -Verb RunAs -WindowStyle Hidden -PassThru
+    $handle = $process.Handle
+    try {
+        if (-not $process.WaitForExit(600000)) { throw 'The Microsoft runtime installer has not completed. Finish it, then retry Haze installation.' }
+        $process.WaitForExit()
+        if ($process.ExitCode -notin @(0,3010,1638)) { throw "Microsoft runtime installation failed ($($process.ExitCode))." }
+    } finally { $process.Dispose() }
+    if (-not (Test-HazeSystemRuntime ([version]$runtime.version))) { throw 'Microsoft runtime files are not ready. Restart Windows, then retry Haze installation.' }
+}
 function Read-HazeSfo([string]$Path) {
     $data = [IO.File]::ReadAllBytes($Path)
     if ($data.Length -lt 20 -or [BitConverter]::ToUInt32($data, 0) -ne 0x46535000) {

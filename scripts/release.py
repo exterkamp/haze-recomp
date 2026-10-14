@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+TOOLING = ROOT
 WIX = "http://wixtoolset.org/schemas/v4/wxs"
 UPGRADE_CODE = "6F7B431E-615D-4B96-AD16-8CE45E3B467B"
 
@@ -51,13 +52,22 @@ def wix_source(stage: Path, output: Path, release_version: str) -> None:
                    InstallerVersion="500", Compressed="yes")
     node(package, "MajorUpgrade", DowngradeErrorMessage="A newer Haze Recomp is already installed.")
     node(package, "MediaTemplate", EmbedCab="yes")
+    saved = node(package, "Property", Id="SAVEDINSTALLFOLDER")
+    node(saved, "RegistrySearch", Id="SavedInstallFolder", Root="HKCU",
+         Key="Software\\HazeRecomp", Name="InstallFolder", Type="raw")
+    node(package, "SetProperty", Id="INSTALLFOLDER", Value="[SAVEDINSTALLFOLDER]",
+                    Before="CostInitialize", Sequence="both", Condition="SAVEDINSTALLFOLDER AND NOT INSTALLFOLDER")
     local = node(package, "StandardDirectory", Id="LocalAppDataFolder")
     programs = node(local, "Directory", Id="HazePrograms", Name="Programs")
     install = node(programs, "Directory", Id="INSTALLFOLDER", Name="Haze Recomp")
     feature = node(package, "Feature", Id="Main", Title="Haze Recomp", Level="1")
     directories = {".": install}
     for relative in inventory(stage):
-        path = Path(relative)
+        # MSI owns defaults; the bootstrapper creates user settings only when
+        # absent. Permanent MSI components retain machine-wide location state
+        # and can skip settings after uninstall/reinstall to another directory.
+        installed_relative = 'defaults/' + relative if relative.startswith('config/') else relative
+        path = Path(installed_relative)
         parent = Path()
         for part in path.parts[:-1]:
             previous = parent.as_posix()
@@ -66,14 +76,10 @@ def wix_source(stage: Path, output: Path, release_version: str) -> None:
             if key not in directories:
                 ident = "D" + hashlib.sha256(key.encode()).hexdigest()[:24]
                 directories[key] = node(directories[previous], "Directory", Id=ident, Name=part)
-        ident = hashlib.sha256(relative.encode()).hexdigest()[:24]
-        attrs = {"Id": "C" + ident, "Guid": str(uuid.uuid5(uuid.UUID(UPGRADE_CODE), relative))}
-        # Settings survive major upgrades, repair and uninstall. User-created
-        # saves, caches and launcher.ini are never installer-owned files.
-        if relative.startswith("config/"):
-            attrs.update(Permanent="yes", NeverOverwrite="yes")
+        ident = hashlib.sha256(installed_relative.encode()).hexdigest()[:24]
+        attrs = {"Id": "C" + ident, "Guid": str(uuid.uuid5(uuid.UUID(UPGRADE_CODE), installed_relative))}
         component = node(directories[parent.as_posix()], "Component", **attrs)
-        node(component, "File", Id="F" + ident, Source=str((stage / path).resolve()), Name=path.name)
+        node(component, "File", Id="F" + ident, Source=str((stage / relative).resolve()), Name=path.name)
         node(component, "RegistryValue", Root="HKCU", Key="Software\\HazeRecomp\\Components",
              Name=ident, Value=release_version, Type="string", KeyPath="yes")
         node(feature, "ComponentRef", Id="C" + ident)
@@ -81,6 +87,7 @@ def wix_source(stage: Path, output: Path, release_version: str) -> None:
     component = node(menu, "Component", Id="StartMenu", Guid="*")
     node(component, "Shortcut", Id="Launch", Name="Haze Recomp", Target="[INSTALLFOLDER]HazeLauncher.exe", WorkingDirectory="INSTALLFOLDER")
     node(component, "RegistryValue", Root="HKCU", Key="Software\\HazeRecomp", Name="Installed", Value="1", Type="integer", KeyPath="yes")
+    node(component, "RegistryValue", Root="HKCU", Key="Software\\HazeRecomp", Name="InstallFolder", Value="[INSTALLFOLDER]", Type="string")
     node(feature, "ComponentRef", Id="StartMenu")
     ET.indent(tree)
     ET.ElementTree(tree).write(output, encoding="utf-8", xml_declaration=True)
@@ -104,7 +111,7 @@ def stage_package(runtime: Path, tools: Path, licenses: Path, notes: Path, outpu
         raise ValueError("Runtime inputs changed since dependency staging")
     lock = json.loads((ROOT / "config/release-tools.json").read_text())
     recorded = json.loads((tools / "files.json").read_text())
-    for name in lock:
+    for name in ('7zip',):
         if inventory(tools / name) != recorded[name]:
             raise ValueError(f"Bundled {name} is modified; prepare a pristine tools directory")
     if json.loads((tools / "release-tools.json").read_text()) != lock:
@@ -121,27 +128,15 @@ def stage_package(runtime: Path, tools: Path, licenses: Path, notes: Path, outpu
     stage.mkdir(parents=True)
     for name in runtime_files:
         shutil.copy2(runtime / name, stage / name)
-    for name in ("rpcs3", "7zip"):
-        shutil.copytree(tools / name, stage / "tools" / name)
-    # Setup runs RPCS3 from a private copy with its own working directory. CRT
-    # DLLs beside the launcher would not satisfy that helper's loader search.
-    for name in runtime_files:
-        if name.lower().endswith('.dll') and name.lower().startswith(('msvcp', 'vcruntime', 'concrt', 'vccorlib')):
-            shutil.copy2(runtime / name, stage / "tools/rpcs3" / name)
-    for name in ("release-tools.json", "firmware.json"):
-        shutil.copy2(ROOT / "config" / name, stage / "tools" / name)
     shutil.copytree(licenses, stage / "licenses")
     shutil.copytree(ROOT / "assets/input-prompts", stage / "assets/input-prompts")
     (stage / "config").mkdir()
     for name in ("input.ini", "graphics.ini"):
         shutil.copy2(ROOT / "config" / name, stage / "config" / name)
-    (stage / "scripts").mkdir()
-    for name in ("setup.ps1", "setup-common.ps1"):
-        shutil.copy2(ROOT / "scripts" / name, stage / "scripts" / name)
-    for name in ("Setup.cmd", "LICENSE", "VERSION"):
+    for name in ("LICENSE", "VERSION"):
         shutil.copy2(ROOT / name, stage / name)
     shutil.copy2(notes, stage / "RELEASE-NOTES.txt")
-    shutil.copy2(ROOT / "docs/installing.md", stage / "INSTALLING.txt")
+    shutil.copy2(TOOLING / "docs/installing.md", stage / "INSTALLING.txt")
     (stage / "manifest.json").write_text(json.dumps({"version": release_version, "commit": commit,
         "files": inventory(stage)}, indent=2) + "\n", encoding="utf-8")
     return stage
@@ -166,8 +161,10 @@ def archive(stage: Path, output: Path) -> None:
 
 
 def main() -> None:
+    global ROOT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify", type=Path)
+    parser.add_argument("--project-root", type=Path, default=ROOT)
     parser.add_argument("--runtime", type=Path)
     parser.add_argument("--tools", type=Path)
     parser.add_argument("--licenses", type=Path)
@@ -175,6 +172,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--wix", type=Path)
     args = parser.parse_args()
+    ROOT = args.project_root.resolve()
     if args.verify:
         verify(args.verify)
         return
@@ -187,7 +185,9 @@ def main() -> None:
     subprocess.run([str(args.wix.resolve()), "build", "-arch", "x64", str(wxs), "-o", str(msi)], check=True)
     zipped = args.output / f"{stage.name}.zip"
     archive(stage, zipped)
-    (args.output / "SHA256SUMS.txt").write_text("".join(f"{digest(p)}  {p.name}\n" for p in (msi, zipped)), encoding="ascii")
+    from installer import build_installer
+    setup = build_installer(msi, args.tools, args.output, version())
+    (args.output / "SHA256SUMS.txt").write_text("".join(f"{digest(p)}  {p.name}\n" for p in (setup, msi, zipped)), encoding="ascii")
     print(f"Release candidate: {args.output}. Complete the acceptance gates before publishing.")
 
 

@@ -4,11 +4,10 @@ Experimental Windows port of **Haze** for PS3, built with
 [ps3recomp](https://github.com/sp00nznet/ps3recomp). Targets the USA disc
 **BLUS30094**, disc version **01.02**, application version **01.00**.
 
-Release tooling supports a per-user Windows MSI and portable ZIP, first-run ISO
-preparation, and a verified firmware download from Sony. See
+The Windows installer prepares your ISO, downloads verified firmware from Sony,
+and installs a ready-to-play launcher. It uses a per-user MSI internally. See
 [installation and upgrades](docs/installing.md) and the
-[release process and gates](docs/releasing.md). Public release approval and
-clean-Windows acceptance remain separate from building these packages.
+[automated release process](docs/releasing.md).
 
 Menus, opening-scene gameplay, audio output, and checkpoint saves have been
 tested. Keyboard/mouse and SDL controller support are implemented. Performance,
@@ -16,7 +15,39 @@ rendering, and campaign compatibility are still in development. Full campaign
 completion is not validated; online co-op is not implemented. Native PAMF movies
 play with synchronized video and audio; the current confirm binding skips them.
 
-## Build and run
+## Install
+
+Run `HazeRecomp-<version>-Setup.exe` from [Releases](https://github.com/zdiemer/haze-recomp/releases),
+choose your ISO, and click **Install**. The installer downloads the required
+RPCS3 helper and Sony firmware, prepares the game, and installs the launcher.
+When it finishes, click **Play Haze**. Subsequent launches use **Haze Recomp**
+in the Start menu. No separate tools or development environment are needed.
+
+![Haze installer: choose the ISO and installation folder](docs/images/installer.png)
+
+After the installer prepares the game, the launcher is ready to use:
+
+![Haze installer: installation complete with Play Haze](docs/images/installer-complete.png)
+
+The tested disc-decrypted image is `Haze (USA) (En,Fr,Es).iso`
+(8,498,184,192 bytes), BLUS30094, disc version 01.02 / application version 01.00.
+Its **SHA-256** is:
+
+```text
+e778fff687b4a122146d23160fe1fefdff14dddb5d5709b257cff76832dc2520
+```
+
+Check your image with PowerShell:
+
+```powershell
+Get-FileHash -LiteralPath 'D:\PS3\Haze (USA) (En,Fr,Es).iso' -Algorithm SHA256
+```
+
+This identifies the tested ISO byte for byte. Setup also checks the disc metadata
+and executable hashes; other regions, encrypted raw dumps and updated executables
+are unsupported. Supply your own disc image; none is included in releases.
+
+## Build from source
 
 Requires Windows x64, Visual Studio C++ tools with the Windows SDK, Clang,
 CMake and Ninja components, Python 3.11+, Git, and 7-Zip. Supply your own

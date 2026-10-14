@@ -1,6 +1,8 @@
-param([string]$Iso, [string]$Firmware, [string]$DataDirectory, [switch]$DownloadFirmware, [switch]$NoGui)
+param([string]$Iso, [string]$Firmware, [string]$DataDirectory, [string]$InstallDirectory, [switch]$DownloadFirmware, [switch]$NoGui)
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $root = Split-Path $PSScriptRoot -Parent
+$install = if ($InstallDirectory) { (Resolve-Path -LiteralPath $InstallDirectory).Path } else { $root }
 . "$PSScriptRoot/setup-common.ps1"
 function Select-Input([string]$Title, [string]$Filter) {
     if ($NoGui) { throw "Missing input: $Title" }
@@ -15,7 +17,7 @@ function Select-Input([string]$Title, [string]$Filter) {
 try {
     if (-not $Iso) { $Iso = Select-Input 'Choose the decrypted Haze USA disc ISO' 'PS3 disc ISO (*.iso)|*.iso' }
     $Iso = (Resolve-Path -LiteralPath $Iso).Path
-    if (-not $DataDirectory) { $DataDirectory = Join-Path $root 'local/user-data' }
+    if (-not $DataDirectory) { $DataDirectory = Join-Path $install 'local/user-data' }
     $data = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($DataDirectory)
     if ($data -match '[\r\n]') { throw 'The data path must not contain a newline.' }
     $attempt = Join-Path $data ('setup-' + [Guid]::NewGuid().ToString('N'))
@@ -45,8 +47,17 @@ try {
     $tools = Join-Path $root 'tools'
     $sevenZip = Join-Path $tools '7zip/7z.exe'
     $rpcs3 = Join-Path $attempt 'rpcs3'
-    if (-not (Test-Path -LiteralPath $sevenZip) -or -not (Test-Path -LiteralPath "$tools/rpcs3/rpcs3.exe")) { throw 'Bundled setup tools are missing. Re-extract the complete release ZIP.' }
-    Copy-Item -LiteralPath "$tools/rpcs3" -Destination $rpcs3 -Recurse
+    if (-not (Test-Path -LiteralPath $sevenZip)) { throw 'Bundled 7-Zip is missing. Reinstall or re-extract the complete release ZIP.' }
+    Write-Output 'Downloading the verified setup helper from RPCS3...'
+    $helper = (Get-Content "$tools/release-tools.json" -Raw | ConvertFrom-Json).rpcs3
+    $helperArchive = Join-Path $attempt 'rpcs3.7z'
+    Receive-HazeDownload $helper.url $helper.sha256 $helperArchive
+    Invoke-HazeHelper $sevenZip @('x',$helperArchive,"-o$rpcs3",'-y','-bsp0') $attempt "$attempt/helper-extract"
+    if (-not (Test-Path -LiteralPath "$rpcs3/rpcs3.exe")) { throw 'RPCS3 download did not contain its executable.' }
+    # RPCS3 explicitly rejects app-local MSVC DLLs. Let it use the supported
+    # system runtime, installing Microsoft's signed redistributable if needed.
+    Install-HazeSystemRuntime "$tools/vc-runtime.json" $attempt
+    $env:RPCS3_CONFIG_DIR = "$rpcs3/portable"
     # Override inherited RPCS3_CONFIG_DIR and any installed RPCS3 configuration.
     New-Item -ItemType Directory -Path "$rpcs3/portable/log" -Force | Out-Null
     $flash = "$rpcs3/portable/dev_flash"
@@ -81,7 +92,7 @@ public static class HazeSetupIni {
     public static extern bool WritePrivateProfileString(string section, string key, string value, string path);
 }
 '@
-    $config = Join-Path $root 'launcher.ini'
+    $config = Join-Path $install 'launcher.ini'
     $pending = "$config.setup-$([Guid]::NewGuid().ToString('N'))"
     $contents = if (Test-Path -LiteralPath $config) { [IO.File]::ReadAllText($config, [Text.Encoding]::UTF8) } else { "[Launcher]`r`n" }
     [IO.File]::WriteAllText($pending, $contents, [Text.Encoding]::Unicode)
