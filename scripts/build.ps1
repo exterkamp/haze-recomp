@@ -472,6 +472,10 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Taskset readiness watcher test failed.' }
     & $python "$sdk/runtime/spu/tests/test_taskset_wake_integration.py" --compiler $clang
     if ($LASTEXITCODE -ne 0) { throw 'Taskset wake policy/dispatch integration test failed.' }
+    & $python "$sdk/runtime/spu/tests/test_taskset_scan_profile.py" --compiler $clang --output-dir "$root/local/taskset-scan-fixture"
+    if ($LASTEXITCODE -ne 0) { throw 'Taskset scan profiling regression failed.' }
+    & $python "$root/tests/test_analyze_taskset_scans.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Taskset scan timing validation regression failed.' }
     $drawBatchTest = Join-Path $root 'local/test_draw_batches.exe'
     & $clang /nologo /W0 /O1 "/Fe$drawBatchTest" "/Fo$root/local/test_draw_batches.obj" "$sdk/libs/video/tests/test_draw_batches.c"
     if ($LASTEXITCODE -ne 0) { throw 'Draw-packet storage test compilation failed.' }

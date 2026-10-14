@@ -15,8 +15,8 @@ def synthetic_ninja(renderer, jobs):
     blocks = []
     for source in ('ppu_loader.cpp', 'ppu_hle.cpp'):
         blocks.append(rule('HazeRecomp', source, sdk_defs))
-    for source in ('spu_workload.c', 'cellSpursQueue.c', 'rsx_live_draw.c', 'cellGcmSys.c'):
-        defines = workload_defs if source == 'spu_workload.c' else sdk_defs
+    for source in ('spu_workload.c', 'spu_taskset_dispatch.c', 'cellSpursQueue.c', 'rsx_live_draw.c', 'cellGcmSys.c'):
+        defines = workload_defs if source in ('spu_workload.c', 'spu_taskset_dispatch.c') else sdk_defs
         blocks.append(rule('ps3recomp_runtime', source, defines))
     title_sources = ('main.cpp', 'haze_job_profile.cpp', 'ppu_recomp_003.cpp',
                      'haze_job_trace.cpp', 'haze_job0_capture.cpp',
@@ -27,6 +27,13 @@ def synthetic_ninja(renderer, jobs):
 
 
 class ProfileConfigurationTests(unittest.TestCase):
+    def test_jobs_only_requires_scan_instrumentation(self):
+        ninja = synthetic_ninja(False, True).replace(
+            'spu_taskset_dispatch.c.obj: CXX_COMPILER__ps3recomp_runtime_ spu_taskset_dispatch.c\n  DEFINES = -DYZ_PERF_PROFILE',
+            'spu_taskset_dispatch.c.obj: CXX_COMPILER__ps3recomp_runtime_ spu_taskset_dispatch.c\n  DEFINES = ')
+        with self.assertRaisesRegex(ValueError, 'spu_taskset_dispatch.c'):
+            check_rules(ninja, False, True)
+
     def test_independent_renderer_and_job_gates(self):
         for renderer in (False, True):
             for jobs in (False, True):

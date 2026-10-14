@@ -434,6 +434,9 @@ static DWORD WINAPI frame_clock(LPVOID)
             if (pump_messages() != 0) {
                 haze_input_shutdown();
                 haze_camera_dump_benchmark();
+#ifdef HAZE_JOB_PROFILE
+                spu_taskset_scan_profile_dump();
+#endif
 #ifdef _WIN32
                 haze_movie_shutdown();
                 haze_movie_present_tick();
@@ -467,6 +470,9 @@ static DWORD WINAPI frame_clock(LPVOID)
                 haze_movie_present_tick();
                 haze_input_shutdown();
                 haze_camera_dump_benchmark();
+#ifdef HAZE_JOB_PROFILE
+                spu_taskset_scan_profile_dump();
+#endif
                 const int audio_stopped=haze_audio_stop_output(2000);
                 if (s_rsx_live) {
                     rsx_live_draw_dump_present_samples();

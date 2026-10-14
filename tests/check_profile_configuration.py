@@ -29,6 +29,7 @@ def check_rules(ninja, renderer_enabled, jobs_enabled=False, inline_reads=None):
         'ppu_loader.cpp': 'HazeRecomp',
         'ppu_hle.cpp': 'HazeRecomp',
         'spu_workload.c': 'ps3recomp_runtime',
+        'spu_taskset_dispatch.c': 'ps3recomp_runtime',
         'cellSpursQueue.c': 'ps3recomp_runtime',
         ('haze_video_backend.c' if 'haze_video_backend.c.obj:' in ninja else 'rsx_live_draw.c'): 'ps3recomp_runtime',
         'cellGcmSys.c': 'ps3recomp_runtime',
@@ -43,7 +44,7 @@ def check_rules(ninja, renderer_enabled, jobs_enabled=False, inline_reads=None):
         defines = next((line for line in blocks[0].splitlines()
                         if line.startswith('  DEFINES = ')), '')
         profiled = bool(re.search(r'(?:^|\s)(?:-D|/D)YZ_PERF_PROFILE(?:=\S+)?(?:\s|$)', defines))
-        expected = (renderer_enabled or jobs_enabled) if source == 'spu_workload.c' else renderer_enabled
+        expected = (renderer_enabled or jobs_enabled) if source in ('spu_workload.c', 'spu_taskset_dispatch.c') else renderer_enabled
         if profiled != expected:
             raise ValueError(f'{target}/{source}: profiling flag is {profiled}, expected {expected}')
     print(f'Actual compile rules: renderer={int(renderer_enabled)} jobs={int(jobs_enabled)} verified on SDK sources')

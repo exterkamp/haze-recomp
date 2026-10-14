@@ -247,6 +247,7 @@ if(HAZE_RSX_PROFILE OR HAZE_JOB_DIAGNOSTICS)
     # Keep asynchronous SPU job hooks available without enabling the broader
     # PPU, queue, and renderer instrumentation used by ProfileRenderer.
     set_property(SOURCE "${PS3RECOMP_DIR}/runtime/spu/spu_workload.c"
+        "${PS3RECOMP_DIR}/runtime/spu/spu_taskset_dispatch.c"
         DIRECTORY "${PS3RECOMP_DIR}" APPEND PROPERTY
         COMPILE_DEFINITIONS YZ_PERF_PROFILE)
 endif()
