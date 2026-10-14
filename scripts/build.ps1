@@ -86,6 +86,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native VP consumer FIFO/wrapper/diagnostic boundary tests failed.' }
     & $python "$root/tests/test_fifo_slow_drain.py" --compiler $clang --sdk $sdk --output-dir "$root/build/fifo-slow-drain"
     if ($LASTEXITCODE -ne 0) { throw 'FIFO slow-drain lock/body diagnostic regression failed.' }
+    & $python "$root/tests/test_fifo_recycle_trace.py" --compiler $clang --sdk $sdk --output-dir "$root/build/fifo-recycle-trace"
+    if ($LASTEXITCODE -ne 0) { throw 'FIFO recycle acknowledgement diagnostic regression failed.' }
     & $python "$root/tests/test_rsx_slow_flush.py" --compiler $clang --sdk $sdk --output-dir "$root/build/rsx-slow-flush"
     if ($LASTEXITCODE -ne 0) { throw 'RSX slow-flush phase and failure diagnostic regression failed.' }
     & $python "$root/tests/test_rsx_slow_draw_ordinary.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/rsx-slow-draw-ordinary"
@@ -312,6 +314,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native job wait scope validation failed.' }
     & $python "$root/tests/test_bulk_fill.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/bulk-fill-tests"
     if ($LASTEXITCODE -ne 0) { throw 'Native slot-fill source/boundary differential regression failed.' }
+    & $python "$root/tests/test_slot_copy.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/slot-copy-tests"
+    if ($LASTEXITCODE -ne 0) { throw 'Native slot-copy source/boundary differential regression failed.' }
     & $python "$root/tests/test_vp_packet_oracle.py"
     if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle guard tests failed.' }
     & $python "$root/scripts/extract_vp_packet_oracle.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/vp_packet_reference.inc"

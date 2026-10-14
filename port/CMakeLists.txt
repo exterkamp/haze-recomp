@@ -112,8 +112,16 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
             "${HAZE_VP_UPLOAD_PATCHED}" "${HAZE_JOB_TRACE_PATCHED}"
         DEPENDS "${HAZE_VP_UPLOAD_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_job_dispatch_trace.py"
         VERBATIM)
-    list(APPEND RECOMP_SOURCES "${HAZE_JOB_TRACE_PATCHED}")
-    set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    set(HAZE_SLOT_COPY_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_slot_copy/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_SLOT_COPY_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_slot_copy.py"
+            "${HAZE_JOB_TRACE_PATCHED}" --memmove-source "${RECOMP_DIR}/ppu_recomp_005.cpp"
+            "${HAZE_SLOT_COPY_PATCHED}"
+        DEPENDS "${HAZE_JOB_TRACE_PATCHED}" "${RECOMP_DIR}/ppu_recomp_005.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_slot_copy.py"
+        VERBATIM)
+    list(APPEND RECOMP_SOURCES "${HAZE_SLOT_COPY_PATCHED}")
+    set_property(SOURCE "${HAZE_SLOT_COPY_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
 # Bounded native fill at an audited game boundary; original source stays local
@@ -336,6 +344,7 @@ add_executable(${PROJECT_NAME}
     haze_guest_pacer.cpp
     haze_job_wait.cpp
     haze_bulk_fill.cpp
+    haze_slot_copy.cpp
     haze_job_profile.cpp
     haze_job_trace.cpp
     haze_vp_upload.cpp
@@ -420,9 +429,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 if(HAZE_RSX_PROFILE)
-    set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" main.cpp haze_job_profile.cpp
+    set_property(SOURCE "${HAZE_SLOT_COPY_PATCHED}" main.cpp haze_job_profile.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
-    set_property(SOURCE "${HAZE_JOB_TRACE_PATCHED}" main.cpp haze_job_trace.cpp
+    set_property(SOURCE "${HAZE_SLOT_COPY_PATCHED}" main.cpp haze_job_trace.cpp
         haze_job0_capture.cpp "${HAZE_JOB0_PATCHED}"
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_TRACE)
 endif()

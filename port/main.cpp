@@ -234,6 +234,7 @@ void rsx_null_backend_suppress_present(int);
 uint32_t cellGcmResolveLocated(int, uint32_t);
 uint32_t cellGcmResolveIO(uint32_t);
 void cellGcm_fifo_slow_drain_dump(void);
+void haze_slot_copy_dump_stats(void);
 void cellGcm_vp_burst_dump(void);
 }
 static bool s_rsx_live = false;
@@ -417,6 +418,9 @@ static DWORD WINAPI frame_clock(LPVOID)
                 haze_job_profile_dump();
                 haze_job_trace_dump();
                 haze_job_wait_dump_counts();
+                // Guest threads are still live: these are shutdown snapshots,
+                // not guaranteed final totals after a producer join.
+                haze_slot_copy_dump_stats();
                 haze_job0_capture_dump();
                 if (s_rsx_live) rsx_live_draw_dump_shader_cache();
 #endif
