@@ -94,6 +94,56 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (std::strcmp(mode, "implicit-calls") == 0) {
+        // An implicit call outside any frame must stay completely inert, even
+        // when the output environment variable is present.
+        {
+            haze_producer_profile::call_scope no_parent(0x00686A20, 0x0068EC40);
+            assert(!no_parent.active());
+            assert(qpc_calls == 0 && cycle_calls == 0 && frequency_calls == 0);
+        }
+        {
+            haze_producer_profile::frame_scope root(1, kToc, 0x00680FA0, 99);
+            assert(root.active() && root.id() == 1);
+            {
+                haze_producer_profile::call_scope outer(0x00686A20, 0x0068EC40);
+                assert(outer.active() && outer.id() == 2);
+                assert(outer.generation() == 99);
+                {
+                    haze_producer_profile::call_scope inner(0x00686A44, 0x00684ED8);
+                    assert(inner.active() && inner.id() == 3);
+                    assert(inner.generation() == 99);
+                }
+                {
+                    haze_producer_profile::call_scope sibling(0x00686A50, 0x00684ED8);
+                    assert(sibling.active() && sibling.id() == 4);
+                    assert(sibling.generation() == 99);
+                }
+            }
+            {
+                haze_producer_profile::call_scope restored(0x00686A54, 0x006F0DE0);
+                assert(restored.active() && restored.id() == 5);
+                assert(restored.generation() == 99);
+            }
+        }
+        const auto before_unparented = qpc_calls.load();
+        const auto cycles_before_unparented = cycle_calls.load();
+        {
+            haze_producer_profile::call_scope no_parent(0x00686A68, 0x006F2348);
+            assert(!no_parent.active());
+        }
+        assert(qpc_calls == before_unparented && cycle_calls == cycles_before_unparented);
+        haze_producer_profile::haze_producer_profile_dump();
+        return 0;
+    }
+
+    if (std::strcmp(mode, "no-parent") == 0) {
+        haze_producer_profile::call_scope no_parent(0x00686A20, 0x0068EC40);
+        assert(!no_parent.active());
+        assert(qpc_calls == 0 && cycle_calls == 0 && frequency_calls == 0);
+        return 0;
+    }
+
     if (std::strcmp(mode, "overflow") == 0) {
         for (unsigned i = 0; i < 20; ++i) {
             haze_producer_profile::frame_scope row(1, kToc, 0x680FA0, i);
@@ -233,6 +283,26 @@ class ProducerProfileTests(unittest.TestCase):
             self.assertEqual(row["qpc_valid"], "1")
             self.assertEqual(row["cycles_valid"], "1")
             self.assertGreater(int(row["cycles_delta"]), 0)
+
+    def test_implicit_calls_inherit_active_tls_scope_and_restore_parent(self):
+        metadata, rows = parse_csv(self.run_mode("implicit-calls"))
+        self.assertEqual(metadata["begun"], "5")
+        self.assertEqual(metadata["completed"], "5")
+        self.assertEqual([row["kind"] for row in rows], ["0", "1", "1", "1", "1"])
+        self.assertEqual([row["parent_id"] for row in rows], ["0", "1", "2", "2", "1"])
+        self.assertEqual([row["generation"] for row in rows], ["99"] * 5)
+        self.assertEqual([row["callsite_lr"] for row in rows[1:]], [
+            str(0x00686A20), str(0x00686A44), str(0x00686A50), str(0x00686A54)])
+        self.assertTrue(all(row["completed"] == "1" and row["qpc_valid"] == "1"
+                            for row in rows))
+
+    def test_implicit_call_without_parent_does_not_initialize_profile(self):
+        path = self.out_dir / "producer-profile-no-parent.csv"
+        path.unlink(missing_ok=True)
+        result = subprocess.run([str(self.exe), "no-parent", str(path)], cwd=ROOT,
+            text=True, capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(path.exists())
 
     def test_bounded_ring_reports_overwrites_and_retained_span(self):
         metadata, rows = parse_csv(self.run_mode("overflow"))

@@ -77,6 +77,24 @@ class ProducerProfilePatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "changed"):
             producer_profile.patch(producer_profile.patch(self.source))
 
+    def test_dispatcher_and_dynamic_targets_preserve_calls(self):
+        result = producer_profile.patch(self.source)
+        self.assertEqual(producer_profile.strip_profile(result), self.source)
+        main = producer_profile.function_body(result)
+        nested = producer_profile.function_body(result, producer_profile.DISPATCH_FUNCTION)
+        self.assertEqual(len(producer_profile.call_sites(nested)), 14)
+        self.assertEqual(nested.count("haze_producer_nested_"), 14)
+        self.assertEqual(nested.count("haze_producer_indirect_"), 4)
+        self.assertEqual(main.count("haze_producer_indirect_"), 2)
+        for body, returns in ((main, producer_profile.MAIN_INDIRECT_RETURNS),
+                              (nested, producer_profile.DISPATCH_INDIRECT_RETURNS)):
+            for lr in returns:
+                self.assertIn(f"0x{lr}u, static_cast<std::uint32_t>(ctx->ctr));", body)
+        original_body = producer_profile.function_body(self.source, producer_profile.DISPATCH_FUNCTION)
+        changed = self.source.replace(original_body, original_body.replace("func_0068EC40(ctx)", "func_0068EC41(ctx)"))
+        with self.assertRaisesRegex(ValueError, "dispatcher changed"):
+            producer_profile.patch(changed)
+
 
 if __name__ == "__main__":
     unittest.main()

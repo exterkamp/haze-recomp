@@ -47,6 +47,9 @@ class call_scope final : public scope {
 public:
     call_scope(const scope& parent, std::uint32_t callsite_lr,
         std::uint32_t callee_ea) noexcept;
+    // Attach to the active scope on this thread. If no parent is active, this
+    // constructor is a no-op and does not initialize configuration or clocks.
+    call_scope(std::uint32_t callsite_lr, std::uint32_t callee_ea) noexcept;
 };
 
 // Call once from the normal shutdown path. The snapshot is frozen before file

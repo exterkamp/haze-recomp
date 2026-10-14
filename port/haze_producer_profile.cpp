@@ -18,7 +18,7 @@ namespace {
 #if defined(HAZE_PRODUCER_PROFILE_TEST_CAPACITY)
 constexpr std::uint64_t kCapacity = HAZE_PRODUCER_PROFILE_TEST_CAPACITY;
 #else
-constexpr std::uint64_t kCapacity = 524288;
+constexpr std::uint64_t kCapacity = 1048576;
 #endif
 
 struct record {
@@ -235,6 +235,15 @@ call_scope::call_scope(const scope& parent, std::uint32_t callsite_lr,
     begin(1, &parent, parent.generation(), 0, callsite_lr, callee_ea);
 }
 
+call_scope::call_scope(std::uint32_t callsite_lr,
+    std::uint32_t callee_ea) noexcept {
+    // Do not touch the lazy configuration or query clocks on ordinary calls
+    // that have no active profiled ancestor.
+    if (!g_current_scope || !g_current_scope->active())
+        return;
+    begin(1, nullptr, 0, 0, callsite_lr, callee_ea);
+}
+
 void haze_producer_profile_dump() noexcept {
     const configuration& cfg = config();
     if (!cfg.csv_path)
@@ -350,6 +359,7 @@ void scope::begin(unsigned, const scope*, std::uint64_t, std::uint32_t,
 frame_scope::frame_scope(unsigned, std::uint64_t, std::uint32_t,
     std::uint64_t, const scope*) noexcept {}
 call_scope::call_scope(const scope&, std::uint32_t, std::uint32_t) noexcept {}
+call_scope::call_scope(std::uint32_t, std::uint32_t) noexcept {}
 void haze_producer_profile_dump() noexcept {}
 } // namespace haze_producer_profile
 #endif
