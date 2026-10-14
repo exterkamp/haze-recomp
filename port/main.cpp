@@ -41,12 +41,17 @@ void haze_job_wait_dump_counts();
 static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
                            uint64_t begin, uint64_t end)
 {
-    if (phase < 1 || phase > 9 || !job) return;
-    const uint64_t args[] = {
+    if (phase < 1 || phase > 10 || !job) return;
+    uint64_t args[] = {
         job->job_id, static_cast<uint32_t>(job->image_id) | (uint64_t(job->have_r3) << 32),
         job->args_ea, (uint64_t(job->taskset_ea) << 32) | job->taskid,
         job->r3[0], job->r3[1], job->r3[2], job->r3[3]
     };
+    if (phase == SPU_ASYNC_TRACE_DISPATCH_DISCOVERY) {
+        args[4] = job->dispatch_cause;
+        args[5] = job->claim_qpc;
+        args[6] = args[7] = 0;
+    }
     haze_job_trace_interval(phase + 6, begin, end, args, 8);
 }
 #endif

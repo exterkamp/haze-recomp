@@ -10,7 +10,10 @@ KINDS = {1: 'submit', 2: 'dispatch_including_trampolines', 3: 'transform_kernel'
          4: 'completion_wait', 5: 'transform_handler', 6: 'state_publication',
          7: 'spu_submit_point', 8: 'spu_create_thread', 9: 'spu_setup',
          10: 'spu_execute', 11: 'spu_finish', 12: 'spu_cleanup',
-         13: 'spu_create_failed', 14: 'spu_setup_failed', 15: 'spu_reuse_worker'}
+         13: 'spu_create_failed', 14: 'spu_setup_failed', 15: 'spu_reuse_worker',
+         16: 'spu_dispatch_discovery'}
+
+DISPATCH_CAUSES = {0: 'unknown', 1: 'create', 2: 'task_exit', 3: 'poll'}
 
 
 def union_ticks(intervals):
@@ -67,10 +70,26 @@ def join_async_jobs(events):
         if not job_id or row['kind'] in jobs[job_id]:
             raise ValueError('Invalid or duplicate SDK job phase')
         previous = next(iter(jobs[job_id].values()), None)
-        if previous and any(previous[f'arg{i}'] != row[f'arg{i}'] for i in range(8)):
+        identity_args = 4 if row['kind'] == 16 or (previous and previous['kind'] == 16) else 8
+        if previous and any(previous[f'arg{i}'] != row[f'arg{i}'] for i in range(identity_args)):
             raise ValueError('SDK snapshot identity changed across phases')
         jobs[job_id][row['kind']] = row
     for phases in jobs.values():
+        # Discovery carries cause/claim time instead of R3 in args 4..7.
+        # Validate all ordinary phase snapshots independently, including when
+        # discovery is the first retained event for this job.
+        ordinary = [row for kind, row in phases.items() if kind != 16]
+        if ordinary and any(any(row[f'arg{i}'] != ordinary[0][f'arg{i}'] for i in range(8))
+                            for row in ordinary[1:]):
+            raise ValueError('SDK snapshot identity changed across phases')
+        discovery = phases.get(16)
+        if discovery:
+            if discovery['arg4'] not in DISPATCH_CAUSES or discovery['arg5'] != discovery['begin_qpc'] or discovery['arg6'] or discovery['arg7']:
+                raise ValueError('Invalid SDK dispatch provenance')
+            submit = phases.get(7)
+            if submit and (discovery['end_qpc'] != submit['begin_qpc'] or
+                           discovery['host_tid'] != submit['host_tid']):
+                raise ValueError('SDK discovery/submit endpoint or thread mismatch')
         if 8 in phases and 13 in phases:
             raise ValueError('SDK job reports both successful and failed creation')
         if 15 in phases and 13 in phases:
@@ -197,6 +216,19 @@ def summarize_wait_phases(events, jobs, lo, hi, scale, frames):
             groups[identity] = {'waits': [], **{name: [] for name in phase_names}}
         group = groups[identity]
         a, b = wait['begin_qpc'], wait['end_qpc']
+        discovery = phases.get(16)
+        provenance = group.setdefault('discovery', defaultdict(lambda: {
+            'waits': 0, 'before_claim': [], 'claim_to_submit': []}))
+        cause = DISPATCH_CAUSES[discovery['arg4']] if discovery else 'missing'
+        bucket = provenance[cause]
+        bucket['waits'] += 1
+        if discovery:
+            for name, start, end in (
+                    ('before_claim', submit['begin_qpc'], discovery['begin_qpc']),
+                    ('claim_to_submit', discovery['begin_qpc'], sdk['begin_qpc'])):
+                start, end = max(a, start), min(b, end)
+                if end > start:
+                    bucket[name].append((start, end))
         group['waits'].append((a, b))
         matched_waits[wait['host_tid']].append((a, b))
         segments = (
@@ -230,7 +262,12 @@ def summarize_wait_phases(events, jobs, lo, hi, scale, frames):
                        'job_key': job_key, 'image': image, 'waits': len(group['waits']),
                        'wait_ms_per_frame': union_ticks(group['waits']) * scale / frames,
                        'phase_ms_per_frame': {name: union_ticks(group[name]) * scale / frames
-                                              for name in phase_names}})
+                                              for name in phase_names},
+                       'dispatch_provenance': {
+                           cause: {'waits': bucket['waits'],
+                                   'before_claim_wait_ms_per_frame': union_ticks(bucket['before_claim']) * scale / frames,
+                                   'claim_to_submit_wait_ms_per_frame': union_ticks(bucket['claim_to_submit']) * scale / frames}
+                           for cause, bucket in group['discovery'].items()}})
     return {'note': 'Exact slot address plus latest preceding title submit, observed generation, unique SDK job and state-2 publication. Wall-time overlaps are not CPU time or removable savings. Only fully contained, validated waits are partitioned.',
             'skipped_waits': dict(skipped),
             'groups': sorted(result, key=lambda r: r['wait_ms_per_frame'], reverse=True)}

@@ -53,6 +53,38 @@ class JobTraceAnalysis(unittest.TestCase):
         result = summarize_wait_phases(rows, join_async_jobs(rows), 0, 200, 1, 2)
         self.assertEqual(result['skipped_waits'], {'inconsistent_observed_lifetime': 1})
 
+    def test_dispatch_provenance_partitions_same_job_presubmit_wait(self):
+        rows = self.reused_slot_events()
+        for submit in list(rows):
+            if submit['kind'] != 7:
+                continue
+            discovery = submit.copy()
+            discovery.update(kind=16, begin_qpc=submit['begin_qpc']-5,
+                             arg4=3, arg5=submit['begin_qpc']-5, arg6=0, arg7=0)
+            # Put discovery first to exercise immutable R3 validation later.
+            rows.insert(0, discovery)
+        jobs = join_async_jobs(rows)
+        group, = summarize_wait_phases(rows, jobs, 0, 200, 1, 2)['groups']
+        self.assertEqual(group['dispatch_provenance'], {'poll': {
+            'waits': 2, 'before_claim_wait_ms_per_frame': 2,
+            'claim_to_submit_wait_ms_per_frame': 5}})
+        self.assertEqual(group['phase_ms_per_frame']['before_sdk_submit'], 7)
+        next(r for r in rows if r['kind'] == 9)['arg7'] = 1
+        with self.assertRaisesRegex(ValueError, 'snapshot identity'):
+            join_async_jobs(rows)
+
+    def test_dispatch_provenance_rejects_mismatched_endpoint_and_cause(self):
+        rows = self.reused_slot_events()
+        submit = next(r for r in rows if r['kind'] == 7)
+        discovery = dict(submit, kind=16, begin_qpc=5, arg4=3, arg5=5, arg6=0, arg7=0)
+        rows.append(discovery)
+        for field, value in (('end_qpc', 11), ('host_tid', 7), ('arg4', 99), ('arg5', 4)):
+            previous = discovery[field]
+            discovery[field] = value
+            with self.assertRaises(ValueError):
+                join_async_jobs(rows)
+            discovery[field] = previous
+
     def test_async_thread_can_finish_before_create_returns(self):
         def row(kind, lo, hi, tid):
             return dict(kind=kind, begin_qpc=lo, end_qpc=hi, host_tid=tid,
