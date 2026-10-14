@@ -71,6 +71,24 @@ preserving counters and event data without synchronous formatting or output
 from texture binding. Audit/race modes remain explicit diagnostics. Validation
 must include exact-source recording/flush checks and a real checkpoint run.
 
+## Implemented replacement
+
+Haze `a11df11` pins SDK `f6cba5c`. Routine full-cache, decode-failure and refresh
+messages now append fixed-size records to a 256-event ring. The original
+throttling/count values and event frame, descriptor and slot are preserved;
+aggregate counters remain complete even if old records are overwritten. The
+shutdown summary explicitly reports total, retained and overwritten events.
+Recording does no formatting, clock query, allocation or output. Normal window
+exit and renderer shutdown invoke the one-shot dump. Explicit audit/race
+diagnostics retain their existing behavior.
+
+The extracted actual-source ring/normal-exit-wrapper fixture passes bounded
+overflow, ordering, event identity, no recording-time I/O and duplicate-dump
+checks. The full WARP live-texture suite exercises actual eviction, failure and
+refresh branches, verifies their messages are absent before the dump, then
+checks event ordering and exact summary totals afterward. Build-script `-Test`
+includes the new regression fixture. A live game run remains a separate check.
+
 Evidence prefix: `local/jungle-texture-hash-reasons-a1`, including raw draw,
 FIFO/flush, pump/present/camera records; windows and process/resource observations;
 comparison/slow-draw reports; and `-logging-attribution.json` with full callback
