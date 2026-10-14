@@ -33,6 +33,7 @@
 #include "ppu_recomp.h"
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
+#include "haze_producer_profile.h"
 void haze_job_wait_dump_counts();
 #include "haze_job0_capture.h"
 #include "spu_workload.h"
@@ -421,6 +422,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 // Guest threads are still live: these are shutdown snapshots,
                 // not guaranteed final totals after a producer join.
                 haze_slot_copy_dump_stats();
+                haze_producer_profile::haze_producer_profile_dump();
                 haze_job0_capture_dump();
                 if (s_rsx_live) rsx_live_draw_dump_shader_cache();
 #endif

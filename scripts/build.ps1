@@ -318,6 +318,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Native slot-fill source/boundary differential regression failed.' }
     & $python "$root/tests/test_slot_copy.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/slot-copy-tests"
     if ($LASTEXITCODE -ne 0) { throw 'Native slot-copy source/boundary differential regression failed.' }
+    & $python -m unittest tests.test_producer_profile_patch
+    if ($LASTEXITCODE -ne 0) { throw 'Main producer phase patch preservation failed.' }
+    & $python -m unittest tests.test_analyze_producer_profile
+    if ($LASTEXITCODE -ne 0) { throw 'Main producer phase analysis validation failed.' }
+    & $python "$root/tests/test_producer_profile.py" --compiler $clang --output-dir "$root/local"
+    if ($LASTEXITCODE -ne 0) { throw 'Main producer phase recorder regression failed.' }
     & $python "$root/tests/test_vp_packet_oracle.py"
     if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle guard tests failed.' }
     & $python "$root/scripts/extract_vp_packet_oracle.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/vp_packet_reference.inc"

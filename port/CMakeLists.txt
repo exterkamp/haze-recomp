@@ -120,8 +120,15 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
         DEPENDS "${HAZE_JOB_TRACE_PATCHED}" "${RECOMP_DIR}/ppu_recomp_005.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_slot_copy.py"
         VERBATIM)
-    list(APPEND RECOMP_SOURCES "${HAZE_SLOT_COPY_PATCHED}")
-    set_property(SOURCE "${HAZE_SLOT_COPY_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    set(HAZE_PRODUCER_PROFILE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_producer_profile/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_PRODUCER_PROFILE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_producer_profile.py"
+            "${HAZE_SLOT_COPY_PATCHED}" "${HAZE_PRODUCER_PROFILE_PATCHED}"
+        DEPENDS "${HAZE_SLOT_COPY_PATCHED}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_producer_profile.py"
+        VERBATIM)
+    list(APPEND RECOMP_SOURCES "${HAZE_PRODUCER_PROFILE_PATCHED}")
+    set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
 # Bounded native fill at an audited game boundary; original source stays local
@@ -345,6 +352,7 @@ add_executable(${PROJECT_NAME}
     haze_job_wait.cpp
     haze_bulk_fill.cpp
     haze_slot_copy.cpp
+    haze_producer_profile.cpp
     haze_job_profile.cpp
     haze_job_trace.cpp
     haze_vp_upload.cpp
@@ -429,9 +437,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 if(HAZE_RSX_PROFILE)
-    set_property(SOURCE "${HAZE_SLOT_COPY_PATCHED}" main.cpp haze_job_profile.cpp
+    set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" main.cpp haze_job_profile.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
-    set_property(SOURCE "${HAZE_SLOT_COPY_PATCHED}" main.cpp haze_job_trace.cpp
+    set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" main.cpp haze_job_trace.cpp
         haze_job0_capture.cpp "${HAZE_JOB0_PATCHED}"
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_TRACE)
 endif()
