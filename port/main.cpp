@@ -67,6 +67,16 @@ static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "haze_quit.h"
+#ifdef _WIN32
+#include "haze_video_backend.h"
+extern "C" int haze_audio_stop_output(unsigned timeout_ms);
+extern "C" void haze_movie_shutdown(void);
+extern "C" void haze_movie_render_init(void);
+extern "C" int haze_movie_present_tick(void);
+extern "C" void haze_movie_render_guest_flip(void);
+extern "C" void haze_movie_set_root(const char* root);
+#endif
 #ifdef __EMSCRIPTEN__
 #include "haze_wasm_vm.h"
 #include <emscripten/emscripten.h>
@@ -258,7 +268,13 @@ static const uint8_t* live_guest_ptr(void*, uint32_t location, uint32_t offset, 
 static void present_frame(void)
 {
 #ifdef _WIN32
-    if (s_rsx_live) { rsx_live_draw_present(cellGcmGetCurrentDisplayBufferId()); return; }
+    if (s_rsx_live) {
+        // Service movies at every flip, including vblank catch-up iterations.
+        // Guest black movie surfaces must not overwrite the decoded image.
+        if (haze_movie_present_tick()) haze_movie_render_guest_flip();
+        else rsx_live_draw_present(cellGcmGetCurrentDisplayBufferId());
+        return;
+    }
 #endif
     rsx_backend_present();
 }
@@ -410,12 +426,17 @@ static DWORD WINAPI frame_clock(LPVOID)
          * those at 16 ms apiece paces the guest into single-figure frame rates.
          * The real RSX writes them in microseconds. */
         if (rsx_ok) {
+#ifdef _WIN32
+            haze_movie_present_tick();
+#endif
             drain_and_present();
 
             if (pump_messages() != 0) {
                 haze_input_shutdown();
                 haze_camera_dump_benchmark();
 #ifdef _WIN32
+                haze_movie_shutdown();
+                haze_movie_present_tick();
                 if (s_rsx_live) rsx_live_draw_dump_present_samples();
                 spu_float_native_summary();
                 haze_vp_upload_summary();
@@ -436,7 +457,28 @@ static DWORD WINAPI frame_clock(LPVOID)
                 // guest workers, rather than leaving an invisible game running.
                 exit(0);
             }
+#ifdef _WIN32
+            if (haze_quit_take_shutdown(haze_quit_guest_parked())) {
+                /* The guest producer is parked and save admission is closed.
+                 * Output and display cleanup belong on this window thread.
+                 * Other guest threads end with the host process; retain their
+                 * shared port state until then instead of destroying locks. */
+                haze_movie_shutdown();
+                haze_movie_present_tick();
+                haze_input_shutdown();
+                const int audio_stopped=haze_audio_stop_output(2000);
+                if (s_rsx_live) {
+                    rsx_live_draw_dump_present_samples();
+                    haze_video_stop(2000);
+                }
+                SetThreadExecutionState(ES_CONTINUOUS);
+                fprintf(stderr,"[quit] Native shutdown complete; audio=%s.\n",audio_stopped ? "stopped" : "process teardown");
+                fflush(NULL);
+                exit(0);
+            }
+#endif
             haze_input_update();
+            haze_graphics_update();
             /* Present on a guest flip. A present on a fixed clock can catch the
              * drain mid-frame and flash a partial one. Before the first flip
              * present freely, so the window is not blank during boot. */
@@ -690,6 +732,9 @@ int main(int argc, char** argv)
     }
 
     derive_vfs_root(argv[1]);
+#ifdef _WIN32
+    haze_movie_set_root(ppu_vfs_root);
+#endif
     printf("[boot] VFS root: %s\n", ppu_vfs_root);
     const char* save_root = getenv("PS3_SAVEDATA_ROOT");
     char default_save_root[1200];
@@ -720,6 +765,9 @@ int main(int argc, char** argv)
     /* Install the guest-callback hook, then start the frame clock. It no-ops
      * until the title registers its vblank and flip handlers during init. */
     g_ps3_guest_caller = harness_guest_caller;
+#ifdef _WIN32
+    haze_movie_render_init();
+#endif
     haze_input_initialize();
     haze_camera_initialize();
     haze_menu_initialize();

@@ -2,6 +2,8 @@ param(
     [string]$SharedRoot,
     [string]$SdkRoot,
     [string]$SDL3Root,
+    [string]$FFmpegRoot,
+    [string]$Python,
     [switch]$RuntimeOnly,
     [switch]$Test,
     [switch]$ProfileRenderer,
@@ -37,7 +39,8 @@ foreach ($line in $environment) {
 $cmake = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
 $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
 $clang = Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang-cl.exe'
-$python = Join-Path $assets '.venv\Scripts\python.exe'
+if ($env:HAZE_LLVM_ROOT) { $clang = Join-Path $env:HAZE_LLVM_ROOT 'bin/clang-cl.exe' }
+if (-not $Python) { $Python = Join-Path $assets '.venv\Scripts\python.exe' }
 $sdk = if ($SdkRoot) { (Resolve-Path -LiteralPath $SdkRoot).Path } elseif (Test-Path -LiteralPath "$root/external/ps3recomp/CMakeLists.txt") { Join-Path $root 'external\ps3recomp' } else { Join-Path $assets 'external\ps3recomp' }
 if ($RuntimeOnly) {
     $source = $sdk
@@ -54,7 +57,8 @@ $exeOutput = if ($OutputDirectory) { $ExecutionContext.SessionState.Path.GetUnre
 $controllerArgs = @()
 if (-not $RuntimeOnly) { $controllerArgs += "-DHAZE_EXPERIMENT_INLINE_READS=$([int][bool]$ExperimentalInlineReads)" }
 if ($SDL3Root) { $controllerArgs += "-DFETCHCONTENT_SOURCE_DIR_SDL3=$((Resolve-Path -LiteralPath $SDL3Root).Path)" }
-& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_JOB_DIAGNOSTICS=$([int][bool]$ProfileJobs)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)" "-DPS3RECOMP_NATIVE_FLOAT_RUNTIME=$([int][bool]$NativeSpuFloat)" @controllerArgs
+if ($FFmpegRoot) { $controllerArgs += "-DHAZE_FFMPEG_ROOT=$((Resolve-Path -LiteralPath $FFmpegRoot).Path)" }
+& $cmake -S $source -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_C_COMPILER=$clang" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_BUILD_TYPE=$Configuration" "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$exeOutput" "-DPython3_EXECUTABLE=$python" "-DPS3RECOMP_DIR=$sdk" "-DHAZE_SHARED_ROOT=$assets" "-DRECOMP_DIR=$assets/generated/ppu" "-DSPU_DIR=$assets/generated/spu" "-DHAZE_RSX_PROFILE=$([int][bool]$ProfileRenderer)" "-DHAZE_JOB_DIAGNOSTICS=$([int][bool]$ProfileJobs)" "-DHAZE_SPU_FMA=$([int][bool]$SpuFma)" "-DHAZE_SPU_BYTE_COMPARE=$([int][bool]$CompareSpuByteOps)" "-DPS3RECOMP_NATIVE_FLOAT_RUNTIME=$([int][bool]$NativeSpuFloat)" @controllerArgs
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 if (-not $RuntimeOnly) {
     & $python "$root/tests/check_profile_configuration.py" $build --enabled $([int][bool]$ProfileRenderer) --jobs-enabled $([int][bool]$ProfileJobs) --inline-reads $([int][bool]$ExperimentalInlineReads)
@@ -108,6 +112,22 @@ if ($Test) {
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"
     if ($LASTEXITCODE -ne 0) { throw 'Diagnostic controller detach regression failed.' }
     New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
+    if (-not $RuntimeOnly) {
+        & $python "$root/tests/test_movie_patch.py" "$assets/generated/ppu/ppu_recomp_003.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Movie guest EOF patch regression failed.' }
+        & $cmake --build $build --target HazeMovieDecodeTest HazeMoviePlaybackTest HazeMovieSailTest HazeMoviePamfTest --parallel $Jobs
+        if ($LASTEXITCODE -ne 0) { throw 'Movie test compilation failed.' }
+        & "$exeOutput/HazeMovieSailTest.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Movie lifecycle regression failed.' }
+        & "$exeOutput/HazeMoviePamfTest.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'PAMF parsing regression failed.' }
+        $movies = Get-ChildItem -LiteralPath "$assets/game/disc/PS3_GAME/USRDIR/assets/g5/pamf" -Filter '*.pam'
+        if (-not $movies) { throw 'Supported-disc movies are required for movie validation.' }
+        & "$exeOutput/HazeMovieDecodeTest.exe" @($movies.FullName)
+        if ($LASTEXITCODE -ne 0) { throw 'Supported-disc movie decoding failed.' }
+        & "$exeOutput/HazeMoviePlaybackTest.exe" "$assets/game/disc"
+        if ($LASTEXITCODE -ne 0) { throw 'Timed playback/skip/pause regression failed.' }
+    }
     & $python "$root/tests/test_memory_read_fastpaths.py" --compiler $clang --sdk $sdk --output-dir "$root/build/memory-read-fastpaths"
     if ($LASTEXITCODE -ne 0) { throw 'Native byte/halfword memory-read regression failed.' }
     & $python "$root/tests/test_ppu_coherency_predicate.py" --compiler $clang --sdk $sdk --output-dir "$root/build/ppu-coherency-predicate"
@@ -287,60 +307,62 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Firmware ELF relocation tests failed.' }
     & $python "$root/tests/test_present_modes.py"
     if ($LASTEXITCODE -ne 0) { throw 'Present-window benchmark validation failed.' }
-    & $python "$root/tests/test_spu_job_modes.py"
-    if ($LASTEXITCODE -ne 0) { throw 'SPU job mode-summary validation failed.' }
-    & $python "$root/tests/test_guest_pacer_patch.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
-    & $python "$root/tests/test_job_wait_patch.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Job completion patch guard validation failed.' }
-    & $python "$root/tests/test_job_dispatch_trace_patch.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Job trace boundary guard validation failed.' }
-    & $python "$root/tests/test_job_trace_analysis.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Job trace analysis regression failed.' }
-    & $python "$root/tests/test_job_wait_frames.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Job trace interval accounting failed.' }
-    & $clang /nologo /EHsc /W0 /O2 /std:c++20 /DHAZE_JOB_TRACE /DHAZE_JOB_TRACE_TEST_CAPACITY=64 "/Fe$root/local/test_job_trace.exe" "/Fo$root/local/" "$root/tests/test_job_trace.cpp" "$root/port/haze_job_trace.cpp"
-    if ($LASTEXITCODE -ne 0) { throw 'Job trace test compilation failed.' }
-    & "$root/local/test_job_trace.exe"
-    if ($LASTEXITCODE -ne 0) { throw 'Job trace concurrency and retention tests failed.' }
-    & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_trace_noop.exe" "/Fo$root/local/" "$root/tests/test_job_trace_noop.cpp" "$root/port/haze_job_trace.cpp"
-    if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op compilation failed.' }
-    & "$root/local/test_job_trace_noop.exe"
-    if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op test failed.' }
-    & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_profile.exe" "/Fo$root/local/test_job_profile.obj" "$root/tests/test_job_profile.cpp"
-    if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler test compilation failed.' }
-    & "$root/local/test_job_profile.exe" "$root/local/test-job-profile.csv"
-    if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler accounting failed.' }
-    & $python "$root/tests/test_job_completion_summary.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Job completion summary validation failed.' }
-    & $clang /nologo /EHsc /W0 /O2 "/I$assets/generated/ppu" "/Fe$root/local/test_job_wait.exe" "/Fo$root/local/" "$root/tests/test_job_wait.cpp" "$root/port/haze_job_wait.cpp"
-    if ($LASTEXITCODE -ne 0) { throw 'Native job wait test compilation failed.' }
-    & "$root/local/test_job_wait.exe"
-    if ($LASTEXITCODE -ne 0) { throw 'Native job wait scope validation failed.' }
-    & $python "$root/tests/test_bulk_fill.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/bulk-fill-tests"
-    if ($LASTEXITCODE -ne 0) { throw 'Native slot-fill source/boundary differential regression failed.' }
-    & $python "$root/tests/test_slot_copy.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/slot-copy-tests"
-    if ($LASTEXITCODE -ne 0) { throw 'Native slot-copy source/boundary differential regression failed.' }
-    & $python -m unittest tests.test_producer_profile_patch
-    if ($LASTEXITCODE -ne 0) { throw 'Main producer phase patch preservation failed.' }
-    & $python -m unittest tests.test_analyze_producer_profile
-    if ($LASTEXITCODE -ne 0) { throw 'Main producer phase analysis validation failed.' }
-    & $python "$root/tests/test_producer_profile.py" --compiler $clang --output-dir "$root/local"
-    if ($LASTEXITCODE -ne 0) { throw 'Main producer phase recorder regression failed.' }
-    & $python "$root/tests/test_vp_packet_oracle.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle guard tests failed.' }
-    & $python "$root/scripts/extract_vp_packet_oracle.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/vp_packet_reference.inc"
-    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle extraction failed.' }
-    & $clang /nologo /EHsc /W0 /O2 /std:c++17 "/I$root/port" "/I$root/local" "/Fe$root/local/test_vp_packets.exe" "/Fo$root/local/test_vp_packets.obj" "$root/tests/test_vp_packets.cpp"
-    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet test compilation failed.' }
-    & "$root/local/test_vp_packets.exe"
-    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet boundary comparison failed.' }
-    & $python "$root/tests/test_vp_upload_patch.py"
-    if ($LASTEXITCODE -ne 0) { throw 'Vertex-program upload patch guards failed.' }
-    & $clang /nologo /EHsc /W0 /O2 /std:c++17 "/I$assets/generated/ppu" "/I$sdk/runtime/ppu" "/I$root/local" "/Fe$root/local/test_vp_upload.exe" "/Fo$root/local/" "$root/tests/test_vp_upload.cpp" "$root/port/haze_vp_upload.cpp" "$sdk/runtime/ppu/ppu_native_memory.cpp"
-    if ($LASTEXITCODE -ne 0) { throw 'Native vertex-program upload adapter compilation failed.' }
-    & "$root/local/test_vp_upload.exe"
-    if ($LASTEXITCODE -ne 0) { throw 'Native vertex-program upload boundary validation failed.' }
+    if (-not $RuntimeOnly) {
+        & $python "$root/tests/test_spu_job_modes.py"
+        if ($LASTEXITCODE -ne 0) { throw 'SPU job mode-summary validation failed.' }
+        & $python "$root/tests/test_guest_pacer_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Guest pacing patch guard validation failed.' }
+        & $python "$root/tests/test_job_wait_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Job completion patch guard validation failed.' }
+        & $python "$root/tests/test_job_dispatch_trace_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Job trace boundary guard validation failed.' }
+        & $python "$root/tests/test_job_trace_analysis.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Job trace analysis regression failed.' }
+        & $python "$root/tests/test_job_wait_frames.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Job trace interval accounting failed.' }
+        & $clang /nologo /EHsc /W0 /O2 /std:c++20 /DHAZE_JOB_TRACE /DHAZE_JOB_TRACE_TEST_CAPACITY=64 "/Fe$root/local/test_job_trace.exe" "/Fo$root/local/" "$root/tests/test_job_trace.cpp" "$root/port/haze_job_trace.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Job trace test compilation failed.' }
+        & "$root/local/test_job_trace.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Job trace concurrency and retention tests failed.' }
+        & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_trace_noop.exe" "/Fo$root/local/" "$root/tests/test_job_trace_noop.cpp" "$root/port/haze_job_trace.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op compilation failed.' }
+        & "$root/local/test_job_trace_noop.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op test failed.' }
+        & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_profile.exe" "/Fo$root/local/test_job_profile.obj" "$root/tests/test_job_profile.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler test compilation failed.' }
+        & "$root/local/test_job_profile.exe" "$root/local/test-job-profile.csv"
+        if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler accounting failed.' }
+        & $python "$root/tests/test_job_completion_summary.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Job completion summary validation failed.' }
+        & $clang /nologo /EHsc /W0 /O2 "/I$assets/generated/ppu" "/Fe$root/local/test_job_wait.exe" "/Fo$root/local/" "$root/tests/test_job_wait.cpp" "$root/port/haze_job_wait.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Native job wait test compilation failed.' }
+        & "$root/local/test_job_wait.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Native job wait scope validation failed.' }
+        & $python "$root/tests/test_bulk_fill.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/bulk-fill-tests"
+        if ($LASTEXITCODE -ne 0) { throw 'Native slot-fill source/boundary differential regression failed.' }
+        & $python "$root/tests/test_slot_copy.py" --compiler $clang --sdk $sdk --generated "$assets/generated/ppu" --output-dir "$root/build/slot-copy-tests"
+        if ($LASTEXITCODE -ne 0) { throw 'Native slot-copy source/boundary differential regression failed.' }
+        & $python -m unittest tests.test_producer_profile_patch
+        if ($LASTEXITCODE -ne 0) { throw 'Main producer phase patch preservation failed.' }
+        & $python -m unittest tests.test_analyze_producer_profile
+        if ($LASTEXITCODE -ne 0) { throw 'Main producer phase analysis validation failed.' }
+        & $python "$root/tests/test_producer_profile.py" --compiler $clang --output-dir "$root/local"
+        if ($LASTEXITCODE -ne 0) { throw 'Main producer phase recorder regression failed.' }
+        & $python "$root/tests/test_vp_packet_oracle.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle guard tests failed.' }
+        & $python "$root/scripts/extract_vp_packet_oracle.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/vp_packet_reference.inc"
+        if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet oracle extraction failed.' }
+        & $clang /nologo /EHsc /W0 /O2 /std:c++17 "/I$root/port" "/I$root/local" "/Fe$root/local/test_vp_packets.exe" "/Fo$root/local/test_vp_packets.obj" "$root/tests/test_vp_packets.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet test compilation failed.' }
+        & "$root/local/test_vp_packets.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Vertex-program packet boundary comparison failed.' }
+        & $python "$root/tests/test_vp_upload_patch.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Vertex-program upload patch guards failed.' }
+        & $clang /nologo /EHsc /W0 /O2 /std:c++17 "/I$assets/generated/ppu" "/I$sdk/runtime/ppu" "/I$root/local" "/Fe$root/local/test_vp_upload.exe" "/Fo$root/local/" "$root/tests/test_vp_upload.cpp" "$root/port/haze_vp_upload.cpp" "$sdk/runtime/ppu/ppu_native_memory.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Native vertex-program upload adapter compilation failed.' }
+        & "$root/local/test_vp_upload.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Native vertex-program upload boundary validation failed.' }
+    }
     $audioOutTest = Join-Path $root 'local/test_audio_out_abi.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$audioOutTest" "/Fo$root/local/test_audio_out_abi.obj" "$sdk/libs/misc/tests/test_audio_out_abi.c"
     if ($LASTEXITCODE -ne 0) { throw 'Audio-output ABI test compilation failed.' }
@@ -383,7 +405,11 @@ if ($Test) {
         }
     } finally { $env:CC = $oldCC }
     $condTest = Join-Path $root 'local/test_sysprx_lwcond.exe'
-    & $clang /nologo /W0 /O1 /Gy /Gw "/I$assets/generated/ppu" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
+    # Generate only the SDK ABI declarations, without reading a game binary.
+    $abi = Join-Path $root 'build/test-abi'
+    & $python "$root/scripts/test-abi.py" $sdk $abi
+    if ($LASTEXITCODE -ne 0) { throw 'Test ABI header generation failed.' }
+    & $clang /nologo /W0 /O1 /Gy /Gw "/I$abi" "/I$sdk/include" "/Fe$condTest" "/Fo$root/local/test_sysprx_lwcond.obj" "$sdk/runtime/ppu/tests/test_sysprx_lwcond.cpp" /link /OPT:REF
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable test compilation failed.' }
     & $condTest
     if ($LASTEXITCODE -ne 0) { throw 'Lightweight condition-variable boundary and wait test failed.' }
@@ -543,6 +569,16 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle test compilation failed.' }
     & $sailTest
     if ($LASTEXITCODE -ne 0) { throw 'SAIL lifecycle ABI test failed.' }
+    $movieSailTest = Join-Path $root 'local/test_movie_sail.exe'
+    & $clang /nologo /W0 /O1 "/I$sdk/include" "/I$sdk/libs/codec" "/Fe$movieSailTest" "/Fo$root/local/test_movie_sail.obj" "$root/tests/test_movie_sail.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Haze movie lifecycle test compilation failed.' }
+    & $movieSailTest
+    if ($LASTEXITCODE -ne 0) { throw 'Haze movie lifecycle regression failed.' }
+    $moviePamfTest = Join-Path $root 'local/test_movie_pamf.exe'
+    & $clang /nologo /W0 /O1 /EHsc /std:c++20 "/I$root/port" "/Fe$moviePamfTest" "/Fo$root/local/test_movie_pamf.obj" "$root/tests/test_movie_pamf.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'PAMF parser test compilation failed.' }
+    & $moviePamfTest
+    if ($LASTEXITCODE -ne 0) { throw 'PAMF parser regression failed.' }
     $dialogTest = Join-Path $root 'local/test_dialog_callbacks.exe'
     & $clang /nologo /W0 /O1 "/I$sdk/include" "/Fe$dialogTest" "/Fo$root/local/test_dialog_callbacks.obj" "$sdk/libs/system/tests/test_dialog_callbacks.c"
     if ($LASTEXITCODE -ne 0) { throw 'Dialog callback test compilation failed.' }

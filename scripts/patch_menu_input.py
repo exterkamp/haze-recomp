@@ -71,6 +71,12 @@ def patch(source):
     extern void haze_menu_context(uint32_t);
     haze_menu_context(static_cast<uint32_t>(ctx->gpr[3]));
     {original}(ctx);
+    DRAIN_TRAMPOLINE(ctx);
+    // The manager's current-context slot is valid only during GUI dispatch.
+    extern void haze_audio_guest_tick(ppu_context*);
+    haze_audio_guest_tick(ctx);
+    extern void haze_native_menu_tick(ppu_context*);
+    haze_native_menu_tick(ctx);
 }}
 '''
         source = source[:begin] + body + wrapper + source[end:]

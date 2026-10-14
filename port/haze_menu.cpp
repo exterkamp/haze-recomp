@@ -1,163 +1,175 @@
-#include "ppu_recomp.h"
 #include "haze_menu.h"
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <algorithm>
 #include <atomic>
-
-extern "C" void ppu_register_function(uint64_t,void (*)(ppu_context*));
+#include <deque>
+#include <mutex>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace {
-bool supported=false;
-bool pointer_owned=false;
-bool pointer_released=false;
-std::atomic<uint32_t> active_context{0};
-bool trace=false;
-bool valid(uint32_t address) { return address>=0x10000 && address<0xc0000000 && !(address&3); }
-void write_float(uint32_t address,float value) {
-    uint32_t bits; std::memcpy(&bits,&value,sizeof(bits)); vm_write32(address,bits);
-}
-uint32_t current_context() {
-    const auto manager=vm_read32(0xf48dd4);
-    return valid(manager) ? vm_read32(manager+0x48) : 0;
-}
-bool has_menu(uint32_t context) {
-    // CGui context's live menu stack, also checked by its input dispatcher
-    // 0031B9C0 before calling the input object's virtual update.
-    return valid(context) && vm_read32(context+0x28c)!=0;
-}
-float read_float(uint32_t address) {
-    auto bits=vm_read32(address); float value; std::memcpy(&value,&bits,4); return value;
-}
-void update_tabs(ppu_context* ctx) {
-    if (!pointer_owned || !pointer_released || !has_menu(active_context)) {
-        func_00095EA8(ctx);
-        return;
+std::array<HazeMenuProvider,6> providers;
+std::array<std::atomic<bool>,6> available{};
+std::atomic<int> requested{0};
+std::atomic<bool> active{false},blocked{false};
+std::atomic<uint64_t> presented{0};
+std::mutex exchange_mutex;
+std::deque<HazeMenuCommand> commands;
+HazeMenuView published,current_view;
+HazeMenuModal interrupt_dialog;
+std::function<void(int)> interrupt_choose;
+void* owner_window=nullptr;
+uint64_t next_generation=0;
+HazeMenuProvider& provider() { return providers[size_t(current_view.page)]; }
+HazeMenuModal modal() { return interrupt_dialog.revision ? interrupt_dialog : provider().modal ? provider().modal() : HazeMenuModal{}; }
+void publish() {
+    if (current_view.page!=HazeMenuPage::None) {
+        current_view.rows=provider().rows ? provider().rows() : std::vector<HazeMenuRow>{};
+        current_view.modal=modal();
+        current_view.title=provider().title;
+        current_view.actions=provider().actions;
     }
-    // This derived tab widget draws with 00098038, but its original input
-    // routine uses base-widget widths and omits the prompt margin/scroll.
-    // Reuse the draw layout and the guest's eligibility and selection methods.
-    const auto widget=static_cast<uint32_t>(ctx->gpr[3]);
-    auto call=*ctx;
-    call.gpr[4]=1;
-    func_002EFC20(&call);
-    if (!call.gpr[3]) { ctx->gpr[3]=0; return; }
-    const auto input=vm_read32(active_context+0x170);
-    const float x=read_float(input+0x14),y=read_float(input+0x18);
-    // A private guest stack frame holds output structs across nested calls.
-    const auto stack=static_cast<uint32_t>(ctx->gpr[1])-0x100;
-    const auto iterator=stack+0x80,rect=stack+0xa0,bounds=stack+0xb0;
-    call=*ctx; call.gpr[1]=stack; call.gpr[3]=widget; call.gpr[4]=rect;
-    func_002F2978(&call);
-    const float top=read_float(rect+4),height=read_float(widget+0x154);
-    vm_write32(iterator,0); vm_write32(iterator+4,widget+0x58);
-    vm_write32(iterator+8,vm_read32(widget+0x60));
-    vm_write32(iterator+12,vm_read32(widget+0xcc));
-    for (;;) {
-        call=*ctx; call.gpr[1]=stack; call.gpr[3]=iterator;
-        func_00311060(&call);
-        const auto child=static_cast<uint32_t>(call.gpr[3]);
-        if (!valid(child)) break;
-        if (!(vm_read32(child+0x30)&1) || !vm_read32(child+0x14c)) continue;
-        call=*ctx; call.gpr[1]=stack; call.gpr[3]=bounds;
-        call.gpr[4]=widget; call.gpr[5]=child; call.fpr[1]=-1.;
-        func_00098038(&call);
-        if (x<=read_float(bounds) || x>=read_float(bounds+8) || y<=top || y>=top+height)
-            continue;
-        const auto selected=vm_read32(child+0x28);
-        if (selected!=vm_read32(widget+0x158)) {
-            call=*ctx; call.gpr[1]=stack; call.gpr[3]=widget; call.gpr[4]=selected;
-            func_00305510(&call);
+    blocked=active && (presented!=current_view.generation || (current_view.applying && !interrupt_dialog.revision) || current_view.modal.capturing);
+    std::lock_guard lock(exchange_mutex);
+    if (published.generation!=current_view.generation || published.page!=current_view.page ||
+        published.title!=current_view.title || published.notice!=current_view.notice ||
+        published.rows!=current_view.rows || published.modal!=current_view.modal ||
+        published.actions!=current_view.actions || published.applying!=current_view.applying ||
+        published.error!=current_view.error || published.pop!=current_view.pop) {
+        current_view.revision=published.revision+1;
+        published=current_view;
+    }
+}
+void close_page(bool pop) {
+    if (current_view.page==HazeMenuPage::None) return;
+    const bool guest_back=provider().guest_back;
+    if (provider().update) provider().update(false);
+    current_view.page=HazeMenuPage::None;
+    current_view.rows.clear(); current_view.modal={};
+    current_view.applying=false; current_view.pop=pop && guest_back;
+    active=false; blocked=false;
+}
+void dispatch(const HazeMenuCommand& command) {
+    if (command.generation!=current_view.generation || current_view.page==HazeMenuPage::None) return;
+    if (command.kind==HazeMenuCommandKind::Departed) { close_page(false); return; }
+    if (current_view.applying && !interrupt_dialog.revision) return;
+    const auto dialog=modal();
+    if (dialog.revision) {
+        if (command.modal_revision!=dialog.revision) return;
+        // Copy the callback: cancelling an interrupt can clear its owner.
+        const auto choose=interrupt_dialog.revision ? interrupt_choose : provider().modal_choose;
+        if (command.kind==HazeMenuCommandKind::Modal && choose &&
+            command.choice>=0 && command.choice<int(dialog.choices.size()))
+            choose(command.choice);
+        else if (command.kind==HazeMenuCommandKind::Key && dialog.capturing && provider().modal_key)
+            provider().modal_key(command.choice);
+        else if (command.kind==HazeMenuCommandKind::Back && choose) {
+            const int cancel=dialog.cancel_choice>=0 ? dialog.cancel_choice : int(dialog.choices.size())-1;
+            if (cancel>=0 && cancel<int(dialog.choices.size())) choose(cancel);
         }
-        ctx->gpr[3]=1;
         return;
     }
-    ctx->gpr[3]=0;
-}
-}
-
-void haze_menu_initialize() {
-    trace=std::getenv("HAZE_MOUSE_TRACE")!=nullptr;
-    supported=vm_read32(0x30d398)==0x8063028c &&
-              vm_read32(0x30cee0)==0x80630048 &&
-              vm_read32(0x2e0dd8)==0xf821ff61 &&
-              vm_read32(0xe16e94)==0xf48dd4;
-    std::fprintf(stderr,"[input] Guest menu pointer bridge %s\n",supported ? "enabled" : "unavailable: unsupported layout");
-    // 00095EA8 is virtual-only in the audited lift (vtable DD5408).
-    if (supported && vm_read32(0xdd5408)==0xe3a630 &&
-        vm_read32(0xe3a630)==0x95ea8 && vm_read32(0x95ea8)==0xf821feb1 &&
-        vm_read32(0xe0b2ec)==0xbf800000)
-        ppu_register_function(0x95ea8,update_tabs);
-}
-bool haze_menu_gameplay_allowed() {
-    // Called on the guest simulation thread, immediately before camera writes.
-    // Check live ownership even if the window thread has not processed release.
-    // The manager clears its temporary current-context slot between GUI calls.
-    // Keep checking the last dispatched context's live stack in that interval.
-    return supported && !has_menu(current_context()) && !has_menu(active_context);
-}
-void haze_menu_context(uint32_t context) {
-    if (!supported) return;
-    active_context=context;
-    haze_input_menu_state(has_menu(context));
-    if (trace) {
-        static uint32_t previous_context=0,previous_count=~0u;
-        const auto count=valid(context) ? vm_read32(context+0x28c) : 0;
-        if (previous_context!=context || previous_count!=count)
-            std::fprintf(stderr,"[menu] context=%08X stack=%u input=%08X\n",context,count,
-                valid(context) ? vm_read32(context+0x170) : 0);
-        previous_context=context; previous_count=count;
+    switch (command.kind) {
+    case HazeMenuCommandKind::Change: {
+        const auto row=std::find_if(current_view.rows.begin(),current_view.rows.end(),[&](const auto& r){return r.key==command.key;});
+        if (row!=current_view.rows.end() && provider().change) {
+            provider().change(command.key,command.value); current_view.notice.clear(); current_view.error=false;
+        }
+        break;
+    }
+    case HazeMenuCommandKind::Activate:
+        if (provider().activate && std::any_of(current_view.rows.begin(),current_view.rows.end(),[&](const auto& r){return r.key==command.key && r.action;}))
+            provider().activate(command.key);
+        break;
+    case HazeMenuCommandKind::Apply:
+        if (provider().apply) {
+            const auto result=provider().apply(current_view.notice);
+            current_view.applying=result==HazeMenuApply::Pending;
+            current_view.error=result==HazeMenuApply::Failed;
+        }
+        break;
+    case HazeMenuCommandKind::Defaults:
+        if (provider().defaults) provider().defaults();
+        current_view.notice=provider().defaults_notice; current_view.error=false;
+        break;
+    case HazeMenuCommandKind::Back: close_page(true); break;
+    default: break;
     }
 }
-void haze_menu_pointer_before(uint32_t input) {
-    pointer_released=false;
-    if (!supported || !valid(input)) return;
-    // Always let the normal pad mapper run. Native pointer ownership below is
-    // selected by actual mouse activity, and ends on keyboard/controller input.
-    vm_write8(input+0x5c,0);
-    vm_write8(input+0x5d,1);
 }
-void haze_menu_pointer_after(uint32_t input) {
-    if (!supported || !valid(input) || !has_menu(active_context) ||
-        vm_read32(active_context+0x170)!=input) return;
-    const auto pointer=haze_input_take_pointer();
-    if (trace && (pointer.pressed || pointer.released || pointer.back || pointer.scroll))
-        std::fprintf(stderr,"[menu-pointer] xy=%.5f,%.5f active=%d press=%d held=%d release=%d back=%d scroll=%d\n",
-            pointer.x,pointer.y,pointer.active,pointer.pressed,pointer.held,pointer.released,pointer.back,pointer.scroll);
-    if (!pointer.active || !std::isfinite(pointer.x) || !std::isfinite(pointer.y)) {
-        pointer_owned=false;
-        return;
-    }
-    vm_write8(input+0x5c,1);
-    vm_write8(input+0x5d,0);
-    write_float(input+0x14,pointer.x); write_float(input+0x18,pointer.y);
-    if (pointer.pressed || !pointer_owned) {
-        write_float(input+0x1c,pointer.x); write_float(input+0x20,pointer.y);
-    }
-    if (pointer.pressed) vm_write32(input+0x2c,0);
-    if (pointer.held || pointer.released || pointer.back || pointer.scroll)
-        vm_write32(input+0x60,0); // Match the guest pointer's activity timer.
-    write_float(input+0x24,pointer.x); write_float(input+0x28,pointer.y);
-    vm_write32(input+0x4c,pointer.released ? 2 : pointer.held ? 1 : 0);
-    vm_write32(input+0x50,pointer.back ? 2 : 0);
-    vm_write32(input+0x54,0);
-    vm_write32(input+0x38,0);
-    vm_write32(input+0x3c,0); vm_write32(input+0x40,0);
-    if (pointer.scroll) {
-        // Existing directional navigation scrolls the selected list and keeps
-        // its focus visible. One detent is one navigation pulse.
-        vm_write8(input+0x5c,0); vm_write8(input+0x5d,1);
-        write_float(input+0x3c,pointer.scroll>0 ? 1.f : -1.f);
-    }
-    pointer_owned=true;
-    pointer_released=pointer.released;
+void haze_menu_register(HazeMenuPage page,HazeMenuProvider value) {
+    if (page<=HazeMenuPage::None || size_t(page)>=providers.size()) return;
+    providers[size_t(page)]=std::move(value); available[size_t(page)]=true;
 }
-
-bool haze_menu_pointer_confirm(uint32_t input,uint32_t widget,uint32_t hit) {
-    // The guest event dispatcher already resolved its topmost eligible widget.
-    // Only that widget may receive a native mouse release, never a page-wide
-    // keyboard action belonging to a different widget behind a dialog.
-    return supported && pointer_owned && pointer_released && valid(widget) && widget==hit &&
-        has_menu(active_context) && vm_read32(active_context+0x170)==input;
+bool haze_menu_request(HazeMenuPage page) {
+    if (page<=HazeMenuPage::None || size_t(page)>=providers.size() || !available[size_t(page)]) return false;
+    {
+        std::lock_guard lock(exchange_mutex);
+        if (active && (published.applying || published.modal.revision)) return false;
+    }
+    blocked=true; active=true; requested=int(page); return true;
+}
+bool haze_menu_active() { return active.load(); }
+bool haze_menu_blocks_input() { return blocked.load(); }
+bool haze_menu_has_focus() {
+#ifdef _WIN32
+    return active && owner_window && GetForegroundWindow()==owner_window;
+#else
+    return active;
+#endif
+}
+void* haze_menu_owner() { return owner_window; }
+HazeMenuView haze_menu_view() { std::lock_guard lock(exchange_mutex); return published; }
+void haze_menu_command(HazeMenuCommand command) {
+    std::lock_guard lock(exchange_mutex);
+    // Only the displayed page may issue commands. Bound work from input bursts.
+    if (command.generation==published.generation && commands.size()<256) commands.push_back(std::move(command));
+}
+void haze_menu_presented(uint64_t generation) { presented=generation; }
+bool haze_menu_capture_key(int key) {
+    const auto view=haze_menu_view();
+    if (!active || !view.modal.capturing) return false;
+    HazeMenuCommand command; command.generation=view.generation;
+    command.kind=key==27 ? HazeMenuCommandKind::Back : HazeMenuCommandKind::Key; command.choice=key; command.modal_revision=view.modal.revision;
+    haze_menu_command(std::move(command)); return true;
+}
+void haze_menu_update(void* owner,const HazeGamepadState&) {
+    owner_window=owner;
+    if (const int next=requested.exchange(0)) {
+        close_page(false);
+        const auto revision=current_view.revision;
+        current_view={}; current_view.page=HazeMenuPage(next);
+        current_view.generation=++next_generation; current_view.revision=revision;
+        active=true;
+        if (provider().begin) provider().begin();
+        publish();
+    }
+    std::deque<HazeMenuCommand> pending;
+    { std::lock_guard lock(exchange_mutex); pending.swap(commands); }
+    for (const auto& command:pending) dispatch(command);
+    if (current_view.page!=HazeMenuPage::None) {
+        if (provider().update) provider().update(haze_menu_has_focus());
+        if (current_view.applying) {
+            const auto result=provider().poll ? provider().poll(current_view.notice) : HazeMenuApply::Failed;
+            if (!provider().poll) current_view.notice="The settings provider cannot report save completion.";
+            current_view.applying=result==HazeMenuApply::Pending;
+            current_view.error=result==HazeMenuApply::Failed;
+        }
+    }
+    publish();
+}
+void haze_menu_retail() { close_page(false); publish(); }
+void haze_menu_interrupt(HazeMenuModal dialog,std::function<void(int)> choose) {
+    // Provider modal revisions are local counters. Keep interrupts in a separate
+    // range so an old confirmation cannot activate the overlaid Cancel button.
+    if (dialog.revision) dialog.revision|=0x80000000u;
+    interrupt_dialog=std::move(dialog); interrupt_choose=std::move(choose); publish();
+}
+void haze_menu_shutdown(bool exiting_process) {
+    if (!exiting_process) close_page(false);
+    active=false; blocked=false; requested=0; presented=0;
+    current_view={}; interrupt_dialog={}; interrupt_choose={}; owner_window=nullptr;
+    std::lock_guard lock(exchange_mutex); commands.clear(); published={};
 }

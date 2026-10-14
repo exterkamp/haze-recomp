@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" HAZE_RELEASE_VERSION LIMIT_COUNT 1)
 project(HazeRecomp
-    VERSION 0.1.0
+    VERSION ${HAZE_RELEASE_VERSION}
     LANGUAGES C CXX
     DESCRIPTION "Experimental native Haze port (ps3recomp)"
 )
@@ -129,6 +130,31 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
         VERBATIM)
     list(APPEND RECOMP_SOURCES "${HAZE_PRODUCER_PROFILE_PATCHED}")
     set_property(SOURCE "${HAZE_PRODUCER_PROFILE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    # Compose with the performance patches; compile one copy of this translation unit.
+    set(HAZE_SAVE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_save/ppu_recomp_003.cpp")
+    add_custom_command(OUTPUT "${HAZE_SAVE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_save_status.py"
+            "${HAZE_PRODUCER_PROFILE_PATCHED}" "${HAZE_SAVE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_audio_tick.py"
+            "${HAZE_SAVE_PATCHED}" "${HAZE_SAVE_PATCHED}"
+        DEPENDS "${HAZE_PRODUCER_PROFILE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_save_status.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_audio_tick.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PRODUCER_PROFILE_PATCHED}")
+    list(APPEND RECOMP_SOURCES "${HAZE_SAVE_PATCHED}")
+    set_property(SOURCE "${HAZE_SAVE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    if(WIN32)
+        set(HAZE_MOVIE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_movie/ppu_recomp_003.cpp")
+        add_custom_command(OUTPUT "${HAZE_MOVIE_PATCHED}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_movie_poll.py"
+                "${HAZE_SAVE_PATCHED}" "${HAZE_MOVIE_PATCHED}"
+            DEPENDS "${HAZE_SAVE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_movie_poll.py"
+            VERBATIM)
+        list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_SAVE_PATCHED}")
+        list(APPEND RECOMP_SOURCES "${HAZE_MOVIE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_movie_guest.cpp")
+        set_property(SOURCE "${HAZE_MOVIE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+    endif()
+
 endif()
 
 # Bounded native fill at an audited game boundary; original source stays local
@@ -168,6 +194,42 @@ endif()
 # ---------------------------------------------------------------------------
 # ps3recomp runtime library
 # ---------------------------------------------------------------------------
+set(HAZE_TITLE_SOURCE "${RECOMP_DIR}/ppu_recomp_002.cpp")
+if(EXISTS "${HAZE_TITLE_SOURCE}")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_TITLE_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_title/ppu_recomp_002.cpp")
+    add_custom_command(OUTPUT "${HAZE_TITLE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_title_prompt.py"
+            "${HAZE_TITLE_SOURCE}" "${HAZE_TITLE_PATCHED}"
+        DEPENDS "${HAZE_TITLE_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_title_prompt.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_TITLE_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_TITLE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_title.cpp")
+    set_property(SOURCE "${HAZE_TITLE_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+
+set(HAZE_MENU_SOURCE "${HAZE_MENU_PATCHED}")
+if(EXISTS "${RECOMP_DIR}/ppu_recomp_001.cpp")
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_MENU_PATCHED "${CMAKE_CURRENT_BINARY_DIR}/haze_menu_pages/ppu_recomp_001.cpp")
+    add_custom_command(OUTPUT "${HAZE_MENU_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_pages.py"
+            "${HAZE_MENU_SOURCE}" "${HAZE_MENU_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_material.py"
+              "${HAZE_MENU_PATCHED}" "${HAZE_MENU_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_lifetime.py"
+              "${HAZE_MENU_PATCHED}" "${HAZE_MENU_PATCHED}"
+        DEPENDS "${HAZE_MENU_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_pages.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_material.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_menu_lifetime.py"
+        VERBATIM)
+    list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_MENU_SOURCE}")
+    list(APPEND RECOMP_SOURCES "${HAZE_MENU_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_menu_guest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_guest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_native_menu.cpp")
+    set_property(SOURCE "${HAZE_MENU_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
+endif()
+
 # Built from source as a subdirectory rather than imported as a prebuilt
 # archive. A static library carries none of its own link requirements, so an
 # imported one arrives without SDL2, pthreads, the Metal frameworks or the
@@ -205,6 +267,68 @@ endif()
 # ---------------------------------------------------------------------------
 # The HLE NID table
 # ---------------------------------------------------------------------------
+if(WIN32)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(HAZE_SAVEDATA_SOURCE "${PS3RECOMP_DIR}/libs/system/cellSaveData.c")
+    set(HAZE_SAVEDATA_PATCH "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_savedata.py")
+    set(HAZE_SAVEDATA_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/haze_savedata/cellSaveData.c")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HAZE_SAVEDATA_SOURCE}" "${HAZE_SAVEDATA_PATCH}")
+    execute_process(COMMAND "${Python3_EXECUTABLE}" "${HAZE_SAVEDATA_PATCH}"
+        "${HAZE_SAVEDATA_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}" "${HAZE_SAVEDATA_OUTPUT}"
+        RESULT_VARIABLE HAZE_SAVEDATA_RESULT)
+    if(NOT HAZE_SAVEDATA_RESULT EQUAL 0)
+        message(FATAL_ERROR "Could not prepare the audited Audio save transaction")
+    endif()
+    # The extension accesses private descriptor/resource state. Require an
+    # explicit audit when the pinned renderer changes, including on LF checkouts.
+    set(HAZE_RSX_SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c")
+    file(READ "${HAZE_RSX_SOURCE}" HAZE_RSX_TEXT)
+    string(REPLACE "\r\n" "\n" HAZE_RSX_TEXT "${HAZE_RSX_TEXT}")
+    string(SHA256 HAZE_RSX_HASH "${HAZE_RSX_TEXT}")
+    # Packed depth adds renderer-owned resources and descriptor slots. The live
+    # settings transaction still fences before sampler/postprocess changes;
+    # display rollback only replaces scanout buffers. Neither owns depth copies.
+    if(NOT HAZE_RSX_HASH STREQUAL "3707dcdf73fc0f8dfefd57273845c1c7073a6a50d891d28c3f2140676d8e4721")
+        message(FATAL_ERROR "Renderer changed: audit the Haze live-settings transaction before building")
+    endif()
+    # Capture while DXGI still owns this backbuffer, before Present rotates it.
+    string(REPLACE "ld_flush(LD_FLUSH_MOVIE_PRESENT);"
+        "ld_flush(LD_FLUSH_MOVIE_PRESENT);\n    haze_movie_capture_backbuffer(bbi);"
+        HAZE_RSX_TEXT "${HAZE_RSX_TEXT}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/haze_rsx_live_draw.c" "${HAZE_RSX_TEXT}")
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/haze_video_backend.c"
+        TARGET_DIRECTORY ps3recomp_runtime APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
+    get_target_property(HAZE_SDK_SOURCES ps3recomp_runtime SOURCES)
+    list(REMOVE_ITEM HAZE_SDK_SOURCES "${HAZE_RSX_SOURCE}")
+    list(REMOVE_ITEM HAZE_SDK_SOURCES "${HAZE_SAVEDATA_SOURCE}")
+    list(APPEND HAZE_SDK_SOURCES "${HAZE_SAVEDATA_OUTPUT}")
+    list(APPEND HAZE_SDK_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/haze_video_backend.c")
+    set(HAZE_AUDIO_SOURCE "${PS3RECOMP_DIR}/libs/audio/cellAudio.c")
+    file(READ "${HAZE_AUDIO_SOURCE}" HAZE_AUDIO_TEXT)
+    string(REPLACE "\r\n" "\n" HAZE_AUDIO_TEXT "${HAZE_AUDIO_TEXT}")
+    string(SHA256 HAZE_AUDIO_HASH "${HAZE_AUDIO_TEXT}")
+    # SDK 3cd8e81 changes downmix routing and a per-port diagnostic counter.
+    # The mixer thread flag/handle, locks and shutdown path remain unchanged.
+    if(NOT HAZE_AUDIO_HASH STREQUAL "b174688dc8ae62fa67f35888477b5543310cdfee33e6f613e9bb796b7b0c0504")
+        message(FATAL_ERROR "Audio backend changed: audit native output shutdown before building")
+    endif()
+    list(REMOVE_ITEM HAZE_SDK_SOURCES "${HAZE_AUDIO_SOURCE}")
+    list(APPEND HAZE_SDK_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_backend.c")
+    file(READ "${PS3RECOMP_DIR}/libs/codec/cellSail.c" HAZE_SAIL_TEXT)
+    string(REPLACE "\r\n" "\n" HAZE_SAIL_TEXT "${HAZE_SAIL_TEXT}")
+    string(SHA256 HAZE_SAIL_HASH "${HAZE_SAIL_TEXT}")
+    if(NOT HAZE_SAIL_HASH STREQUAL "211a0bbfd9423b57f339817a41b7617a759122f5c8ce1f52df7e4c57c7ef3040")
+        message(FATAL_ERROR "SAIL changed: audit the Haze playback lifecycle bridge")
+    endif()
+    list(REMOVE_ITEM HAZE_SDK_SOURCES "${PS3RECOMP_DIR}/libs/codec/cellSail.c")
+    list(APPEND HAZE_SDK_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/haze_sail_backend.c")
+    set_property(TARGET ps3recomp_runtime PROPERTY SOURCES "${HAZE_SDK_SOURCES}")
+    if(HAZE_RSX_PROFILE)
+        set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/haze_video_backend.c"
+            TARGET_DIRECTORY ps3recomp_runtime APPEND PROPERTY COMPILE_DEFINITIONS YZ_PERF_PROFILE)
+    endif()
+endif()
+
 # Maps each firmware import NID onto the handler in the runtime that answers
 # it. A port may keep a hand-curated one beside its lift; otherwise generate
 # the canonical every-module table, which is what the toolkit's own boot
@@ -368,13 +492,25 @@ add_executable(${PROJECT_NAME}
     haze_job0_kernel.cpp
     haze_spu_triplet_copy.cpp
     haze_graphics.cpp
+    haze_graphics_live.cpp
+    haze_menu_pointer.cpp
+    haze_video_menu.cpp
+    haze_audio_menu.cpp
+    haze_save_status.cpp
+    haze_quit.cpp
+    haze_quit_guest.cpp
+    haze_quit_menu.cpp
     haze_display.cpp
+    haze_display_preview.cpp
     haze_spu_idle.c
     ${PS3RECOMP_SCAFFOLD}
     ${HLE_NID_TABLE}
     ${RECOMP_SOURCES}
     ${SPU_SOURCES}
 )
+if(WIN32)
+    target_sources(${PROJECT_NAME} PRIVATE haze_profile_transaction.cpp)
+endif()
 set_property(SOURCE haze_spu_idle.c APPEND PROPERTY
     INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")
 
@@ -429,6 +565,8 @@ endif()
 if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/app.rc")
     target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/app.rc")
 endif()
+include(windows-icon.cmake)
+haze_local_icon(${PROJECT_NAME})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     "${RECOMP_DIR}"                            # the generated ppu_recomp.h
@@ -457,8 +595,30 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 if(WIN32)
     include(controller-dependency.cmake)
-    target_sources(${PROJECT_NAME} PRIVATE haze_gamepad.cpp haze_prompts.cpp)
-    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3 windowscodecs ole32)
+    include(movie-dependency.cmake)
+    target_sources(${PROJECT_NAME} PRIVATE haze_movie.cpp haze_movie_decode.cpp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE HazeMovieCodec)
+    haze_movie_runtime(${PROJECT_NAME})
+    add_executable(HazeMovieDecodeTest EXCLUDE_FROM_ALL ../tests/test_movie_decode.cpp haze_movie_decode.cpp)
+    target_include_directories(HazeMovieDecodeTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(HazeMovieDecodeTest PRIVATE HazeMovieCodec)
+    target_compile_options(HazeMovieDecodeTest PRIVATE /UNDEBUG)
+    haze_movie_runtime(HazeMovieDecodeTest)
+    add_executable(HazeMoviePlaybackTest EXCLUDE_FROM_ALL ../tests/test_movie_playback.cpp haze_movie.cpp haze_movie_decode.cpp)
+    target_include_directories(HazeMoviePlaybackTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(HazeMoviePlaybackTest PRIVATE HazeMovieCodec SDL3::SDL3)
+    target_compile_options(HazeMoviePlaybackTest PRIVATE /UNDEBUG)
+    haze_movie_runtime(HazeMoviePlaybackTest)
+    add_executable(HazeMovieSailTest EXCLUDE_FROM_ALL ../tests/test_movie_sail.c)
+    target_include_directories(HazeMovieSailTest PRIVATE "${PS3RECOMP_DIR}/include" "${PS3RECOMP_DIR}/libs/codec")
+    target_compile_options(HazeMovieSailTest PRIVATE /UNDEBUG)
+    add_executable(HazeMoviePamfTest EXCLUDE_FROM_ALL ../tests/test_movie_pamf.cpp)
+    target_include_directories(HazeMoviePamfTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(HazeMoviePamfTest PRIVATE /UNDEBUG)
+    add_subdirectory(launcher)
+    target_sources(${PROJECT_NAME} PRIVATE haze_gamepad.cpp haze_prompts.cpp haze_controls_settings.cpp haze_controls_menu.cpp)
+    target_sources(${PROJECT_NAME} PRIVATE haze_steam_vdf.cpp haze_steam_names.cpp haze_steam_win32.cpp haze_steam_art.cpp haze_steam_menu.cpp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3 windowscodecs ole32 comdlg32 advapi32)
     if(TARGET SDL3::SDL3-shared)
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

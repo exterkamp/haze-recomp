@@ -8,6 +8,9 @@
 static bool focused=true;
 static bool keys[256];
 static ULONGLONG ticks=100;
+static unsigned graphics_reloads;
+void haze_graphics_request_reload() { ++graphics_reloads; }
+std::string haze_graphics_notice() { return {}; }
 static SHORT test_key(int vk) { return keys[vk] ? (SHORT)0x8000 : 0; }
 static HWND test_foreground() { return focused ? (HWND)1 : nullptr; }
 static DWORD test_owner(HWND hwnd,DWORD* pid) { *pid=hwnd ? GetCurrentProcessId() : 0; return 1; }
@@ -76,18 +79,95 @@ HazeGamepadState haze_gamepad_update() { return fake_pad; }
 void haze_gamepad_shutdown() {}
 void haze_prompts_initialize(const char*) {}
 void haze_prompts_update(HazeInputFamily) {}
+static bool native_menu_active;
+bool haze_menu_active() { return native_menu_active; }
+bool haze_menu_blocks_input() { return native_menu_active; }
+bool haze_menu_capture_key(int) { return false; }
+bool haze_menu_has_focus() { return false; }
+void haze_menu_update(void*,const HazeGamepadState&) {}
+static bool menu_exiting_process;
+void haze_menu_shutdown(bool exiting_process) { menu_exiting_process=exiting_process; }
+void haze_video_menu_register() {}
+void haze_audio_menu_register() {}
+void haze_controls_menu_register() {}
+void haze_steam_menu_register() {}
+void haze_quit_menu_register() {}
+static bool quit_active=false,close_accepted=false;
+bool haze_quit_menu_active() { return quit_active; }
+bool haze_quit_menu_has_focus() { return false; }
+bool haze_quit_menu_key(int,bool) { return false; }
+void haze_quit_menu_update(void*,const HazeGamepadState&) {}
+void haze_quit_menu_shutdown() {}
+HazeQuitOffer haze_quit_offer() { return {}; }
+bool haze_quit_window_close() { return close_accepted; }
 static CellPadHostInput sample() {
     CellPadHostInput input{0,128,128,128,128,0,0};
     assert(poll(0,&input,nullptr)==1);
     return input;
 }
 int main() {
+    window_proc((HWND)1,WM_KEYDOWN,VK_F6,0);
+    window_proc((HWND)1,WM_KEYDOWN,VK_F6,1ll<<30);
+    assert(graphics_reloads==1 && message_keys[VK_F6]==0);
     _set_error_mode(_OUT_TO_STDERR);
     _set_abort_behavior(0,_CALL_REPORTFAULT);
     window=(HWND)1;
     for (auto& b : bindings) b.vk=key_code(b.fallback);
     assert(key_code("w")=='W'); assert(key_code("Mouse2")==VK_RBUTTON);
     assert(sample().lx==128);
+    native_menu_active=true; keys['W']=keys[VK_SPACE]=keys[VK_LBUTTON]=true;
+    auto blocked=sample(); assert(!blocked.buttons && blocked.lx==128 && blocked.ly==128);
+    native_menu_active=false; keys[VK_NUMLOCK]=keys[VK_CAPITAL]=keys[VK_SCROLL]=true;
+    haze_input_menu_return();
+    assert(!sample().buttons && menu_return_pending);
+    assert(!haze_input_take_pointer().back); // Closing keys must be released.
+    keys['W']=keys[VK_SPACE]=keys[VK_LBUTTON]=false;
+    for (int i=0;i<100;++i) assert(!sample().buttons);
+    assert(menu_return_pending); // Arbitrary GetInfo/backend polls cannot lose Back.
+    focused=false;
+    assert(!haze_input_take_pointer().back && menu_return_pending);
+    focused=true; gamepad_initialized=true; controller_sample_focused=false;
+    assert(!haze_input_take_pointer().back && menu_return_pending);
+    controller_sample_focused=true;
+    auto back=haze_input_take_pointer();
+    assert(back.active && back.back && !back.pressed && !back.held && !back.released);
+    assert(!menu_return_pending && !haze_input_take_pointer().back);
+    // Lock keys are unrelated to the close action and must not strand Back.
+    assert(keys[VK_NUMLOCK] && keys[VK_CAPITAL] && keys[VK_SCROLL]);
+    keys[VK_NUMLOCK]=keys[VK_CAPITAL]=keys[VK_SCROLL]=false;
+    gamepad_initialized=false;
+    haze_input_menu_return(); haze_input_menu_state(false);
+    assert(!menu_return_pending && !haze_input_take_pointer().back);
+    assert(!sample().buttons);
+    keys[VK_SPACE]=true; haze_input_menu_retail();
+    assert(!sample().buttons && menu_return_pending);
+    assert(!haze_input_take_pointer().back && menu_return_pending);
+    keys[VK_SPACE]=false;
+    assert(!haze_input_take_pointer().back && !menu_return_pending);
+    assert(!sample().buttons); // Retail handoff never injects Back.
+    quit_active=true; keys['W']=keys[VK_SPACE]=true;
+    menu_pointer.active=menu_pointer.released=menu_pointer.back=true;
+    auto quit_pointer=haze_input_take_pointer();
+    assert(!quit_pointer.active && !quit_pointer.released && !quit_pointer.back);
+    blocked=sample(); assert(!blocked.buttons && blocked.ly==128);
+    double quit_x,quit_y,quit_speed; bool quit_invert;
+    assert(!haze_input_take_mouse(quit_x,quit_y,quit_speed,quit_invert));
+    quit_active=false; keys['W']=keys[VK_SPACE]=false;
+    haze_input_menu_retail(); assert(!sample().buttons && menu_return_pending);
+    assert(!haze_input_take_pointer().back && !menu_return_pending);
+    close_accepted=true; forwarded_message=0; window_proc(window,WM_CLOSE,0,0);
+    assert(forwarded_message!=WM_CLOSE);
+    quit_active=true;
+    for (int i=0;i<12;++i) {
+        const auto pause=sample();
+        assert(pause.buttons==CELL_PAD_CTRL_START && pause.lx==128 && pause.ly==128);
+    }
+    assert(!sample().buttons); // One held Start burst, never repeated toggles.
+    window_proc(window,WM_CLOSE,0,0); menu_active=true;
+    assert(!sample().buttons && !quit_pause_polls); // Stop once a native menu opens.
+    menu_active=false; window_proc(window,WM_CLOSE,0,0); quit_active=false;
+    assert(!sample().buttons && !quit_pause_polls); // Cancel drops pending injection.
+    close_accepted=false; window_proc(window,WM_CLOSE,0,0); assert(forwarded_message==WM_CLOSE);
     keys['W']=keys['D']=keys[VK_SPACE]=true;
     auto p=sample(); assert(p.lx==255 && p.ly==1 && (p.buttons&CELL_PAD_CTRL_CROSS));
     keys['S']=keys['A']=true;
@@ -235,6 +315,7 @@ int main() {
     assert(!(sample().buttons&CELL_PAD_CTRL_R3));
     captured=0; invert_y=false;
     // Lifecycle-bounded skip survives unfocused boot, then cannot confirm a menu.
+    startup_skip.configure(true,true);
     const char* uri="x-cell-fs:///dev_bdvd/PS3_GAME/USRDIR/assets/g5/pamf/frd.pam";
     assert(startup_skip.playback(123,uri,true,ticks));
     focused=false; ticks+=400;
@@ -274,7 +355,7 @@ int main() {
     GetFullPathNameA("local/test-input-reload.ini",MAX_PATH,config_path,nullptr);
     {
         std::ofstream file(config_path);
-        file<<"[Bindings]\nCross=J\nForward=I\n[Mouse]\nSensitivity=0.25\nInvertY=1\n";
+        file<<"[Bindings]\nCross=J\nStart=K\nForward=I\n[Mouse]\nSensitivity=0.25\nInvertY=1\n";
     }
     config_time={}; next_config_check=0; ticks+=10;
     haze_input_update();
@@ -282,6 +363,9 @@ int main() {
     p=sample(); assert((p.buttons&CELL_PAD_CTRL_CROSS) && p.ly==1);
     keys['J']=keys['I']=false;
     assert(sensitivity==.25 && invert_y);
+    keys[VK_RETURN]=true; assert(!(sample().buttons&CELL_PAD_CTRL_START));
+    keys[VK_RETURN]=false; keys['K']=true; assert(sample().buttons&CELL_PAD_CTRL_START);
+    keys['K']=false; assert(!(sample().buttons&CELL_PAD_CTRL_START));
     // A rebound manual skip cannot activate Start, including across focus loss.
     startup_skip.configure(false,true);
     assert(startup_skip.playback(123,uri,true,ticks));
@@ -325,6 +409,10 @@ int main() {
     assert(!HazeStartupSkip::known_video(nullptr));
     assert(!HazeStartupSkip::known_video("frd.pam"));
     assert(!HazeStartupSkip::known_video("x-cell-fs:///dev_bdvd/PS3_GAME/USRDIR/assets/g5/pamf/story.pam"));
+    assert(isolated.playback(123,uri,true,100));
+    assert(!isolated.filter(500,0,true,cross)); // Playback is the default.
+    assert(isolated.filter(500,cross,true,cross)==cross);
+    isolated.configure(true,true);
     assert(isolated.playback(123,uri,true,100));
     assert(!isolated.filter(399,0,true,cross));
     assert(isolated.filter(400,0,true,cross)==cross);
@@ -394,5 +482,6 @@ int main() {
     capture_policy={}; capture_policy.enabled=false; enabled=false;
     haze_input_attach((void*)1); ticks+=10; haze_input_update(); assert(!captured);
     haze_input_shutdown();
+    assert(menu_exiting_process);
     puts("Haze keyboard taps, focus release, mouse capture gating and movie skip isolation passed.");
 }
