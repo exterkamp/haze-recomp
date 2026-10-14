@@ -299,7 +299,10 @@ if(WIN32)
     # SDK 701292f moves owned shader-cache file writes to a bounded worker.
     # It borrows no renderer/COM state; settings and descriptor ownership are
     # unchanged. Both native quit and window close stop cache admission.
-    if(NOT HAZE_RSX_HASH STREQUAL "5a7a04825039d06356a3c68842f026cf38eda2b2130dd4f9492c4e32de5b936a")
+    # SDK 7d0e132 retains derived VP metadata under the existing dispatcher
+    # ownership. Program writes/reset invalidate it; constants stay live.
+    # No resources, descriptors, or settings transaction ownership changes.
+    if(NOT HAZE_RSX_HASH STREQUAL "5a6f44bf60a52118463cb6ff63bb2ef9f77b44ac8f30f54f640a2d439d6e315d")
         message(FATAL_ERROR "Renderer changed: audit the Haze live-settings transaction before building")
     endif()
     # Capture while DXGI still owns this backbuffer, before Present rotates it.

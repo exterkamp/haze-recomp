@@ -574,6 +574,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Vertex program cache test compilation failed.' }
     & $vpCacheTest
     if ($LASTEXITCODE -ne 0) { throw 'Vertex program cache content validation failed.' }
+    $vpMirrorTest = Join-Path $root 'local/test_vp_mirror_cache.exe'
+    & $clang /nologo /W0 /O2 /std:c11 "/I$sdk/include" "/Fe$vpMirrorTest" "/Fo$root/local/" "$sdk/libs/video/tests/test_vp_mirror_cache.c" "$sdk/libs/video/rsx_dispatch.c" "$sdk/libs/video/rsx_vp_burst.c" "$sdk/libs/video/rsx_vp_program_cache.c" "$sdk/libs/video/rsx_vp_decompiler.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex program mirror cache test compilation failed.' }
+    & $vpMirrorTest
+    if ($LASTEXITCODE -ne 0) { throw 'Vertex program mirror mutation validation failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
     & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }
