@@ -127,6 +127,14 @@ Evidence prefix: `local/jungle-deferred-texture-logs-a1`, including
 `-before-close.json`, `-deferred-validation.json`, diagnostic reports and failed
 isolation gates. Build/identity records use `local/deferred-texture-logs-*`.
 
+A local interactive WIP is packaged at
+`local/releases/haze-wip-2026-10-14-deferred-texture-logs/Play-Haze.cmd` with the
+same executable hash. It preserves the previous WIP's graphics.ini, uses normal
+saves/input/audio and fixed performance policy, and clears benchmark controls
+and deferred diagnostic CSV paths. PowerShell syntax and binary identity are
+checked; the old WIP is preserved. The live validation above exercises this
+binary through the muted private-fixture runner, not an unmuted launcher test.
+
 Evidence prefix: `local/jungle-texture-hash-reasons-a1`, including raw draw,
 FIFO/flush, pump/present/camera records; windows and process/resource observations;
 comparison/slow-draw reports; and `-logging-attribution.json` with full callback
