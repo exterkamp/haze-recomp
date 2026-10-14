@@ -13,7 +13,7 @@ KINDS = {1: 'submit', 2: 'dispatch_including_trampolines', 3: 'transform_kernel'
          13: 'spu_create_failed', 14: 'spu_setup_failed', 15: 'spu_reuse_worker',
          16: 'spu_dispatch_discovery'}
 
-DISPATCH_CAUSES = {0: 'unknown', 1: 'create', 2: 'task_exit', 3: 'poll'}
+DISPATCH_CAUSES = {0: 'unknown', 1: 'create', 2: 'task_exit', 3: 'poll', 4: 'ready_wake'}
 
 
 def union_ticks(intervals):
@@ -84,7 +84,9 @@ def join_async_jobs(events):
             raise ValueError('SDK snapshot identity changed across phases')
         discovery = phases.get(16)
         if discovery:
-            if discovery['arg4'] not in DISPATCH_CAUSES or discovery['arg5'] != discovery['begin_qpc'] or discovery['arg6'] or discovery['arg7']:
+            if (discovery['arg4'] not in DISPATCH_CAUSES or
+                    discovery['arg5'] != discovery['begin_qpc'] or
+                    discovery['arg6'] > discovery['begin_qpc'] or discovery['arg7']):
                 raise ValueError('Invalid SDK dispatch provenance')
             submit = phases.get(7)
             if submit and (discovery['end_qpc'] != submit['begin_qpc'] or
@@ -218,11 +220,23 @@ def summarize_wait_phases(events, jobs, lo, hi, scale, frames):
         a, b = wait['begin_qpc'], wait['end_qpc']
         discovery = phases.get(16)
         provenance = group.setdefault('discovery', defaultdict(lambda: {
-            'waits': 0, 'before_claim': [], 'claim_to_submit': []}))
+            'waits': 0, 'before_claim': [], 'claim_to_submit': [],
+            'observed_ready_waits': 0, 'before_ready': [], 'ready_to_claim': [],
+            'unknown_ready_before_claim': []}))
         cause = DISPATCH_CAUSES[discovery['arg4']] if discovery else 'missing'
         bucket = provenance[cause]
         bucket['waits'] += 1
         if discovery:
+            ready = discovery['arg6']
+            bucket['observed_ready_waits'] += bool(ready)
+            readiness_segments = (
+                ('before_ready', submit['begin_qpc'], ready),
+                ('ready_to_claim', ready, discovery['begin_qpc'])) if ready else (
+                ('unknown_ready_before_claim', submit['begin_qpc'], discovery['begin_qpc']),)
+            for name, start, end in readiness_segments:
+                start, end = max(a, start), min(b, end)
+                if end > start:
+                    bucket[name].append((start, end))
             for name, start, end in (
                     ('before_claim', submit['begin_qpc'], discovery['begin_qpc']),
                     ('claim_to_submit', discovery['begin_qpc'], sdk['begin_qpc'])):
@@ -265,6 +279,10 @@ def summarize_wait_phases(events, jobs, lo, hi, scale, frames):
                                               for name in phase_names},
                        'dispatch_provenance': {
                            cause: {'waits': bucket['waits'],
+                                   'observed_ready_waits': bucket['observed_ready_waits'],
+                                   'before_ready_wait_ms_per_frame': union_ticks(bucket['before_ready']) * scale / frames,
+                                   'ready_to_claim_wait_ms_per_frame': union_ticks(bucket['ready_to_claim']) * scale / frames,
+                                   'unknown_ready_before_claim_wait_ms_per_frame': union_ticks(bucket['unknown_ready_before_claim']) * scale / frames,
                                    'before_claim_wait_ms_per_frame': union_ticks(bucket['before_claim']) * scale / frames,
                                    'claim_to_submit_wait_ms_per_frame': union_ticks(bucket['claim_to_submit']) * scale / frames}
                            for cause, bucket in group['discovery'].items()}})

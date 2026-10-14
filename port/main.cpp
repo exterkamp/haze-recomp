@@ -50,7 +50,8 @@ static void haze_spu_trace(unsigned phase, const spu_async_trace_snapshot* job,
     if (phase == SPU_ASYNC_TRACE_DISPATCH_DISCOVERY) {
         args[4] = job->dispatch_cause;
         args[5] = job->claim_qpc;
-        args[6] = args[7] = 0;
+        args[6] = job->ready_qpc;
+        args[7] = 0;
     }
     haze_job_trace_interval(phase + 6, begin, end, args, 8);
 }

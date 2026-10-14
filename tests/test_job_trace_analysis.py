@@ -67,7 +67,10 @@ class JobTraceAnalysis(unittest.TestCase):
         group, = summarize_wait_phases(rows, jobs, 0, 200, 1, 2)['groups']
         self.assertEqual(group['dispatch_provenance'], {'poll': {
             'waits': 2, 'before_claim_wait_ms_per_frame': 2,
-            'claim_to_submit_wait_ms_per_frame': 5}})
+            'claim_to_submit_wait_ms_per_frame': 5,
+            'observed_ready_waits': 0, 'before_ready_wait_ms_per_frame': 0,
+            'ready_to_claim_wait_ms_per_frame': 0,
+            'unknown_ready_before_claim_wait_ms_per_frame': 2}})
         self.assertEqual(group['phase_ms_per_frame']['before_sdk_submit'], 7)
         next(r for r in rows if r['kind'] == 9)['arg7'] = 1
         with self.assertRaisesRegex(ValueError, 'snapshot identity'):
@@ -78,12 +81,29 @@ class JobTraceAnalysis(unittest.TestCase):
         submit = next(r for r in rows if r['kind'] == 7)
         discovery = dict(submit, kind=16, begin_qpc=5, arg4=3, arg5=5, arg6=0, arg7=0)
         rows.append(discovery)
-        for field, value in (('end_qpc', 11), ('host_tid', 7), ('arg4', 99), ('arg5', 4)):
+        for field, value in (('end_qpc', 11), ('host_tid', 7), ('arg4', 99), ('arg5', 4), ('arg6', 6)):
             previous = discovery[field]
             discovery[field] = value
             with self.assertRaises(ValueError):
                 join_async_jobs(rows)
             discovery[field] = previous
+
+    def test_observed_readiness_splits_claim_wait_without_changing_phase_total(self):
+        rows = self.reused_slot_events()
+        for submit in list(rows):
+            if submit['kind'] != 7:
+                continue
+            rows.append(dict(submit, kind=16, begin_qpc=submit['begin_qpc']-3,
+                             arg4=4, arg5=submit['begin_qpc']-3,
+                             arg6=submit['begin_qpc']-5, arg7=0))
+        group, = summarize_wait_phases(rows, join_async_jobs(rows), 0, 200, 1, 2)['groups']
+        bucket = group['dispatch_provenance']['ready_wake']
+        self.assertEqual(bucket['observed_ready_waits'], 2)
+        self.assertEqual(bucket['before_ready_wait_ms_per_frame'], 2)
+        self.assertEqual(bucket['ready_to_claim_wait_ms_per_frame'], 2)
+        self.assertEqual(bucket['before_claim_wait_ms_per_frame'], 4)
+        self.assertEqual(bucket['claim_to_submit_wait_ms_per_frame'], 3)
+        self.assertEqual(group['phase_ms_per_frame']['before_sdk_submit'], 7)
 
     def test_async_thread_can_finish_before_create_returns(self):
         def row(kind, lo, hi, tid):
