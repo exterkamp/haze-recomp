@@ -152,3 +152,57 @@ join is for the same waited-on job generation; unrelated later submissions
 or main-loop ordering cannot explain it by themselves. Preserve claim
 ownership, readiness predicates, completion ordering and fallback coverage
 when prototyping an event-driven consumer.
+
+## Dispatch provenance capture
+
+SDK `e816b27bacf71f64e527a1c5661cbb114aa3b404`, integrated by root
+`8da95bc4daeadc1fdda02ea7da3c22d4a606d6b2`, tags successful task claims as
+creation, task-exit, or fallback-poll launches. The same immutable SDK job ID
+carries claim QPC through submission; new kind 16 spans claim-to-submit.
+Ordinary builds do not query QPC, and the diagnostic callback must be installed
+before workers start. Existing readiness/claim order is preserved.
+Tests pass: taskset dispatch contracts, 40,000 concurrent create/exit cycles,
+nine job-trace analyzer cases and four wait-to-frame cases. A two-job diagnostic
+build succeeds. Discovery endpoint/TID and job identity mismatches are rejected
+by the analyzer; unknown/missing provenance is explicit.
+
+Candidate `local/candidates/dispatch-provenance/HazeRecomp.exe`:
+
+- EXE SHA256: `E138F08107395A2E5D2AD6FD079C577EC2BDDB4C255F6626AB8CADB70C02F45E`
+- PDB SHA256: `53410BB95DBF5F58AEF05172B9B3B952FD34B33CDE1342BB8B589D07EF577507`
+- Run `20261014-030101-887`, PID 37424; prefix
+  `local/jungle-dispatch-provenance-a1-*`.
+- Same private baseline/config/cache procedure and fixed modes as above;
+  muted, boot reporting off, tutorial completed/Nectar drained, PAD detached.
+- Two 15-second sweeps, tokens 3820/3821, 10 MHz QPC:
+  `14591055573580..14591205576521` and
+  `14591255589390..14591405594401`.
+- 2,704 present intervals: **90.209 FPS, mean 11.085 ms, median 10.864 ms**,
+  p95 13.897, p99 16.233, maximum 20.658; zero over 33.333 ms.
+- Camera/mode/process checks pass; nine resource samples bracket both windows,
+  maximum gap 5.341 seconds, memory 54.55–54.78%, no observed compiler/other
+  Haze. No owned build/capture/heavy analysis overlaps timing. Normal exit zero;
+  all seven immutable save hashes unchanged.
+- All 2,097,152 retained job events are consecutive, with zero drops, missing
+  tickets/parents or incomplete scopes. Discarded cutoff `14590910081226`
+  precedes both windows. Strict wait-to-frame retention checks pass; zero
+  skipped joins in both windows.
+
+| Matched waited-on image | Poll launches / waits | Poll pre-claim wait ms/frame, windows 0 / 1 | Poll claim-to-submit wait ms/frame, windows 0 / 1 |
+| --- | ---: | ---: | ---: |
+| 41 | 20,840 / 21,648 (96.3%) | 0.557 / 0.566 | 0.046 / 0.045 |
+| 43 | 2,558 / 2,715 (94.2%) | 0.612 / 0.597 | 0.030 / 0.033 |
+| 30 | 2,431 / 2,795 (87.0%) | 0.036 / 0.030 | 0.003 / 0.002 |
+
+Remaining matched waits have task-exit launch provenance. These results confirm
+that the fallback polling path claims most waited-on jobs in these images;
+they do **not** prove all pre-claim time is scheduler delay. It includes time
+before a task is ready, work performed by the consumer, and descheduling.
+Claim-to-submit preparation is comparatively small for images 41/43.
+No timing difference from other instrumented captures is treated as a gain.
+
+Track the native readiness-wakeup replacement separately in **#94**. Its next
+measurement must observe actual eligibility publication and distinguish
+not-ready time from ready-to-claim latency. Preserve the current readiness
+predicate, claim ownership and bounded fallback, then use ordinary-build
+OFF/ON measurements before promotion.
