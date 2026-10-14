@@ -102,3 +102,40 @@ clean exit or further guest calls, continuous-traffic checkpoints, and failed
 open with low idle CPU and clean shutdown. The existing SDK milestone suite
 also passes. The blocked-writer case includes concurrent/idempotent dump calls.
 These are implementation checks; a full game build and live check are separate.
+
+## Live asynchronous-output validation
+
+Haze `31bab7a` / SDK `c64652d` builds successfully with two jobs. Candidate
+`texture-inner-async` SHA-256 is
+`193D3E9B8C9E9B83F3DC303C0D588A66FAC248188A4D7B1FCBE726B202A341D0`.
+Muted run `20261013-235526-294`, PID 55384, uses the same private jungle fixture
+and fixed 1440p controls, with milestones explicitly enabled and detailed
+renderer recorders disabled. The settled scene is checked and PAD_FILE detached.
+The game exits normally; the 812,308-byte milestone log contains 152 contiguous
+first-key ordinals, 161 count checkpoints, no overflow marker and exactly one
+final `# end`. Original save hashes still match.
+
+A 90.012-second producer capture (TID 56804, camera token 3580) triggers after
+25 ms without observed present progress. All three samples are retained across
+two episodes. The maximum counter-poll gap is 84.289 ms, so the capture misses
+some hitches; this is not complete attribution. One sample is in
+`WaitOnAddress -> gcm_fifo_wait_for_publication -> gcm_fifo_wait_for_ea ->
+cellGcm_fifo_recycle`. Two subsequent samples lie inside pump frame 48138:
+
+- `vm_read32+0x82 -> func_0051A6C0 -> func_002254A0 -> ... -> func_00680FA0`
+- `vm_read32+0x1 -> func_004B90D0 -> ... -> func_005FBB70 -> func_00680FA0`
+
+Frame 48138 is 40.1796 ms: 31.8087 ms command waits, 6.2776 ms FIFO and
+1.9412 ms presentation. Its two suspension brackets total 3.9383 ms. The
+43.2246-ms maximum frame is unsampled. No sampled producer stack contains
+milestone file I/O, but three observations cannot prove all hitches gone or
+assign CPU shares. These stacks motivate inspecting command-buffer handoff
+and the identified game-code paths.
+
+All 7,320 perturbed intervals are retained: 81.331 FPS / 12.295 ms mean,
+15.829 ms p95 / 18.830 ms p99 / 43.224 ms max, three above 33.333 ms and none
+above 50 ms. This is not an FPS comparison or release acceptance. Another
+Haze PID 51756 overlaps, so isolation fails; no compiler overlaps. Nineteen
+resource samples have a maximum 5.368-second gap, memory 53.46-54.18%.
+Evidence prefix: `local/jungle-milestone-async-live-a1`, including correlated
+stacks and failed isolation reports.
