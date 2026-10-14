@@ -88,6 +88,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'FIFO slow-drain lock/body diagnostic regression failed.' }
     & $python "$root/tests/test_fifo_recycle_trace.py" --compiler $clang --sdk $sdk --output-dir "$root/build/fifo-recycle-trace"
     if ($LASTEXITCODE -ne 0) { throw 'FIFO recycle acknowledgement diagnostic regression failed.' }
+    & $python -m unittest tests.test_analyze_fifo_recycles
+    if ($LASTEXITCODE -ne 0) { throw 'FIFO recycle QPC attribution regression failed.' }
     & $python "$root/tests/test_rsx_slow_flush.py" --compiler $clang --sdk $sdk --output-dir "$root/build/rsx-slow-flush"
     if ($LASTEXITCODE -ne 0) { throw 'RSX slow-flush phase and failure diagnostic regression failed.' }
     & $python "$root/tests/test_rsx_slow_draw_ordinary.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/rsx-slow-draw-ordinary"
