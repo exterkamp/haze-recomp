@@ -442,6 +442,10 @@ if ($Test) {
         & $publicationTest
         if ($LASTEXITCODE -ne 0) { throw 'Concurrent task publication and recycling test failed.' }
     } finally { $env:PS3_VERBOSE = $oldVerbose }
+    & $python "$sdk/runtime/spu/tests/test_taskset_wake_watch.py" --compiler $clang
+    if ($LASTEXITCODE -ne 0) { throw 'Taskset readiness watcher test failed.' }
+    & $python "$sdk/runtime/spu/tests/test_taskset_wake_integration.py" --compiler $clang
+    if ($LASTEXITCODE -ne 0) { throw 'Taskset wake policy/dispatch integration test failed.' }
     $drawBatchTest = Join-Path $root 'local/test_draw_batches.exe'
     & $clang /nologo /W0 /O1 "/Fe$drawBatchTest" "/Fo$root/local/test_draw_batches.obj" "$sdk/libs/video/tests/test_draw_batches.c"
     if ($LASTEXITCODE -ne 0) { throw 'Draw-packet storage test compilation failed.' }
