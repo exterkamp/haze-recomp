@@ -284,13 +284,17 @@ if(WIN32)
     # The extension accesses private descriptor/resource state. Require an
     # explicit audit when the pinned renderer changes, including on LF checkouts.
     set(HAZE_RSX_SOURCE "${PS3RECOMP_DIR}/libs/video/rsx_live_draw.c")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HAZE_RSX_SOURCE}")
     file(READ "${HAZE_RSX_SOURCE}" HAZE_RSX_TEXT)
     string(REPLACE "\r\n" "\n" HAZE_RSX_TEXT "${HAZE_RSX_TEXT}")
     string(SHA256 HAZE_RSX_HASH "${HAZE_RSX_TEXT}")
     # Packed depth adds renderer-owned resources and descriptor slots. The live
     # settings transaction still fences before sampler/postprocess changes;
     # display rollback only replaces scanout buffers. Neither owns depth copies.
-    if(NOT HAZE_RSX_HASH STREQUAL "3707dcdf73fc0f8dfefd57273845c1c7073a6a50d891d28c3f2140676d8e4721")
+    # SDK 562bfac GPU pulling shares the existing fenced vertex-upload ring;
+    # decoded geometry caches do not depend on live sampler/effect settings.
+    # Dedicated packed-depth descriptors remain owned by the renderer.
+    if(NOT HAZE_RSX_HASH STREQUAL "95d8e710e7da97dc8809636afa71ce04a946f720b0e69d786fc05046f37be1e9")
         message(FATAL_ERROR "Renderer changed: audit the Haze live-settings transaction before building")
     endif()
     # Capture while DXGI still owns this backbuffer, before Present rotates it.

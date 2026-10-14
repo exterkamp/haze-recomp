@@ -14,6 +14,9 @@ import patch_job_wait
 import patch_vp_upload
 import patch_job_dispatch_trace
 import patch_slot_copy
+import patch_save_status
+import patch_audio_tick
+import patch_movie_poll
 
 
 class ProducerProfilePatchTests(unittest.TestCase):
@@ -39,6 +42,12 @@ class ProducerProfilePatchTests(unittest.TestCase):
         instrumented = producer_profile.patch(slot_copy)
         self.assertEqual(producer_profile.strip_profile(instrumented), slot_copy)
         self.assertIn('#include "haze_producer_profile.h"\n', instrumented)
+
+        # Main now composes save/audio/movie hooks after the performance chain.
+        # Removing only profiler scopes must yield the identical hooked game.
+        final = patch_movie_poll.patch(patch_audio_tick.patch(patch_save_status.patch(instrumented)))
+        reference = patch_movie_poll.patch(patch_audio_tick.patch(patch_save_status.patch(slot_copy)))
+        self.assertEqual(producer_profile.strip_profile(final), reference)
 
     def test_every_audited_direct_call_is_covered_or_explicitly_excluded(self):
         source = patch_guest_pacer.patch(self.source)

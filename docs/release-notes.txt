@@ -1,7 +1,10 @@
-Haze Recomp 0.1.2 for Windows x64
+Haze Recomp 0.1.3 for Windows x64
 
-Includes corrected release publication and PC settings/desktop actions integrated
-into Haze's native menus.
+Performance checkpoint: native task-readiness wakeups, GPU vertex decoding,
+reusable SPU workers, texture reuse and reduced diagnostic/cache-file overhead.
+Retains native PC menus, movie playback and the latest packed-depth rendering fix.
+Framerate remains configurable, including uncapped rendering and VSync.
+Stable 144 FPS and consistent frame pacing across the campaign remain in progress.
 
 Run HazeRecomp-<version>-Setup.exe and select your disc-decrypted Haze USA ISO
 (BLUS30094, 01.02 / 01.00). The installer downloads the pinned official RPCS3
