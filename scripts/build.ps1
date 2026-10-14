@@ -119,6 +119,10 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'VP burst reporting regression failed.' }
     & $python "$root/tests/test_shader_cache_bundle.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/shader-cache-bundle"
     if ($LASTEXITCODE -ne 0) { throw 'Shader cache bundle regression failed.' }
+    & $clang /nologo /TC /W4 /WX /O2 "/Fe$root/local/test_shader_store.exe" "/Fo$root/local/test_shader_store.obj" "$sdk/libs/video/tests/test_shader_store.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Owned shader cache worker compilation failed.' }
+    & "$root/local/test_shader_store.exe"
+    if ($LASTEXITCODE -ne 0) { throw 'Owned shader cache worker regression failed.' }
     & $python "$root/tests/test_analyze_slow_drains.py"
     if ($LASTEXITCODE -ne 0) { throw 'Slow-drain/flush QPC attribution regression failed.' }
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"

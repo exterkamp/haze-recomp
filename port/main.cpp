@@ -244,6 +244,7 @@ int rsx_live_draw_init(void*, uint32_t, uint32_t,
 void rsx_live_draw_present(uint32_t);
 void rsx_live_draw_dump_present_samples(void);
 void rsx_live_draw_dump_shader_cache(void);
+int rsx_live_draw_stop_shader_cache(unsigned timeout_ms);
 int rsx_null_backend_init(uint32_t, uint32_t, const char*);
 int rsx_null_backend_pump_messages(void);
 void* rsx_null_backend_get_hwnd(void);
@@ -480,6 +481,7 @@ static DWORD WINAPI frame_clock(LPVOID)
                 const int audio_stopped=haze_audio_stop_output(2000);
                 if (s_rsx_live) {
                     rsx_live_draw_dump_present_samples();
+                    rsx_live_draw_stop_shader_cache(2000);
                     haze_video_stop(2000);
                 }
                 dump_shutdown_profiles();
