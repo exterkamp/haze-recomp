@@ -78,11 +78,14 @@ The measured windows pass camera/mode/present and sampled Haze-process gates.
 Fifteen resource samples bracket timing, maximum gap 5.359 seconds, physical
 memory 52.20–52.89%, no other Haze or compiler observed. Four external compilers
 were present before launch but none in the measured resource observations.
-No owned build, screenshot or heavy analysis overlaps timing. The final
-pre-window image still has the yellow Nectar effect, unlike the previous
-settled-scene capture. Together with PDB setup and counter observation, that
-prevents treating these numbers as a matched ordinary-build gain or acceptance
-result. Earlier tutorial/setup captures and failed scene matching are retained.
+No owned build, screenshot or heavy analysis overlaps timing. Navigation needed
+an extra Nectar hold to dismiss the tutorial. A side-by-side check with the
+previous settled capture shows the final image has the same low left gauge and
+yellow border; the border alone does not establish a lingering Nectar effect.
+The initial observation note overinterpreted that border and is corrected here.
+Live NPC/simulation state is not exactly replayed. PDB setup, counter observation
+and changed competing workload prevent treating these numbers as a matched
+ordinary-build gain or acceptance result. All tutorial/setup captures are retained.
 
 Worst pump frame **68063** spans QPC `14508942170385..14508942683721` at 10 MHz:
 51.3336 ms total, **44.3795 ms command wait**, 4.7138 ms FIFO, 2.1642 ms present.
