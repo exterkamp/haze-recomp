@@ -52,7 +52,7 @@ TEXTURE_SKIP_BOOLEAN_FIELDS = {
     'texture_skip_stamp_match', 'texture_skip_hash_kind_match',
     'texture_skip_validation', 'texture_hash_cycle_valid',
 }
-ELAPSED_FIELDS = (set(FLOATS) | {'get_pso_ms'} | PSO_DETAIL_PHASES |
+ELAPSED_FIELDS = (set(FLOATS) | {'get_pso_ms', 'shader_disk_enqueue_ms'} | PSO_DETAIL_PHASES |
                   RESOURCE_ELAPSED_FIELDS | TEXTURE_DETAIL_PHASES)
 
 
@@ -82,6 +82,8 @@ def validate_rows(rows):
         present_phases = PSO_DETAIL_PHASES.intersection(row)
         if present_phases and present_phases != PSO_DETAIL_PHASES:
             raise ValueError('Incomplete nested PSO phase fields')
+        if 'shader_disk_enqueue_ms' in row and not present_phases:
+            raise ValueError('Shader enqueue timing requires nested PSO phases')
         if has_pso_ms:
             pso_ms = row['get_pso_ms']
             if not math.isfinite(pso_ms) or pso_ms < 0:
@@ -101,7 +103,10 @@ def validate_rows(rows):
                 build_ms, disk_ms, compile_ms, create_ms = phases
                 if build_ms > pso_ms + 0.000003:
                     raise ValueError('Nested build_pso interval exceeds get_pso interval')
-                if disk_ms + compile_ms + create_ms > build_ms + 0.000003:
+                enqueue_ms = row.get('shader_disk_enqueue_ms', 0.0)
+                if not math.isfinite(enqueue_ms) or enqueue_ms < 0:
+                    raise ValueError('Invalid shader enqueue time')
+                if disk_ms + compile_ms + create_ms + enqueue_ms > build_ms + 0.000004:
                     raise ValueError('Nested PSO phases exceed build_pso interval')
         elif present_phases:
             raise ValueError('PSO phase fields require get_pso detail fields')

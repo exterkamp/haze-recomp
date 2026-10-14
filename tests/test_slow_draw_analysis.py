@@ -43,6 +43,20 @@ def write_capture(root, events, saved, overwritten, callbacks, threshold=1000):
 
 
 class SlowDrawAnalysisTests(unittest.TestCase):
+    def test_optional_shader_enqueue_is_nested_and_finite(self):
+        detail = row()
+        detail.update(get_pso_ms=0.4, pso_lookup=2, build_pso_ms=0.35,
+                      shader_disk_load_ms=0.1, d3d_compile_ms=0.1,
+                      create_graphics_pso_ms=0.1, shader_disk_enqueue_ms=0.025)
+        validate_rows([detail])
+        for invalid in (-0.1, float('nan'), float('inf'), 0.1):
+            bad = dict(detail, shader_disk_enqueue_ms=invalid)
+            with self.assertRaises(ValueError):
+                validate_rows([bad])
+        missing = dict(row(), shader_disk_enqueue_ms=0.0)
+        with self.assertRaisesRegex(ValueError, 'requires nested PSO'):
+            validate_rows([missing])
+
     def test_partition_and_raw_cycle_units(self):
         self.assertEqual(validate_rows([row()]), 10_000_000)
 
@@ -346,8 +360,9 @@ class SlowDrawAnalysisTests(unittest.TestCase):
 
             full = row()
             full.update(threshold_us=1000, get_pso_ms=0.4, pso_lookup=2,
-                        build_pso_ms=0.3, shader_disk_load_ms=0.1,
-                        d3d_compile_ms=0.1, create_graphics_pso_ms=0.1)
+                        build_pso_ms=0.35, shader_disk_load_ms=0.1,
+                        d3d_compile_ms=0.1, create_graphics_pso_ms=0.1,
+                        shader_disk_enqueue_ms=0.025)
             full.update(texture_outcome=5, texture_decode_attempted=1,
                         texture_decode_succeeded=1,
                         texture_watch_skipped=0, texture_cache_full=0,
