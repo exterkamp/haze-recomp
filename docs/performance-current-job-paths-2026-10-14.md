@@ -206,3 +206,29 @@ measurement must observe actual eligibility publication and distinguish
 not-ready time from ready-to-claim latency. Preserve the current readiness
 predicate, claim ownership and bounded fallback, then use ordinary-build
 OFF/ON measurements before promotion.
+
+Follow-up: the native wake prototype is implemented in SDK `6596635` / root
+`f009524`. A same-binary diagnostic OFF/ON pair shows 10.795 to 9.138 ms average
+and 10.549 to 8.846 ms median, with the measured pre-SDK waits sharply reduced.
+See [the wakeup implementation and evidence](performance-taskset-wake-2026-10-14.md)
+for full frame tails, trace/resource coverage, limitations and remaining
+ordinary-build/gameplay acceptance. This extends the provenance investigation;
+it does not retroactively make the older pre-claim totals pure scheduling cost.
+
+### Whole-job follow-up identity
+
+The local generated registry maps runtime image **41** to
+`spu_0040_at_00F21800`, ELF fingerprint `6336AB246138D1D7` and text fingerprint
+`5B5EF5CFC2370108`; `spu_0041_at_00F2E380` is runtime image **42**. Use the
+registry rather than the folder's numeric suffix when investigating job key 10.
+
+Image 41 entry `03080` walks a descending function-pointer list at local-store
+`F180` until a -1 sentinel, then `030F8` calls `E278`, which directly calls
+`03118`. The initial pointer list may be runtime startup/constructors; it does
+not by itself prove that the actual job body is dynamically dispatched.
+`03118` proceeds to `031B0`, which reads a 5,200-byte argument block using DMA
+and publishes a byte at argument offset 5,184 before further transfers.
+These are source observations, not a measured cost attribution or a completed
+semantic contract. Trace the actual hot body and its input/output ownership
+before selecting a whole-job native replacement; do not treat startup wrapper
+complexity as a blocker to replacing the work itself.

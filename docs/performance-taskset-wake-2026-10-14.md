@@ -134,6 +134,76 @@ change is consistent with reduced scheduling stalls. Earlier job execution
 also reduces image-30 ABI overlap with title waits (roughly 0.59 to 0.056
 ms/frame); this is not proof that the job's computation became cheaper.
 
-Ordinary-build OFF/ON acceptance and wider gameplay checks remain pending.
 No default promotion is inferred from this diagnostic pair. Track remaining
 acceptance in #94; overall frame-pacing and 144 FPS goals remain open.
+
+## Ordinary-build comparison
+
+Built with `scripts/build.ps1 -SpuFma -Jobs 2 -OutputDirectory
+local/candidates/taskset-wake-ordinary`; actual compile rules verify renderer
+profiling **off**, job profiling **off**, inline reads **off**. Runtime producer
+and asynchronous job traces are disabled. Present/pump timing and the same
+light process/resource observers remain enabled in both modes.
+
+- Root build identity: `1a1fa74b616c3a19fd9745dc4fdbfa741f39234d` (same code as
+  `f009524`, documentation only afterward); SDK unchanged at `6596635`.
+- EXE SHA256: `BDB3FF044D4DB6CBF90AA024D68F0327AB05086C77E7F9A8C502458CAAE4C7D8`.
+- PDB SHA256: `C6302F2826BEE090264039F302CB7E8BEA737CC9F59B251EC5F67C7F9C55FFA9`.
+- Prefixes: `local/jungle-taskset-wake-ordinary-{off,on}-a1-*`.
+- OFF run `20261014-033945-659`, PID 7324; ON run `20261014-034521-701`, PID 64496.
+- Same 1440p/FXAA/AF16/8192-shadow settings and frozen private save/cache
+  procedure. Muted, uncapped, VSync off, native completion-wait replacement
+  off, no boot report/milestones. Actual wake mode confirmed in startup logs.
+
+Order is **OFF then ON**, reversing the diagnostic pair. Two 45-second sweeps
+per launch, with 5-second warmups; QPC frequency 10 MHz:
+
+| Mode/token | Start QPC | End QPC |
+| --- | ---: | ---: |
+| OFF/3880 | 14614056041099 | 14614506042785 |
+| OFF/3881 | 14614558923281 | 14615008925404 |
+| ON/3900 | 14619990512063 | 14620440516788 |
+| ON/3901 | 14620490527481 | 14620940528879 |
+
+| Mode | Present intervals | Average FPS | Average ms | Median ms | p95 ms | p99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| OFF | 8,162 | 90.706 | 11.025 | 10.760 | 13.917 | 16.017 | 32.094 |
+| ON | 10,182 | 113.152 | 8.838 | 8.557 | 11.246 | 13.203 | 23.650 |
+
+Observed average decreases **2.187 ms (19.8%)**, median **2.203 ms (20.5%)**,
+p99 **2.814 ms (17.6%)**; FPS increases **24.7%**. All observed frames remain
+in the result, including the 32.094 ms OFF and 23.650 ms ON maxima. Neither
+capture has a frame over 33.333 ms. Within-launch window means are
+11.021/11.028 ms OFF and 8.811/8.865 ms ON; medians 10.750/10.772 OFF and
+8.538/8.581 ON. The fresh OFF control is slower than the older 95.559 FPS
+ordinary baseline, so the improvement uses this matched control, not the old
+baseline or the diagnostic executable as its denominator.
+
+Both captures pass complete presents, actual CPU/job-wait mode, actual camera
+and sampled process checks. Each has 20 resource samples fully bracketing the
+windows, no observed compiler or other Haze; maximum sampling gap 5.326 s OFF
+and 5.355 s ON. Physical memory ranges are 54.38-54.77% OFF and 52.89-53.53% ON.
+No owned builds/screenshots/offline analysis occur in the measured windows.
+Both games close normally with exit zero; all seven immutable baseline hashes
+remain unchanged. These observations do not rule out all system-wide load or
+clock variation.
+
+The first automated ON navigation did **not** reach gameplay: the untimed
+capture `requested_119299.ppm` showed the title screen. No performance window
+was recorded there. The same process was navigated manually through Continue
+Campaign, the same tutorial input sequence was applied, and untimed capture
+`requested_207900.ppm` confirmed the matching jungle view with an empty Nectar
+gauge. PAD polling was then acknowledged detached before timing. Keep this
+navigation failure and extra menu warmup in the record.
+
+Mean pump elapsed scopes, OFF to ON: wait **5.494 -> 3.627 ms**, FIFO
+**3.625 -> 3.342 ms**, presentation **1.840 -> 1.813 ms**. Most observed gain
+is in waiting, consistent with the diagnostic dispatch evidence. These are
+elapsed scope times, not additive CPU costs across threads.
+
+The ordinary result corroborates the diagnostic improvement, but it is still
+one launch per mode in a live scene. Repeat launch pairs and wider gameplay,
+checkpoint reload, squad conversation, transitions and lifecycle/failure-path
+acceptance remain before default promotion. The internal control remains off
+by default. At **8.838 ms average / 13.203 ms p99**, stable 144 FPS
+(6.944 ms/frame) and consistent pacing are still unachieved.
