@@ -61,3 +61,53 @@ not a claim that the whole repository test suite has run.
 - Compare ordinary copy-off/on camera sweeps before choosing a release default.
 - Verify consistent pacing and unlocked/VSync behavior across gameplay; 144 FPS
   remains unachieved.
+
+## First live diagnostic
+
+Ordinary RelWithDebInfo build completed with exit code zero and at most two
+compiler jobs. Candidate `local/candidates/slot-copy-recycle/HazeRecomp.exe`
+uses Haze `e2ae549`, SDK `7574134`, SHA256
+`1613CC66D7732B9EF9711D601A2FA356A9AC9DCBB656C81E9E586500C0AD5718`.
+The compile-rule verifier confirms ordinary profiling/inline-read definitions.
+
+Muted private-save run `20261014-011756-690`, PID 41192, enables the native copy
+and only the FIFO diagnostic. The render settings match the previous jungle
+capture: 2560x1440, 8192 shadows, FXAA/AF16, uncapped and VSync off. Other
+experimental memory/job-delay paths and milestone/detailed draw traces remain
+off. After Nectar and the transient second hint clear, setup captures show the
+low left gauge and expected jungle view. Input-file detachment is acknowledged
+before two 30-second absolute camera sweeps (tokens 3680/3681).
+
+All 5,687 present intervals average **94.817 FPS / 10.547 ms**, p95 13.229 ms,
+p99 15.500 ms, worst 20.743 ms; none exceeds 33.333 ms. Individual windows are
+94.802 and 94.832 FPS. Pump means: command wait 5.557 ms, FIFO 3.137 ms, present
+1.790 ms, other 0.063 ms. Camera/mode/present and process checks pass. Fifteen
+resource samples bracket measurement (max gap 5.345 seconds), memory 52.68-53.15%,
+no other Haze or compiler observed. No owned build, screenshot or heavy offline
+analysis overlaps timing. This diagnostic is not a matched native-copy speedup.
+
+The enabled-only shutdown snapshot reports **885,342 native copies, zero
+rejections, 4,547,116,512 bytes**. It establishes that the intended native path
+executes in gameplay, not its cost or timed-window throughput.
+
+The recycle sidecar retains all 5,129 completed callbacks without overwrite;
+5,130 started and one remains in flight at dump, so complete process-lifetime
+coverage is explicitly false. All retained completed events are on host TID
+5520. The recording spans the measured windows, but the missing in-flight event
+has no timestamp; do not silently count it as a zero-duration callback.
+
+Clipping separately to the two measured windows retains **1,136 callbacks**,
+total **1,709.650 ms**: **1,673.848 ms** awaiting consumption to the current
+pointer, **31.522 ms** awaiting wrap acknowledgement, and about 4.280 ms other
+callback work. This is **0.301 ms of recorded producer callback time per present
+interval**, not an additive renderer cost or a guaranteed recoverable saving.
+Do not include the five-second inter-window gap in these totals. The longest
+completed callback in the windows is 4.731 ms. The three worst pump frames have
+no overlap with any retained recycle callback; the worst is 20.743 ms with
+15.688 ms command wait. Recycling is therefore a smaller observed lead here
+and does not explain those worst frames. Preserve the in-flight coverage limit.
+
+The game exits normally with code zero; all seven immutable baseline save
+hashes match. Evidence prefix: `local/jungle-slot-copy-recycle-a1-*`, including
+all present intervals, resources, per-window recycle reports, raw sidecar and
+worst-frame QPC correlation. Next measure ordinary copy-off/on with tracing off.
