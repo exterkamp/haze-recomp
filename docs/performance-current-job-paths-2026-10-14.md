@@ -109,8 +109,11 @@ image-43 waits in `00697C70`, and image-30 waits in event-2 `00684ED8`.
 The first callback averages ~4.52 ms; its completed depth-zero job loops spend
 ~1.75 ms in the delay wrapper and ~0.018 ms in the completion predicate per
 callback. `00697C70` averages ~1.57 ms, including ~1.45 ms in the delay wrapper.
-Neither path records queue-service work in these loops; pending checks are
-only ~0.0005–0.0006 ms per callback. Delay-wrapper time includes waiting while
+Neither path records calls to the profiler's `service` stage (`00723198`);
+pending checks are only ~0.0005–0.0006 ms per callback. Source inspection shows
+this stage is notification coordination, not submission dispatch. The actual
+completion predicate can drain completion records before the delay.
+Delay-wrapper time includes waiting while
 jobs execute, so it is not all removable sleep overhead.
 
 Investigate the separate route-2 dispatch path and its readiness/wakeup policy
@@ -120,3 +123,32 @@ worker reuse again does not target it. Any change needs ordinary-build A/B
 measurements with median, average and tail frame times, plus gameplay checks.
 No new runtime policy is promoted by this diagnostic capture. Consistent
 pacing and unlocked/VSync acceptance remain open.
+
+### Submission-consumer source audit
+
+The route-2 title path calls `0071F788`, which makes a blocking
+`cellSpursQueuePushBody` call. SDK `libs/spurs/cellSpursQueue.c` waits only
+when its header is busy or the queue is full; `spurs_queue_wait.h` ordinarily
+uses `Sleep(1)` for that wait. A successful push signals a registered task
+waiter after publication and unlock; it does not directly launch the async job.
+
+`runtime/spu/spu_taskset_dispatch.c::spu_taskset_start_ready` scans task IDs,
+claims eligible guest ready/pending-ready tasks under the lock, then resolves
+the image and calls `spu_workload_dispatch_async_task` outside the lock.
+There is no sleep inside this launch scan. Task creation and task exit call
+it directly. A separate `libs/spurs/cellSpurs.c` fallback kernel loop calls
+`spu_taskset_poll` after **`Sleep(1)` on every iteration**, including discovery
+of siblings created by persistent tasks. `spu_taskset_signal_task` latches a
+signal and wakes the signal condition variable, but does not itself invoke
+the ready-task scan.
+
+This yields a concrete replacement candidate: wake submission consumers on
+real queue/task readiness instead of relying on the 1-ms discovery poll.
+First distinguish queue backpressure from ready-task discovery by capturing
+the successful launch trigger (create, exit or poll), taskset/task identity,
+and queue busy/full waits against the existing SDK-submit timeline. Existing
+pre-SDK totals do not establish which of these paths dominates. The measured
+join is for the same waited-on job generation; unrelated later submissions
+or main-loop ordering cannot explain it by themselves. Preserve claim
+ownership, readiness predicates, completion ordering and fallback coverage
+when prototyping an event-driven consumer.
