@@ -154,6 +154,19 @@ static void sink_end_impl(void*, const rsx_dispatch*, ld_slow_draw_scope* scope)
     ld_slow_texture_phase_end(scope, &texture_detail,
                               &texture_detail.lookup_ticks, texture_phase_begin);
     texture_detail.decode_ticks = 20;
+    texture_detail.skip_evaluated = 1;
+    texture_detail.skip_watch_valid = 1;
+    texture_detail.skip_stamp_match = 1;
+    texture_detail.skip_hash_kind_match = 1;
+    texture_detail.skip_rejection_mask = 4;
+    texture_detail.source_span = 4096;
+    texture_detail.mipmaps = 1;
+    texture_detail.hash_kind = 0;
+    u64 hash_cycles_begin = 0;
+    const int hash_cycles_valid =
+        ld_slow_texture_hash_cycles_begin(&texture_detail, &hash_cycles_begin);
+    ld_slow_texture_hash_cycles_end(&texture_detail, hash_cycles_begin,
+                                    hash_cycles_valid);
     texture_phase_begin = ld_slow_draw_qpc();
     ld_slow_texture_resource_create(&texture_detail, texture_phase_begin);
     texture_detail.outcome = LD_SLOW_TEXTURE_MISS;
@@ -200,7 +213,7 @@ int main(int argc, char** argv) {
     if (stub_calls != LD_SLOW_DRAW_CAP + 4 ||
         g_ld_slow_draw.callbacks != LD_SLOW_DRAW_CAP + 4 ||
         g_ld_slow_draw.recorded != LD_SLOW_DRAW_CAP ||
-        g_ld_slow_draw.overwritten != 4 || cycle_calls != 2 * (LD_SLOW_DRAW_CAP + 4))
+        g_ld_slow_draw.overwritten != 4 || cycle_calls != 4 * (LD_SLOW_DRAW_CAP + 4))
         return 13;
     for (unsigned i = 0; i < g_ld_slow_draw.recorded; ++i) {
         const ld_slow_draw_event* e = &g_ld_slow_draw.events[i];
@@ -220,6 +233,15 @@ int main(int argc, char** argv) {
             e->resource[LD_SLOW_RESOURCE_TEXTURE].max_location != 31 ||
             e->resource[LD_SLOW_RESOURCE_VERTEX_TEXTURE].max_format != 63)
             return 22;
+        const ld_slow_texture_detail* td =
+            &e->resource[LD_SLOW_RESOURCE_TEXTURE].texture_detail;
+        if (!td->skip_evaluated || !td->skip_watch_valid || td->skip_entry_valid ||
+            !td->skip_stamp_match || !td->skip_hash_kind_match ||
+            td->skip_rejection_mask != 4 || td->source_span != 4096 ||
+            td->mipmaps != 1 || td->hash_kind != 0 ||
+            td->hash_cycle_attempts != 1 || td->hash_cycle_successes != 1 ||
+            td->hash_cycle_failures || td->hash_cycle_delta != 111)
+            return 23;
     }
     g.ready = 1;
     rsx_live_draw_dump_present_samples();
@@ -289,8 +311,15 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
     if "ld_slow_texture_phase_begin" not in texture_slot or \
             "LD_SLOW_TEXTURE_REFRESH" not in texture_slot or \
             "LD_SLOW_TEXTURE_MISS" not in texture_slot or \
+            "skip_rejection_mask" not in texture_slot or \
+            "skip_entry_valid" not in texture_slot or \
             "slots[u] = texture_srv_slot(&t);" not in body:
         raise AssertionError("texture scope, outcomes, or ordinary null-scope path missing")
+    hash_impl = extract_function(text, "static u64 texture_content_hash_kind_scoped(")
+    if "ld_slow_texture_hash_cycles_begin(slow_detail" not in hash_impl or \
+            "ld_slow_texture_hash_cycles_end(slow_detail" not in hash_impl or \
+            "texture_hash_algorithm_kind()" not in texture_slot:
+        raise AssertionError("scoped hash timing or algorithm identity is missing")
     for signature in ("static ID3D12Resource* create_texture_mipped_scoped(",
                       "static ID3D12Resource* create_texture_cube("):
         creation = extract_function(text, signature)
@@ -351,7 +380,14 @@ def run_test(compiler: str, source: Path, output_dir: Path, profile: bool) -> No
         if abs(texture_phases - float(row["texture_max_ms"])) > 0.00001 or \
                 float(row["texture_resource_create_ms"]) > float(row["texture_slot_decode_ms"]) or \
                 row["texture_outcome"] != str(5) or row["texture_cache_full"] != "1" or \
-                row["texture_max_offset"] != "42":
+                row["texture_max_offset"] != "42" or \
+                row["texture_skip_evaluated"] != "1" or \
+                row["texture_skip_entry_valid"] != "0" or \
+                row["texture_skip_rejection_mask"] != "4" or \
+                row["texture_source_span"] != "4096" or \
+                row["texture_mipmaps"] != "1" or row["texture_hash_kind"] != "0" or \
+                row["texture_hash_cycle_valid"] != "1" or \
+                row["texture_hash_cycle_delta_not_ms"] != "111":
             raise AssertionError("slowest texture-call detail lost identity or partition")
     if {int(row["pso_lookup"]) for row in rows} != {0, 1, 2}:
         raise AssertionError("uncalled, hit, and miss outcomes were not all retained")

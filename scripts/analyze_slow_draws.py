@@ -36,6 +36,22 @@ TEXTURE_DETAIL_FLAGS = {
     'texture_outcome', 'texture_decode_attempted', 'texture_decode_succeeded', 'texture_watch_skipped',
     'texture_cache_full', 'texture_resource_create_calls',
 }
+TEXTURE_SKIP_DETAIL_FIELDS = {
+    'texture_skip_evaluated', 'texture_skip_override_changed',
+    'texture_skip_watch_valid', 'texture_skip_entry_valid',
+    'texture_skip_stamp_match', 'texture_skip_hash_kind_match',
+    'texture_skip_validation', 'texture_skip_rejection_mask',
+    'texture_source_span', 'texture_mipmaps', 'texture_hash_kind',
+    'texture_hash_cycle_attempts', 'texture_hash_cycle_successes',
+    'texture_hash_cycle_failures', 'texture_hash_cycle_valid',
+    'texture_hash_cycle_delta_not_ms',
+}
+TEXTURE_SKIP_BOOLEAN_FIELDS = {
+    'texture_skip_evaluated', 'texture_skip_override_changed',
+    'texture_skip_watch_valid', 'texture_skip_entry_valid',
+    'texture_skip_stamp_match', 'texture_skip_hash_kind_match',
+    'texture_skip_validation', 'texture_hash_cycle_valid',
+}
 ELAPSED_FIELDS = (set(FLOATS) | {'get_pso_ms'} | PSO_DETAIL_PHASES |
                   RESOURCE_ELAPSED_FIELDS | TEXTURE_DETAIL_PHASES)
 
@@ -115,6 +131,7 @@ def validate_rows(rows):
                 raise ValueError('Nested resource detail and residual do not partition resource phase')
         present_texture_detail = TEXTURE_DETAIL_PHASES.intersection(row)
         present_texture_flags = TEXTURE_DETAIL_FLAGS.intersection(row)
+        present_texture_skip = TEXTURE_SKIP_DETAIL_FIELDS.intersection(row)
         if present_texture_detail or present_texture_flags:
             if (present_texture_detail != TEXTURE_DETAIL_PHASES or
                     present_texture_flags != TEXTURE_DETAIL_FLAGS):
@@ -166,6 +183,51 @@ def validate_rows(rows):
                 'texture_slot_log_ms', 'texture_slot_residual_ms'))
             if abs(slot_partition - row['texture_max_ms']) > 0.00001:
                 raise ValueError('Nested texture-call detail does not partition maximum texture call')
+        if present_texture_skip:
+            if present_texture_skip != TEXTURE_SKIP_DETAIL_FIELDS:
+                raise ValueError('Incomplete texture skip-reason detail fields')
+            if (present_texture_detail != TEXTURE_DETAIL_PHASES or
+                    present_texture_flags != TEXTURE_DETAIL_FLAGS):
+                raise ValueError('Texture skip-reason detail requires complete texture-call detail')
+            for key in TEXTURE_SKIP_DETAIL_FIELDS:
+                if not isinstance(row[key], int) or row[key] < 0:
+                    raise ValueError('Invalid texture skip-reason metadata')
+            for key in TEXTURE_SKIP_BOOLEAN_FIELDS:
+                if row[key] not in (0, 1):
+                    raise ValueError('Invalid texture skip predicate flag')
+            if row['texture_skip_rejection_mask'] & ~31:
+                raise ValueError('Invalid texture skip rejection mask')
+            if row['texture_hash_kind'] not in (0, 1, 2):
+                raise ValueError('Invalid texture hash kind')
+            if (row['texture_hash_cycle_successes'] + row['texture_hash_cycle_failures'] !=
+                    row['texture_hash_cycle_attempts']):
+                raise ValueError('Texture hash cycle query counts do not balance')
+            if row['texture_hash_cycle_valid'] != int(
+                    row['texture_hash_cycle_attempts'] > 0 and
+                    row['texture_hash_cycle_failures'] == 0):
+                raise ValueError('Texture hash cycle validity disagrees with query counts')
+            if (row['texture_hash_cycle_successes'] == 0 and
+                    row['texture_hash_cycle_delta_not_ms'] != 0):
+                raise ValueError('Texture hash cycle delta without successful samples')
+            if row['texture_skip_evaluated']:
+                expected_mask = (
+                    (1 if row['texture_skip_override_changed'] else 0) |
+                    (2 if not row['texture_skip_watch_valid'] else 0) |
+                    (4 if not row['texture_skip_entry_valid'] else 0) |
+                    (8 if not row['texture_skip_stamp_match'] else 0) |
+                    (16 if not row['texture_skip_hash_kind_match'] else 0))
+                if row['texture_skip_rejection_mask'] != expected_mask:
+                    raise ValueError('Texture skip rejection mask disagrees with predicate inputs')
+                if row['texture_watch_skipped'] and expected_mask:
+                    raise ValueError('Texture watch skip accepted despite rejected predicate')
+            elif any(row[key] for key in (
+                    'texture_skip_override_changed', 'texture_skip_watch_valid',
+                    'texture_skip_entry_valid', 'texture_skip_stamp_match',
+                    'texture_skip_hash_kind_match', 'texture_skip_validation',
+                    'texture_skip_rejection_mask')):
+                raise ValueError('Unevaluated texture skip has predicate inputs')
+            if row['texture_calls'] == 0 and any(row[key] for key in TEXTURE_SKIP_DETAIL_FIELDS):
+                raise ValueError('No texture calls may carry texture skip detail')
         if row['thread_cycles_valid'] not in (0, 1):
             raise ValueError('Invalid cycle validity flag')
         if row['thread_cycles_valid']:

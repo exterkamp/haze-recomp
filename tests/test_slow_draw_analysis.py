@@ -7,7 +7,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from analyze_slow_draws import RESOURCE_KINDS, STAGES, analyze, validate_rows
+from analyze_slow_draws import (RESOURCE_KINDS, STAGES,
+                                TEXTURE_SKIP_DETAIL_FIELDS, analyze,
+                                validate_rows)
 
 
 def row():
@@ -207,6 +209,84 @@ class SlowDrawAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'complete outer resource schema'):
             validate_rows([partial_outer])
 
+    def test_texture_skip_reason_and_hash_cycle_evidence(self):
+        detail = row()
+        for kind in RESOURCE_KINDS:
+            detail.update({
+                f'{kind}_calls': 0, f'{kind}_total_ms': 0.0,
+                f'{kind}_max_ms': 0.0, f'{kind}_max_location': 0,
+                f'{kind}_max_offset': 0, f'{kind}_max_format': 0,
+                f'{kind}_max_width': 0, f'{kind}_max_height': 0,
+                f'{kind}_max_slot': 0,
+            })
+        detail.update(resource_residual_ms=0.0,
+                      texture_calls=1, texture_total_ms=0.5,
+                      texture_max_ms=0.5,
+                      texture_outcome=1, texture_decode_attempted=0,
+                      texture_decode_succeeded=0,
+                      texture_watch_skipped=0, texture_cache_full=0,
+                      texture_slot_lookup_ms=0.01,
+                      texture_slot_watch_ms=0.02,
+                      texture_slot_hash_ms=0.40,
+                      texture_slot_decode_ms=0.0,
+                      texture_slot_srv_ms=0.01,
+                      texture_slot_retire_ms=0.0,
+                      texture_slot_log_ms=0.0,
+                      texture_slot_residual_ms=0.06,
+                      texture_resource_create_ms=0.0,
+                      texture_resource_create_calls=0)
+        detail.update(texture_skip_evaluated=1,
+                      texture_skip_override_changed=0,
+                      texture_skip_watch_valid=1,
+                      texture_skip_entry_valid=0,
+                      texture_skip_stamp_match=1,
+                      texture_skip_hash_kind_match=1,
+                      texture_skip_validation=0,
+                      texture_skip_rejection_mask=4,
+                      texture_source_span=4 * 1024 * 1024,
+                      texture_mipmaps=1, texture_hash_kind=0,
+                      texture_hash_cycle_attempts=1,
+                      texture_hash_cycle_successes=1,
+                      texture_hash_cycle_failures=0,
+                      texture_hash_cycle_valid=1,
+                      texture_hash_cycle_delta_not_ms=123456)
+        validate_rows([detail])
+        invalid = copy.deepcopy(detail)
+        invalid['texture_skip_rejection_mask'] = 0
+        with self.assertRaisesRegex(ValueError, 'disagrees'):
+            validate_rows([invalid])
+        invalid = copy.deepcopy(detail)
+        invalid['texture_hash_cycle_successes'] = 0
+        with self.assertRaisesRegex(ValueError, 'do not balance'):
+            validate_rows([invalid])
+        invalid = copy.deepcopy(detail)
+        invalid['texture_hash_cycle_valid'] = 0
+        with self.assertRaisesRegex(ValueError, 'validity disagrees'):
+            validate_rows([invalid])
+        invalid = copy.deepcopy(detail)
+        invalid.update(texture_hash_cycle_successes=0,
+                       texture_hash_cycle_failures=1,
+                       texture_hash_cycle_valid=0,
+                       texture_hash_cycle_delta_not_ms=1)
+        with self.assertRaisesRegex(ValueError, 'delta without successful'):
+            validate_rows([invalid])
+        invalid = copy.deepcopy(detail)
+        invalid['texture_hash_kind'] = 3
+        with self.assertRaisesRegex(ValueError, 'hash kind'):
+            validate_rows([invalid])
+        incomplete = copy.deepcopy(detail)
+        del incomplete['texture_skip_watch_valid']
+        with self.assertRaisesRegex(ValueError, 'Incomplete texture skip-reason'):
+            validate_rows([incomplete])
+        accepted_but_rejected = copy.deepcopy(detail)
+        accepted_but_rejected['texture_watch_skipped'] = 1
+        with self.assertRaisesRegex(ValueError, 'accepted despite rejected'):
+            validate_rows([accepted_but_rejected])
+        partial = row()
+        partial.update({key: detail[key] for key in TEXTURE_SKIP_DETAIL_FIELDS})
+        with self.assertRaisesRegex(ValueError, 'requires complete texture-call detail'):
+            validate_rows([partial])
+
     def test_nan_and_qpc_mismatch_rejected(self):
         for key, value in [('wall_ms', float('nan')), ('qpc_end', 50_000)]:
             bad = row(); bad[key] = value
@@ -281,6 +361,21 @@ class SlowDrawAnalysisTests(unittest.TestCase):
                         texture_slot_residual_ms=0.005,
                         texture_resource_create_ms=0.010,
                         texture_resource_create_calls=1)
+            full.update(texture_skip_evaluated=1,
+                        texture_skip_override_changed=0,
+                        texture_skip_watch_valid=1,
+                        texture_skip_entry_valid=0,
+                        texture_skip_stamp_match=1,
+                        texture_skip_hash_kind_match=1,
+                        texture_skip_validation=0,
+                        texture_skip_rejection_mask=4,
+                        texture_source_span=4096, texture_mipmaps=1,
+                        texture_hash_kind=0,
+                        texture_hash_cycle_attempts=1,
+                        texture_hash_cycle_successes=1,
+                        texture_hash_cycle_failures=0,
+                        texture_hash_cycle_valid=1,
+                        texture_hash_cycle_delta_not_ms=1000)
             full['resource_residual_ms'] = 0.3
             for kind in RESOURCE_KINDS:
                 full.update({
