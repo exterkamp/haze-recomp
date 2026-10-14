@@ -31,6 +31,8 @@
 /* The lifter's generated header, which declares ppu_context and the function
  * table. It comes first: everything below is written against that struct. */
 #include "ppu_recomp.h"
+#include <cstring>
+#include "haze_shader_prepare.h"
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
 #include "haze_producer_profile.h"
@@ -665,6 +667,8 @@ extern "C" int spu_float_native_set_mode(int requested);
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
+    if (argc > 1 && std::strcmp(argv[1], "--prepare-vertex-shaders") == 0)
+        return haze_shader_prepare_cli();
     // Exact whole-image fingerprints; no generic/persistent controller jobs.
     // Each invocation retains fresh context/LS and existing completion cleanup.
     spu_workload_allow_worker_reuse(0xDB819079AF1D1346ULL, 30);

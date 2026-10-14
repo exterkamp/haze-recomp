@@ -579,6 +579,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Vertex program mirror cache test compilation failed.' }
     & $vpMirrorTest
     if ($LASTEXITCODE -ne 0) { throw 'Vertex program mirror mutation validation failed.' }
+    $shaderArchiveTest = Join-Path $root 'local/test_shader_archive.exe'
+    & $clang /nologo /W0 /O2 /EHsc /std:c++20 /UNDEBUG "/Fe$shaderArchiveTest" "/Fo$root/local/" "$root/tests/test_shader_archive.cpp" "$root/port/haze_shader_archive.cpp"
+    if ($LASTEXITCODE -ne 0) { throw 'Shader archive fixture compilation failed.' }
+    & $shaderArchiveTest
+    if ($LASTEXITCODE -ne 0) { throw 'Shader archive bounds/decode regression failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
     & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }
