@@ -139,3 +139,14 @@ Haze PID 51756 overlaps, so isolation fails; no compiler overlaps. Nineteen
 resource samples have a maximum 5.368-second gap, memory 53.46-54.18%.
 Evidence prefix: `local/jungle-milestone-async-live-a1`, including correlated
 stacks and failed isolation reports.
+
+Source follow-up on the two memory-read samples: `func_0051A6C0` is a
+bounds-checked float-array accessor, called twice by `func_002254A0`, which
+contains a dynamic loop, FP accumulation and several helper calls.
+`func_004B90D0` follows object pointers to a dynamic CTR/TOC target, invokes it,
+and copies three resulting floats. Neither sampled leaf establishes a dominant
+algorithm or safe dynamic-target identity for a native replacement. Prior
+broad inline-read comparisons are already inconclusive (see
+`performance-native-read-profile-2026-10-13.md`); do not repeat that experiment
+based only on these snapshots. Call duration/count or resolved-target evidence
+would be needed before selecting either routine for replacement.
