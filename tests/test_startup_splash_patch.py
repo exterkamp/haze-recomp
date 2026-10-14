@@ -6,8 +6,8 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'scripts'))
-from patch_startup_splash import patch, DIGESTS
-from patch_movie_poll import patch as movie_patch
+from patches.patch_startup_splash import patch, DIGESTS
+from patches.patch_movie_poll import patch as movie_patch
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('source', type=Path)
