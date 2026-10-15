@@ -1,4 +1,4 @@
-/* Private whole-batch oracle: original translated computation, recorded channel
+/* Private whole-batch replay: explicitly labeled compiled computation, recorded channel
  * inputs, and exact comparisons of all channel writes, DMA PUTs and final state.
  * This deliberately has no real guest memory or SDK scheduling side effects.
  * It validates the compute boundary, not ownership/completion integration. */
@@ -10,6 +10,10 @@
 #include <immintrin.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
+#ifndef HAZE_JOB13_REPLAY_VARIANT
+#define HAZE_JOB13_REPLAY_VARIANT "unspecified"
+#endif
 
 static haze_job13_capture_header header;
 static haze_job13_capture_event *events;
@@ -220,7 +224,8 @@ int main(int argc,char **argv) {
     equal_bytes(ctx->ls,expected_ls,SPU_LS_SIZE,"final local store");
     require(final_mxcsr==header.final_mxcsr,"floating-point status mismatch");
     }
-    printf("PASS whole original batch events=%u payload=%u steps=%llu\n",cursor,header.payload_size,(unsigned long long)steps);
+    printf("PASS whole-batch replay variant=%s events=%u payload=%u steps=%llu\n",
+        HAZE_JOB13_REPLAY_VARIANT,cursor,header.payload_size,(unsigned long long)steps);
     if(repetitions>1) {
         /* First iteration warms code/data. Input reset and final-state checks
          * are outside timed compute; ordered channel/PUT comparisons remain
@@ -234,9 +239,10 @@ int main(int argc,char **argv) {
         }
         double median=(n&1)?(double)durations[1+n/2]:
             ((double)durations[n/2]+(double)durations[1+n/2])*.5;
-        printf("BENCH samples=%u mean_ms=%.6f median_ms=%.6f min_ms=%.6f max_ms=%.6f\n",
+        printf("BENCH samples=%u mean_ms=%.6f median_ms=%.6f min_ms=%.6f max_ms=%.6f variant=%s\n",
             n,1000.0*total/n/frequency.QuadPart,1000.0*median/frequency.QuadPart,
-            1000.0*durations[1]/frequency.QuadPart,1000.0*durations[n]/frequency.QuadPart);
+            1000.0*durations[1]/frequency.QuadPart,1000.0*durations[n]/frequency.QuadPart,
+            HAZE_JOB13_REPLAY_VARIANT);
     }
     _aligned_free(initial);_aligned_free(ctx);free(expected_gpr);free(expected_ls);free(events);free(payload);
     return 0;
