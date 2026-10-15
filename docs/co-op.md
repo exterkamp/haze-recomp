@@ -35,9 +35,7 @@ For single player, choose **Single Player Campaign**; no co-op service is needed
 The **Player Profile** entry on the main menu changes the displayed name and
 persists it across restarts. Names contain 3–16 ASCII letters, digits, `_` or `-`,
 starting with a letter. Existing saves keep their original internal identity.
-The menu header and server list use the chosen name. The in-game teammate label
-still displays `User` in the current local reproduction; this is an outstanding
-profile-display issue.
+The menu header, server list and campaign teammate label use the chosen name.
 
 ## Validation and limits
 
@@ -45,8 +43,9 @@ Two local game instances joined through the native invite pages, loaded the
 same campaign, and synchronized movement. The host survived client departure,
 a fresh client rejoined the same invite, and host closure produced the game's
 lost-connection dialog. A separate run with `PS3_NET_ONLINE=0` loaded the
-single-player checkpoint without a co-op service. Copied save profiles remained
-unchanged.
+single-player checkpoint without a co-op service. A subsequent two-instance
+campaign run verified each player's chosen name above the other character,
+with movement still synchronized. Copied save profiles remained unchanged.
 
 Transport tests cover four direct peers and two peers using a selected TURN
 relay route. Secure signaling tests accept a trusted certificate and reject

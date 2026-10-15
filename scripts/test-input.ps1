@@ -70,6 +70,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Native menu lifetime patch guard failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Save status patch guard failed.' }
 & $Python "$root/tests/test_audio_tick_patch.py" "$assets/generated/ppu/ppu_recomp_003.cpp"
 if ($LASTEXITCODE -ne 0) { throw 'Audio tick patch guard failed.' }
+& $Python "$root/tests/test_teammate_name_patch.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$clang"
+if ($LASTEXITCODE -ne 0) { throw 'Teammate name regression failed.' }
 foreach ($test in @('test_haze_audio','test_haze_quit_guest')) {
     & $clang /nologo /W4 /O1 /std:c++20 "/I$assets/generated/ppu" "/I$sdk/include" "/I$sdk/libs/input" "/Fe$root/local/$test.exe" "/Fo$root/local/$test.obj" "$root/tests/$test.cpp"
     if ($LASTEXITCODE -ne 0) { throw "$test compilation failed." }

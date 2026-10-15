@@ -48,11 +48,18 @@ for the separate browser integration.
   the initial loopback experiment. Leaving and returning created a second
   socket while the first descriptor remained allocated. Fresh-client discovery
   worked. Error handling and socket ownership still require investigation.
-- With complete address remapping, the client loaded into the host's campaign.
-  Host movement appeared in the client's view. The in-game teammate label still
-  read `User`, despite the correct server-list name. Overriding the two network
-  reads of `profile+d` with `profile+4d` stalled the joining client; those reads
-  participate in identity matching and that experimental patch was removed.
+- With complete address remapping, the client loaded into the host's campaign
+  and movement appeared in the other instance's view.
+- The original teammate label used a stale character `NAME` property. The
+  guarded `0062A280` hook matches the viewed character's entity handle (`+44`)
+  to a network player's entity handle (`+160`), then copies its display name
+  (`+16a`) into the existing 64-byte label buffer. The nearby voice lookup
+  identifies the local player and cannot supply the teammate's name. Matching
+  the full entity handle preserves the NPC fallback and avoids stale slots;
+  profile keys, character properties and guest registers remain unchanged.
+  Two local instances verified `Host_46` on the client and `Client_46` on the
+  host, alongside synchronized movement. The regression exercises different
+  local/remote slots, stale handles, missing names, bounds and register state.
 - Closing the client caused the host to display the retail lost-server dialog.
   The Windows SDK socket path now disables UDP Port Unreachable
   reporting with `SIO_UDP_CONNRESET`. An end-to-end SDK regression sends to a
@@ -73,7 +80,6 @@ for the separate browser integration.
 
 ## Remaining acceptance work
 
-Validate campaign progression beyond join and movement, the remaining teammate
-name label, and four-player gameplay. Competitive modes
+Validate campaign progression beyond join and movement and four-player gameplay. Competitive modes
 remain a separate inventory. Local loopback evidence cannot establish Internet
 reachability; the separate-machine and router tests are deferred.
