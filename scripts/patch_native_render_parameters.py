@@ -8,6 +8,9 @@ DIGESTS = {
     '00673750': '51ae9b4fce79163e1dfe6909ba83484043a52042c71ab9551002d5dcb96f6e98',
     '006740E0': 'e0d4b24718c48f15fdd98cdd8920ab2fef6ad9fee9412a26b3f8969485fa93ed',
 }
+# The producer transform now scopes this caller's five direct calls. Its
+# stripped body is unchanged; accept only this audited instrumentation variant.
+PROFILED_CALLER_DIGEST = '1b9f7fee6ee1c1525f3b0b9ae04e5c1483036485b5f200ca54eaaf4ea84239f2'
 CALL = 'ctx->lr = 0x006741AC; func_00673750(ctx); DRAIN_TRAMPOLINE(ctx);'
 REPLACEMENT = ('ctx->lr = 0x006741AC; if (!haze_native_render_parameters(ctx)) '
                'func_00673750(ctx); DRAIN_TRAMPOLINE(ctx);')
@@ -15,7 +18,10 @@ REPLACEMENT = ('ctx->lr = 0x006741AC; if (!haze_native_render_parameters(ctx)) '
 
 def audited_body(source, address):
     body = function_body(source, f'void func_{address}(ppu_context* ctx) {{')
-    if hashlib.sha256(body.encode()).hexdigest() != DIGESTS[address]:
+    accepted = {DIGESTS[address]}
+    if address == '006740E0':
+        accepted.add(PROFILED_CALLER_DIGEST)
+    if hashlib.sha256(body.encode()).hexdigest() not in accepted:
         raise ValueError(f'{address} changed; re-audit native rendering boundary')
     return body
 

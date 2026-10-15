@@ -12,6 +12,12 @@ class NativeParameterPatch(unittest.TestCase):
     def setUpClass(cls):
         source = ROOT / 'generated/ppu/ppu_recomp_003.cpp'
         if not source.exists():
+            for checkout in ROOT.parents:
+                candidate = checkout / 'generated/ppu/ppu_recomp_003.cpp'
+                if candidate.exists():
+                    source = candidate
+                    break
+        if not source.exists():
             raise unittest.SkipTest('requires private generated Haze source')
         cls.source = source.read_text(encoding='cp1252')
 
@@ -32,10 +38,22 @@ class NativeParameterPatch(unittest.TestCase):
             native.patch(native.patch(self.source))
 
     def test_composes_with_existing_build_source(self):
-        # The producer instrumentation does not alter this native boundary.
         import patch_producer_profile
-        self.assertEqual(native.patch(patch_producer_profile.patch(self.source)),
-                         patch_producer_profile.patch(native.patch(self.source)))
+        # Actual order is producer instrumentation, then native parameters.
+        # Removing just the native call replacement restores every timing scope
+        # and every guest operation, including the original fallback function.
+        profiled = patch_producer_profile.patch(self.source)
+        patched = native.patch(profiled)
+        restored = patched.replace('#include "haze_native_render_parameters.h"\n', '')
+        self.assertEqual(restored.replace(native.REPLACEMENT, native.CALL), profiled)
+        self.assertEqual(patch_producer_profile.strip_profile(profiled), self.source)
+        self.assertEqual(patched.count(native.REPLACEMENT), 1)
+        body = native.audited_body(profiled, '006740E0')
+        changed = body.replace('vm_read32', 'changed_read32', 1)
+        with self.assertRaisesRegex(ValueError, '006740E0 changed'):
+            native.patch(profiled.replace(body, changed, 1))
+        with self.assertRaises(ValueError):
+            native.patch(patched)
 
 
 if __name__ == '__main__':
