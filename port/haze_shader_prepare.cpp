@@ -60,6 +60,97 @@ struct PrepareTimings {
     uint64_t cache_write_failures = 0;
 };
 
+/* BEGIN HAZE SHADER PREP REPORT */
+enum class BundleSaveState { saved, reused, skipped, failed };
+
+static const char* bundle_save_state_name(BundleSaveState state) {
+    switch (state) {
+    case BundleSaveState::saved: return "saved";
+    case BundleSaveState::reused: return "reused";
+    case BundleSaveState::failed: return "failed";
+    default: return "skipped";
+    }
+}
+
+static BundleSaveState choose_bundle_save_state(bool worker_ok, bool fits,
+    bool path_ready, bool has_items, uint64_t hits, bool persist_ok) {
+    if (!worker_ok || !fits || !path_ready) return BundleSaveState::skipped;
+    if (!has_items) return hits ? BundleSaveState::reused : BundleSaveState::skipped;
+    return persist_ok ? BundleSaveState::saved : BundleSaveState::failed;
+}
+
+struct PrepareReport {
+    bool pixels = false;
+    bool counts_known = true;
+    uint32_t width = 0, height = 0;
+    uint64_t vertex_archive_entries = 0, pixel_archive_entries = 0;
+    uint64_t vertex_programs = 0, fragment_programs = 0;
+    uint64_t vertex_recipes = 0, pixel_recipes = 0, source_variants = 0;
+    uint64_t duplicate_programs = 0, source_duplicates = 0;
+    uint64_t compiled = 0, cached = 0, errors = 0;
+    uint64_t per_file_cache_write_attempts = 0, per_file_cache_write_failures = 0;
+    uint64_t skipped_large = 0, unsupported_decode = 0, invalid_records = 0;
+    uint64_t unsupported_sampler_records = 0;
+    BundleSaveState bundle_save = BundleSaveState::skipped;
+    uint64_t bundle_entries = 0, bundle_bytes = 0, bundle_hits = 0;
+};
+
+static void print_prepare_progress(FILE* output, char stage,
+    uint64_t processed_sources, uint64_t compiled, uint64_t cached,
+    uint64_t errors) {
+    std::fprintf(output,
+        "[shader-prepare-progress] schema=1 phase=shader_sources stage=%c "
+        "processed=%llu compiled=%llu cached=%llu errors=%llu\n",
+        stage, static_cast<unsigned long long>(processed_sources),
+        static_cast<unsigned long long>(compiled),
+        static_cast<unsigned long long>(cached),
+        static_cast<unsigned long long>(errors));
+    std::fflush(output);
+}
+
+static void print_prepare_result(FILE* output, const PrepareReport& r,
+    const char* worker_result) {
+    std::fprintf(output,
+        "[shader-prepare-result] schema=1 scope=archive_shader_sources "
+        "worker_result=%s counts_known=%u pixels=%u width=%u height=%u "
+        "vertex_archive_entries=%llu pixel_archive_entries=%llu "
+        "vertex_programs=%llu fragment_programs=%llu vertex_recipes=%llu "
+        "pixel_recipes=%llu source_variants=%llu duplicate_programs=%llu "
+        "source_duplicates=%llu "
+        "compiled=%llu cached=%llu errors=%llu per_file_cache_write_attempts=%llu "
+        "per_file_cache_write_failures=%llu skipped_large=%llu "
+        "unsupported_decode=%llu invalid_records=%llu "
+        "unsupported_sampler_records=%llu bundle_save=%s bundle_entries=%llu "
+        "bundle_bytes=%llu bundle_hits=%llu coverage=archive_supported_sources_only "
+        "pso_coverage=not_prepared\n",
+        worker_result, r.counts_known ? 1u : 0u, r.pixels ? 1u : 0u,
+        r.width, r.height,
+        static_cast<unsigned long long>(r.vertex_archive_entries),
+        static_cast<unsigned long long>(r.pixel_archive_entries),
+        static_cast<unsigned long long>(r.vertex_programs),
+        static_cast<unsigned long long>(r.fragment_programs),
+        static_cast<unsigned long long>(r.vertex_recipes),
+        static_cast<unsigned long long>(r.pixel_recipes),
+        static_cast<unsigned long long>(r.source_variants),
+        static_cast<unsigned long long>(r.duplicate_programs),
+        static_cast<unsigned long long>(r.source_duplicates),
+        static_cast<unsigned long long>(r.compiled),
+        static_cast<unsigned long long>(r.cached),
+        static_cast<unsigned long long>(r.errors),
+        static_cast<unsigned long long>(r.per_file_cache_write_attempts),
+        static_cast<unsigned long long>(r.per_file_cache_write_failures),
+        static_cast<unsigned long long>(r.skipped_large),
+        static_cast<unsigned long long>(r.unsupported_decode),
+        static_cast<unsigned long long>(r.invalid_records),
+        static_cast<unsigned long long>(r.unsupported_sampler_records),
+        bundle_save_state_name(r.bundle_save),
+        static_cast<unsigned long long>(r.bundle_entries),
+        static_cast<unsigned long long>(r.bundle_bytes),
+        static_cast<unsigned long long>(r.bundle_hits));
+    std::fflush(output);
+}
+/* END HAZE SHADER PREP REPORT */
+
 void print_timings(const PrepareTimings& timings, uint64_t wall_ns) {
     const uint64_t measured_ns = timings.dedup_ns + timings.source_ns +
         timings.cache_validate_ns + timings.compile_ns + timings.cache_write_ns;
@@ -127,6 +218,8 @@ class PreparationBundle {
     std::vector<std::vector<uint8_t>> blobs_;
     std::vector<shader_bundle_item> items_;
     size_t size_ = sizeof(shader_bundle_header);
+    uint32_t saved_entries_ = 0;
+    size_t saved_bytes_ = 0;
     bool fits_ = true;
     unsigned hits_ = 0;
 public:
@@ -179,22 +272,36 @@ public:
         item.blob = blobs_.back().data();
         items_.push_back(item);
     }
-    void save(bool complete) {
+    BundleSaveState save(bool complete) {
         // A fully reused snapshot needs no merge or disk write. Incoming
         // entries alone are merged under the shared writer lock when needed.
-        if (complete && fits_ && items_.empty() && hits_) {
-            std::printf("[shader-prepare] bundle_save=reused entries=%u bytes=%zu hits=%u elapsed_ms=0.000\n",
-                view_.count, loaded_size_, hits_);
-            return;
-        }
+        const bool path_ready = !path_.empty();
+        const bool has_items = !items_.empty();
+        const bool persist_requested = complete && fits_ && path_ready && has_items;
         uint32_t entries = 0;
         size_t bytes = 0;
         const auto begin = PrepareClock::now();
-        const bool saved = complete && fits_ && !path_.empty() && !items_.empty() &&
+        const bool saved = persist_requested &&
             shader_bundle_persist_file(path_.c_str(), items_.data(), static_cast<uint32_t>(items_.size()), &entries, &bytes);
+        const auto state = choose_bundle_save_state(
+            complete, fits_, path_ready, has_items, hits_, saved);
+        if (state == BundleSaveState::reused) {
+            saved_entries_ = view_.count;
+            saved_bytes_ = loaded_size_;
+        } else if (state == BundleSaveState::saved) {
+            saved_entries_ = entries;
+            saved_bytes_ = bytes;
+        }
         std::printf("[shader-prepare] bundle_save=%s entries=%u bytes=%zu hits=%u elapsed_ms=%.3f\n",
-            saved ? "saved" : "skipped", entries, bytes, hits_, ms(elapsed_ns(begin)));
+            bundle_save_state_name(state),
+            state == BundleSaveState::reused ? view_.count : entries,
+            state == BundleSaveState::reused ? loaded_size_ : bytes, hits_,
+            state == BundleSaveState::reused ? 0.0 : ms(elapsed_ns(begin)));
+        return state;
     }
+    unsigned hits() const { return hits_; }
+    uint32_t saved_entries() const { return saved_entries_; }
+    size_t saved_bytes() const { return saved_bytes_; }
 };
 
 bool write_cache(const fs::path& path, const std::string& source, uint64_t hash, char stage, ID3DBlob* blob) {
@@ -235,6 +342,24 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
     unsigned source_duplicates = 0, unsupported_pixels = 0;
     unsigned compiled = 0, hits = 0, failed = 0;
     PrepareTimings timings;
+    PrepareReport report;
+    report.pixels = pixels;
+    report.width = width;
+    report.height = height;
+    print_prepare_progress(stdout, pixels ? 'P' : 'V', 0, 0, 0, 0);
+    const auto snapshot_report = [&]() {
+        report.vertex_recipes = seen.size();
+        report.pixel_recipes = seen_pixels.size();
+        report.source_variants = sources.size();
+        report.duplicate_programs = timings.duplicate_programs;
+        report.source_duplicates = source_duplicates;
+        report.compiled = compiled;
+        report.cached = hits;
+        report.errors = failed;
+        report.per_file_cache_write_attempts = timings.cache_write_calls;
+        report.per_file_cache_write_failures = timings.cache_write_failures;
+        report.unsupported_sampler_records = unsupported_pixels;
+    };
     const auto store_source = [&](char stage) {
         const std::string source(text.data());
         auto phase_begin = PrepareClock::now();
@@ -248,6 +373,10 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         const auto source_entry = sources.emplace(stage, source).first;
         source_bytes += source.size();
         timings.dedup_ns += elapsed_ns(phase_begin);
+        const auto report_progress = [&]() {
+            if (sources.size() % 64 == 0)
+                print_prepare_progress(stdout, stage, sources.size(), compiled, hits, failed);
+        };
         const auto hash = source_hash(source);
         char name[64];
         std::snprintf(name, sizeof name, "%c_%016llX_%08X.bin", stage, static_cast<unsigned long long>(hash),
@@ -263,6 +392,7 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         if (cache_valid) {
             ++hits; ++timings.cache_hits;
             if (!bundle_hit) bundle.retain(stage, source_entry->second, hash, std::move(bytecode));
+            report_progress();
             return;
         }
         ComPtr<ID3DBlob> blob, diagnostic;
@@ -289,11 +419,7 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
             bundle.retain(stage, source_entry->second, hash,
                 std::vector<uint8_t>(data, data + blob->GetBufferSize()));
         }
-        if (sources.size() % 16 == 0) {
-            std::printf("[shader-prepare] stage=%c unique=%zu compiled=%u cached=%u failed=%u\n",
-                stage, sources.size(), compiled, hits, failed);
-            std::fflush(stdout);
-        }
+        report_progress();
     };
     const auto reserve_program = [&](size_t bytes) {
         if (seen.size() + seen_pixels.size() > 8192 || program_bytes + bytes > 64u * 1024u * 1024u)
@@ -351,9 +477,19 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         const auto pak = disc / "PS3_GAME" / "USRDIR" / "pak" / "cell" / name;
         const bool archive_ok = haze_visit_archive_vertex_programs(pak, visitor, stats, error);
         const uint64_t archive_ns = elapsed_ns(archive_begin);
+        report.vertex_archive_entries += stats.entries;
+        report.vertex_programs += stats.vertex_programs;
+        report.skipped_large += stats.skipped_large;
+        report.unsupported_decode += stats.unsupported_decode;
+        report.invalid_records += stats.invalid_shader;
         if (!archive_ok) {
             std::fprintf(stderr, "[shader-prepare] %s: %s\n", name, error.c_str());
             std::printf("[shader-prepare] archive_timing failed=%s wall_ms=%.3f\n", name, ms(archive_ns));
+            ++failed;
+            snapshot_report();
+            report.bundle_hits = bundle.hits();
+            report.bundle_save = BundleSaveState::skipped;
+            print_prepare_result(stdout, report, "failed");
             print_timings(timings, elapsed_ns(prepare_begin));
             return 1;
         }
@@ -366,8 +502,19 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         if (stats.invalid_shader) ++failed;
         if (pixels) {
             HazeShaderArchiveStats pixel_stats{};
-            if (!haze_visit_archive_fragment_programs(pak, pixel_visitor, pixel_stats, error)) {
+            const bool pixels_ok = haze_visit_archive_fragment_programs(pak, pixel_visitor, pixel_stats, error);
+            report.pixel_archive_entries += pixel_stats.entries;
+            report.fragment_programs += pixel_stats.fragment_programs;
+            report.skipped_large += pixel_stats.skipped_large;
+            report.unsupported_decode += pixel_stats.unsupported_decode;
+            report.invalid_records += pixel_stats.invalid_shader;
+            if (!pixels_ok) {
                 std::fprintf(stderr, "[shader-prepare] %s: %s\n", name, error.c_str());
+                ++failed;
+                snapshot_report();
+                report.bundle_hits = bundle.hits();
+                report.bundle_save = BundleSaveState::skipped;
+                print_prepare_result(stdout, report, "failed");
                 print_timings(timings, elapsed_ns(prepare_begin));
                 return 1;
             }
@@ -381,13 +528,18 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         // The archive scanner reports bounded coverage; a successful worker
         // prepares the supported variant, not every runtime pipeline variant.
     }
-    bundle.save(!failed && !sources.empty());
+    snapshot_report();
+    report.bundle_hits = bundle.hits();
+    report.bundle_save = bundle.save(!failed && !sources.empty());
+    report.bundle_entries = bundle.saved_entries();
+    report.bundle_bytes = bundle.saved_bytes();
     const uint64_t wall_ns = elapsed_ns(prepare_begin);
     std::printf("[shader-prepare] complete unique=%zu compiled=%u cached=%u failed=%u seconds=%.3f\n",
         sources.size(), compiled, hits, failed, double(wall_ns) / 1000000000.0);
     std::printf("[shader-prepare] coverage vertex_recipes=%zu pixel_recipes=%zu source_duplicates=%u "
         "unsupported_pixel_records=%u pixel_variants=%u width=%u height=%u\n",
         seen.size(), seen_pixels.size(), source_duplicates, unsupported_pixels, pixels ? 6u : 0u, width, height);
+    print_prepare_result(stdout, report, failed || sources.empty() ? "failed" : "finished");
     print_timings(timings, wall_ns);
     return failed || sources.empty() ? 1 : 0;
 }
@@ -424,6 +576,13 @@ int haze_shader_prepare_cli() {
     try { return prepare(disc, cache, pixels, width, height); }
     catch (const std::exception& error) {
         std::fprintf(stderr, "[shader-prepare] %s\n", error.what());
+        PrepareReport report;
+        report.counts_known = false;
+        report.pixels = pixels;
+        report.width = width;
+        report.height = height;
+        report.errors = 1;
+        print_prepare_result(stdout, report, "failed");
         return 1;
     }
 }

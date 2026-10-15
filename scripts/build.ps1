@@ -589,6 +589,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Shader preparation source fixture compilation failed.' }
     & $shaderPrepareTest
     if ($LASTEXITCODE -ne 0) { throw 'Shader preparation source/extent regression failed.' }
+    & $python "$root/tests/test_shader_prepare_reporting.py" --compiler $clang --source "$root/port/haze_shader_prepare.cpp" --output-dir "$root/local/shader-prepare-reporting-fixture"
+    if ($LASTEXITCODE -ne 0) { throw 'Shader preparation progress/result reporting regression failed.' }
     & $python "$root/tests/test_completion_queue_profile.py" --compiler $clang --sdk $sdk --output-dir "$root/local/completion-queue-fixtures"
     if ($LASTEXITCODE -ne 0) { throw 'Completion queue publication/pop diagnostic regression failed.' }
     & $python -m unittest tests.test_analyze_completion_queue
