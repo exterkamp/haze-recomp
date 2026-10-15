@@ -88,13 +88,15 @@ void completion_dump() {
     std::snprintf(metadata_path,sizeof metadata_path,"%s.meta.json",completion_path);
     FILE* metadata=std::fopen(metadata_path,"wb");
     if(metadata) {
-        std::fprintf(metadata,"{\n  \"schema\": 1,\n  \"qpc_frequency\": %llu,\n"
+        std::fprintf(metadata,"{\n  \"schema\": 2,\n  \"qpc_frequency\": %llu,\n"
             "  \"begin_qpc\": %llu,\n  \"end_qpc\": %llu,\n"
             "  \"recorded\": %llu,\n  \"retained\": %llu,\n  \"epochs\": %llu,\n"
             "  \"publications\": %llu,\n  \"submits\": %llu,\n  \"invalidations\": %llu,\n"
             "  \"unsupported_tail\": %llu,\n  \"pending_overwritten\": %llu,\n"
             "  \"pending_at_stop\": %llu,\n  \"ambiguous_submits\": %llu,\n"
             "  \"max_overwritten_pop_qpc\": %llu,\n"
+            "  \"min_pending_publication_qpc\": %llu,\n  \"min_pending_submit_qpc\": %llu,\n"
+            "  \"pending_unknown_publication_qpc\": %llu,\n  \"pending_unknown_submit_qpc\": %llu,\n"
             "  \"publication_is_locked_notification\": true,\n"
             "  \"service_and_callback_phases\": \"missing\",\n"
             "  \"flag_bits\": {\"no_publication\": 1, \"no_generation\": 2, "
@@ -104,18 +106,24 @@ void completion_dump() {
             snapshot.publications,snapshot.submits,snapshot.invalidations,
             snapshot.unsupported_tail,snapshot.pending_overwritten,
             snapshot.pending_at_stop,snapshot.ambiguous_submits,
-            snapshot.max_overwritten_pop_qpc);
+            snapshot.max_overwritten_pop_qpc,snapshot.min_pending_publication_qpc,
+            snapshot.min_pending_submit_qpc,snapshot.pending_unknown_publication_qpc,
+            snapshot.pending_unknown_submit_qpc);
         std::fclose(metadata);
     } else std::fprintf(stderr,"[completion-queue-profile] cannot open metadata output\n");
     std::fprintf(stderr,"[completion-queue-profile] recorded=%llu retained=%llu epochs=%llu "
         "publications=%llu submits=%llu invalidations=%llu unsupported_tail=%llu "
         "pending_overwritten=%llu pending_at_stop=%llu ambiguous_submits=%llu "
         "max_overwritten_pop_qpc=%llu begin_qpc=%llu end_qpc=%llu "
+        "min_pending_publication_qpc=%llu min_pending_submit_qpc=%llu "
+        "pending_unknown_publication_qpc=%llu pending_unknown_submit_qpc=%llu "
         "publication_is_locked_notification=1 service_and_callback_phases=missing\n",snapshot.recorded,snapshot.recorded-first,
         snapshot.epochs,snapshot.publications,snapshot.submits,snapshot.invalidations,
         snapshot.unsupported_tail,snapshot.pending_overwritten,snapshot.pending_at_stop,
         snapshot.ambiguous_submits,snapshot.max_overwritten_pop_qpc,
-        snapshot.begin_qpc,snapshot.end_qpc);
+        snapshot.begin_qpc,snapshot.end_qpc,snapshot.min_pending_publication_qpc,
+        snapshot.min_pending_submit_qpc,snapshot.pending_unknown_publication_qpc,
+        snapshot.pending_unknown_submit_qpc);
 }
 }
 void haze_completion_queue_submit(unsigned thread,uint64_t toc,uint32_t slot) {

@@ -6,7 +6,10 @@
 //   tests/test_completion_queue_profile.cpp port/haze_job_profile.cpp
 //   port/haze_job_trace.cpp external/ps3recomp/runtime/spu/spu_coherency.c
 //   external/ps3recomp/libs/spurs/cellSpursQueue.c
-// Run as: test_completion_queue_profile.exe contracts|wrap|concurrent output.csv
+// Use test_completion_queue_profile.py for pending-clock cases: it compiles
+// coherency through a generated wrapper substituting only its QPC query.
+// Production source has no test clock switch or runtime policy changes.
+// Run as: test_completion_queue_profile.exe <mode> output.csv
 #include <windows.h>
 #include <cassert>
 #include <cstdint>
@@ -19,7 +22,22 @@
 #include "spu_coherency.h"
 #include "spu_queue_diagnostic.h"
 
+static bool fixture_fail_queue_qpc;
+static bool fixture_script_queue_qpc;
+static uint64_t fixture_queue_qpc;
+static uint64_t fixture_last_queue_qpc;
 extern "C" {
+BOOL WINAPI completion_fixture_qpc(LARGE_INTEGER* value) {
+    if(fixture_fail_queue_qpc) {value->QuadPart=0;return FALSE;}
+    if(fixture_script_queue_qpc) {
+        value->QuadPart=++fixture_queue_qpc;
+        fixture_last_queue_qpc=fixture_queue_qpc;
+        return TRUE;
+    }
+    const BOOL result=QueryPerformanceCounter(value);
+    if(result)fixture_last_queue_qpc=uint64_t(value->QuadPart);
+    return result;
+}
 uint8_t* vm_base;
 int g_resv_store_active;
 uint32_t g_ww_lo,g_ww_hi;
@@ -91,6 +109,12 @@ int main(int argc,char** argv) {
     // The source-audited TOC -> root -> table -> completion queue chain.
     write32(0xE94EE0-0x7C1C,0x10000);write32(0x10000-0x7FD8,0x2000);write32(0x2000,queue);
     reset();
+    const bool pending=std::strncmp(argv[1],"pending",7)==0;
+    if(pending) {
+        LARGE_INTEGER base;assert(QueryPerformanceCounter(&base));
+        fixture_queue_qpc=uint64_t(base.QuadPart);fixture_script_queue_qpc=true;
+    }
+    uint64_t expected_pending_publication=0,expected_pending_submit=0;
     if(std::strcmp(argv[1],"contracts")==0) {
         uint8_t before[128];std::memcpy(before,vm_base+queue,sizeof before);
         submit(3,true);assert(std::memcmp(before,vm_base+queue,sizeof before)==0);
@@ -116,6 +140,20 @@ int main(int argc,char** argv) {
     } else if(std::strcmp(argv[1],"wrap")==0) {
         for(unsigned i=0;i<SPU_QUEUE_DIAG_CAPACITY+7;++i) {
             submit(3);assert(publish(3,i%2==0));pop(3);
+        }
+    } else if(pending) {
+        submit(1);assert(publish(1));pop(1);
+        if(std::strcmp(argv[1],"pending")==0) {
+            submit(2);expected_pending_submit=fixture_last_queue_qpc;
+            assert(publish(2));expected_pending_publication=fixture_last_queue_qpc;
+            submit(3);assert(publish(3));
+        } else if(std::strcmp(argv[1],"pending_unknown")==0) {
+            assert(publish(7));expected_pending_publication=fixture_last_queue_qpc;
+            submit(2);expected_pending_submit=fixture_last_queue_qpc;
+            fixture_fail_queue_qpc=true;assert(publish(2));fixture_fail_queue_qpc=false;
+        } else {
+            assert(std::strcmp(argv[1],"pending_all_unknown")==0);
+            fixture_fail_queue_qpc=true;assert(publish(7));fixture_fail_queue_qpc=false;
         }
     } else {
         assert(std::strcmp(argv[1],"concurrent")==0);
@@ -145,6 +183,14 @@ int main(int argc,char** argv) {
         assert(r[8].flags==0 && r[8].generation==1);
         assert(snapshot.ambiguous_submits==1 && snapshot.invalidations==2);
         assert(!snapshot.pending_at_stop && !snapshot.unsupported_tail);
+    } else if(pending) {
+        assert(snapshot.recorded==1 && snapshot.rows[0].flags==0);
+        assert(snapshot.pending_at_stop==(std::strcmp(argv[1],"pending_all_unknown")==0?1:2));
+        assert(snapshot.min_pending_publication_qpc==expected_pending_publication);
+        assert(snapshot.min_pending_submit_qpc==expected_pending_submit);
+        const unsigned unknown=std::strcmp(argv[1],"pending")==0?0:1;
+        assert(snapshot.pending_unknown_publication_qpc==unknown);
+        assert(snapshot.pending_unknown_submit_qpc==unknown);
     } else {
         const uint64_t first=snapshot.recorded>SPU_QUEUE_DIAG_CAPACITY?snapshot.recorded-SPU_QUEUE_DIAG_CAPACITY:0;
         assert(snapshot.max_overwritten_pop_qpc && !snapshot.pending_at_stop);
@@ -157,6 +203,10 @@ int main(int argc,char** argv) {
     const uint64_t stopped_at=snapshot.end_qpc;
     submit(21);spu_lockline_lock();spu_coh_notify_write(queue);spu_lockline_unlock();
     spu_queue_diag_stop(&snapshot);assert(snapshot.end_qpc==stopped_at);
+    if(pending) {
+        assert(snapshot.min_pending_publication_qpc==expected_pending_publication);
+        assert(snapshot.min_pending_submit_qpc==expected_pending_submit);
+    }
     haze_job_profile_dump(); // independent CSV works without old profile CSV
     assert(GetFileAttributesA(argv[2])!=INVALID_FILE_ATTRIBUTES);
     const std::string metadata=std::string(argv[2])+".meta.json";

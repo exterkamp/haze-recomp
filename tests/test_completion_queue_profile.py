@@ -19,6 +19,13 @@ def main():
     # Preserve earlier artifacts; never recursively remove/reuse another run.
     out = Path(tempfile.mkdtemp(prefix="completion-queue-", dir=args.output_dir.resolve()))
     exe = out / "test_completion_queue_profile.exe"
+    # Compile the actual production coherency source; only the OS clock call
+    # is substituted so zero-clock pending records are exercised deterministically.
+    coherency_wrapper = out / "coherency_fixture.c"
+    coherency_wrapper.write_text(
+        '#include <windows.h>\nBOOL WINAPI completion_fixture_qpc(LARGE_INTEGER*);\n'
+        '#define QueryPerformanceCounter completion_fixture_qpc\n'
+        f'#include "{(sdk / "runtime/spu/spu_coherency.c").as_posix()}"\n')
     subprocess.run([
         args.compiler, "/nologo", "/EHsc", "/W0", "/O2", "/std:c++20",
         "/DHAZE_JOB_PROFILE", "/DHAZE_JOB_TRACE", "/D_CRT_SECURE_NO_WARNINGS",
@@ -29,17 +36,18 @@ def main():
         str(root / "tests/test_completion_queue_profile.cpp"),
         str(root / "port/haze_job_profile.cpp"),
         str(root / "port/haze_job_trace.cpp"),
-        str(sdk / "runtime/spu/spu_coherency.c"),
+        str(coherency_wrapper),
         str(sdk / "libs/spurs/cellSpursQueue.c"),
     ], check=True, timeout=120)
-    for mode, total in (("contracts", 9), ("wrap", 23), ("concurrent", 128)):
+    for mode, total in (("contracts", 9), ("wrap", 23), ("concurrent", 128),
+                        ("pending", 1), ("pending_unknown", 1), ("pending_all_unknown", 1)):
         path = out / f"{mode}.csv"
         subprocess.run([str(exe), mode, str(path)], check=True, timeout=20)
         metadata = json.loads(Path(str(path) + ".meta.json").read_text())
         with path.open(newline="") as file:
             rows = [{key: int(value) for key, value in row.items()}
                     for row in csv.DictReader(file)]
-        assert metadata["schema"] == 1
+        assert metadata["schema"] == 2
         assert metadata["recorded"] == total
         assert metadata["retained"] == len(rows) == min(total, 16)
         assert metadata["qpc_frequency"] > 0
@@ -66,6 +74,21 @@ def main():
             # must exclude the overwrite boundary itself, rather than assume
             # a strictly later clock value for every retained row.
             assert metadata["max_overwritten_pop_qpc"] <= rows[0]["pop_qpc"]
+        if mode.startswith("pending"):
+            unknown = 0 if mode == "pending" else 1
+            assert metadata["pending_unknown_publication_qpc"] == unknown
+            assert metadata["pending_unknown_submit_qpc"] == unknown
+            assert metadata["pending_at_stop"] == (1 if mode == "pending_all_unknown" else 2)
+            if mode == "pending_all_unknown":
+                assert metadata["min_pending_publication_qpc"] == metadata["min_pending_submit_qpc"] == 0
+            else:
+                assert metadata["min_pending_publication_qpc"] > 0
+                assert metadata["min_pending_submit_qpc"] > 0
+        else:
+            assert metadata["pending_at_stop"] == 0
+            assert not any(metadata[field] for field in (
+                "min_pending_publication_qpc", "min_pending_submit_qpc",
+                "pending_unknown_publication_qpc", "pending_unknown_submit_qpc"))
     print(f"PASS completion queue actual-source fixture and export metadata: {out}")
 
 
