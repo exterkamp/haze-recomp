@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile actual shader-bundle codec/persistence helpers and exercise them."""
+"""Compile the shared SDK shader-bundle header and exercise it."""
 
 from __future__ import annotations
 
@@ -11,20 +11,6 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BEGIN = "/* BEGIN RSX SHADER BUNDLE */"
-END = "/* END RSX SHADER BUNDLE */"
-PERSIST_BEGIN = "/* BEGIN RSX SHADER BUNDLE PERSIST */"
-PERSIST_END = "/* END RSX SHADER BUNDLE PERSIST */"
-
-
-def extract_block(source: str, begin: str, end_marker: str) -> str:
-    start = source.find(begin)
-    end = source.find(end_marker, start + len(begin))
-    if start < 0 or end < 0:
-        raise ValueError("shader bundle source markers are missing")
-    return source[start + len(begin):end]
-
-
 PRELUDE = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -36,9 +22,10 @@ PRELUDE = r'''
 typedef uint8_t u8;
 typedef uint32_t u32;
 typedef uint64_t u64;
-#define MAX_SHADER_BLOBS 8192u
 #define SHADER_DISK_CACHE_VERSION 2u
 #define SHADER_DISK_CACHE_MAX_BLOB (4u * 1024u * 1024u)
+#define MAX_SHADER_BLOBS 8192u
+#include "rsx_shader_bundle.h"
 '''
 
 
@@ -254,7 +241,7 @@ int main(int argc, char** argv) {
                     &first, sizeof(first));
     }
 
-    /* Count and total-byte caps reject before payload allocation/copy. */
+    /* Count cap rejects before payload allocation/copy. */
     static const u8 one_byte = 7;
     const u32 over_entry_cap = SHADER_BUNDLE_MAX_ENTRIES + 1u;
     shader_bundle_item* repeated = (shader_bundle_item*)calloc(
@@ -296,6 +283,32 @@ int main(int argc, char** argv) {
     }
     assert(!shader_bundle_serialize(oversized, large_count, &rejected, &rejected_size));
     free(oversized);
+
+    /* A valid archive larger than the old 64 MiB ceiling must round-trip. */
+    const u32 large_valid_count = 16u;
+    u8* large_blob = (u8*)calloc(SHADER_DISK_CACHE_MAX_BLOB, 1u);
+    u8 (*large_sources)[4] = (u8 (*)[4])calloc(large_valid_count, 4u);
+    shader_bundle_item* large_items = (shader_bundle_item*)calloc(
+        large_valid_count, sizeof(shader_bundle_item));
+    assert(large_blob && large_sources && large_items);
+    for (u32 i = 0; i < large_valid_count; ++i) {
+        memcpy(large_sources[i], &i, 4u);
+        large_items[i] = make_item((u32)'V', large_sources[i], 4u,
+            large_blob, SHADER_DISK_CACHE_MAX_BLOB);
+    }
+    u8* large_archive = NULL;
+    size_t large_archive_size = 0;
+    assert(shader_bundle_serialize(large_items, large_valid_count,
+        &large_archive, &large_archive_size));
+    assert(large_archive_size > 64u * 1024u * 1024u);
+    assert(large_archive_size <= SHADER_BUNDLE_MAX_BYTES);
+    shader_bundle_view large_view = {};
+    assert(shader_bundle_parse(large_archive, large_archive_size, &large_view));
+    assert(large_view.count == large_valid_count);
+    free(large_archive);
+    free(large_items);
+    free(large_sources);
+    free(large_blob);
 
     /* Concurrent parse/find on one immutable archive and serialize on
      * independent lists exercises the helper's shared-read/reentrant paths. */
@@ -366,12 +379,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiler", required=True, help="clang-cl executable")
     parser.add_argument("--source", type=Path,
-                        default=ROOT / "external/ps3recomp/libs/video/rsx_live_draw.c")
+                        default=ROOT / "external/ps3recomp/libs/video/rsx_live_draw.c",
+                        help="SDK source path used to locate the shared header")
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
-    source_text = args.source.read_text(encoding="utf-8")
-    block = extract_block(source_text, BEGIN, END)
-    persist_block = extract_block(source_text, PERSIST_BEGIN, PERSIST_END)
+    header = args.source.with_name("rsx_shader_bundle.h")
+    if not header.is_file():
+        raise FileNotFoundError(header)
     if args.output_dir:
         out = args.output_dir.resolve()
         out.mkdir(parents=True, exist_ok=True)
@@ -382,14 +396,16 @@ def main() -> None:
         temp_path = Path(temp)
         fixture = temp_path / "shader_bundle_fixture.cpp"
         executable = temp_path / "shader_bundle_fixture.exe"
-        fixture.write_text(PRELUDE + block + persist_block + HARNESS, encoding="utf-8")
+        fixture.write_text(PRELUDE + HARNESS, encoding="utf-8")
         command = [args.compiler, "/nologo", "/std:c++17", "/EHsc", "/W4", "/WX",
-                   "/O2", str(fixture), f"/Fo:{temp_path / 'shader_bundle_fixture.obj'}",
+                   "/O2", f"/I{header.parent}",
+                   f"/I{args.source.parents[2] / 'include'}", str(fixture),
+                   f"/Fo:{temp_path / 'shader_bundle_fixture.obj'}",
                    f"/Fe:{executable}"]
         subprocess.run(command, check=True)
         subprocess.run([str(executable)], check=True)
         run_persistence_race(executable, temp_path)
-    print("PASS shader bundle codec/persistence: corruption, merge, caps, concurrent writers")
+    print("PASS shared shader bundle header: corruption, merge, 128 MiB cap, concurrent writers")
 
 
 if __name__ == "__main__":

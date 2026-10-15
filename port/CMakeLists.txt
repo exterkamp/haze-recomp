@@ -302,7 +302,10 @@ if(WIN32)
     # SDK 7d0e132 retains derived VP metadata under the existing dispatcher
     # ownership. Program writes/reset invalidate it; constants stay live.
     # No resources, descriptors, or settings transaction ownership changes.
-    if(NOT HAZE_RSX_HASH STREQUAL "5a6f44bf60a52118463cb6ff63bb2ef9f77b44ac8f30f54f640a2d439d6e315d")
+    # Shared shader-bundle helpers preserve cache format and merge ownership;
+    # only the bounded byte cap increases to 128 MiB. No descriptor, GPU
+    # resource, or live-settings transaction changes.
+    if(NOT HAZE_RSX_HASH STREQUAL "9adadcea45782295342ad871c909be49644b14b50e94ca15c516ce939e83c1d6")
         message(FATAL_ERROR "Renderer changed: audit the Haze live-settings transaction before building")
     endif()
     # Capture while DXGI still owns this backbuffer, before Present rotates it.

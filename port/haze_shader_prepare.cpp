@@ -19,6 +19,10 @@
 #include <tuple>
 #include <stdexcept>
 #include <cwchar>
+#include <cstdlib>
+#include <memory>
+#include <algorithm>
+#include "rsx_shader_bundle.h"
 
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "shell32.lib")
@@ -83,7 +87,19 @@ uint64_t source_hash(const std::string& source) {
     return result;
 }
 
-bool valid_cached_shader(const fs::path& path, const std::string& source, uint64_t hash, char stage) {
+bool valid_bytecode(const void* data, size_t size, char stage) {
+    ComPtr<ID3D11ShaderReflection> reflection;
+    if (FAILED(D3DReflect(data, size, __uuidof(ID3D11ShaderReflection),
+        reinterpret_cast<void**>(reflection.GetAddressOf())))) return false;
+    D3D11_SHADER_DESC desc{};
+    return SUCCEEDED(reflection->GetDesc(&desc)) &&
+        D3D11_SHVER_GET_TYPE(desc.Version) ==
+            (stage == 'V' ? D3D11_SHVER_VERTEX_SHADER : D3D11_SHVER_PIXEL_SHADER) &&
+        D3D11_SHVER_GET_MAJOR(desc.Version) == 5 && D3D11_SHVER_GET_MINOR(desc.Version) == 0;
+}
+
+bool valid_cached_shader(const fs::path& path, const std::string& source, uint64_t hash, char stage,
+                         std::vector<uint8_t>& bytecode) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) return false;
     const auto size = input.tellg();
@@ -96,17 +112,90 @@ bool valid_cached_shader(const fs::path& path, const std::string& source, uint64
         size != static_cast<std::streamoff>(sizeof header + source.size() + header.blob_length)) return false;
     std::string retained(source.size(), '\0');
     if (!input.read(retained.data(), retained.size()) || retained != source) return false;
-    std::vector<uint8_t> bytecode(header.blob_length);
+    bytecode.resize(header.blob_length);
     if (!input.read(reinterpret_cast<char*>(bytecode.data()), bytecode.size())) return false;
-    ComPtr<ID3D11ShaderReflection> reflection;
-    if (FAILED(D3DReflect(bytecode.data(), bytecode.size(), __uuidof(ID3D11ShaderReflection),
-        reinterpret_cast<void**>(reflection.GetAddressOf())))) return false;
-    D3D11_SHADER_DESC desc{};
-    return SUCCEEDED(reflection->GetDesc(&desc)) &&
-        D3D11_SHVER_GET_TYPE(desc.Version) ==
-            (stage == 'V' ? D3D11_SHVER_VERTEX_SHADER : D3D11_SHVER_PIXEL_SHADER) &&
-        D3D11_SHVER_GET_MAJOR(desc.Version) == 5 && D3D11_SHVER_GET_MINOR(desc.Version) == 0;
+    return valid_bytecode(bytecode.data(), bytecode.size(), stage);
 }
+
+// Share the renderer's bounded codec, exact-source lookup and locked merge.
+// Per-file entries remain the resumable fallback if bundle persistence fails.
+class PreparationBundle {
+    std::string path_;
+    std::unique_ptr<uint8_t, decltype(&std::free)> bytes_{nullptr, &std::free};
+    shader_bundle_view view_{};
+    size_t loaded_size_ = 0;
+    std::vector<std::vector<uint8_t>> blobs_;
+    std::vector<shader_bundle_item> items_;
+    size_t size_ = sizeof(shader_bundle_header);
+    bool fits_ = true;
+    unsigned hits_ = 0;
+public:
+    explicit PreparationBundle(const fs::path& cache) {
+        const auto wide = (cache / "shader_cache.bundle").wstring();
+        // The current SDK persistence API uses narrow Windows paths. Refuse
+        // lossy conversion; Unicode/long paths retain the existing wide-file
+        // preparation path until bundle persistence supports those paths too.
+        if (wide.size() >= MAX_PATH || std::any_of(wide.begin(), wide.end(),
+                [](wchar_t ch) { return ch > 127; })) {
+            std::printf("[shader-prepare] bundle_load=unsupported_path\n");
+            return;
+        }
+        path_.assign(wide.begin(), wide.end());
+        uint8_t* data = nullptr;
+        size_t size = 0;
+        const auto begin = PrepareClock::now();
+        const int result = shader_bundle_read_file(path_.c_str(), &data, &size, &view_);
+        bytes_.reset(data);
+        loaded_size_ = size;
+        std::printf("[shader-prepare] bundle_load=%s entries=%u bytes=%zu elapsed_ms=%.3f\n",
+            result == 1 ? "loaded" : result == 0 ? "absent" : "rejected",
+            result == 1 ? view_.count : 0, size, ms(elapsed_ns(begin)));
+    }
+    bool load(char stage, const std::string& source, uint64_t hash) {
+        const auto* record = shader_bundle_find(&view_, static_cast<uint32_t>(stage),
+            source.data(), static_cast<uint32_t>(source.size()), hash);
+        if (!record || !valid_bytecode(view_.bytes + record->blob_offset, record->blob_length, stage)) return false;
+        ++hits_;
+        return true;
+    }
+    // source belongs to the stable set of generated sources, alive through save.
+    void retain(char stage, const std::string& source, uint64_t hash, std::vector<uint8_t> blob) {
+        if (path_.empty() || !fits_) return;
+        const size_t add = sizeof(shader_bundle_record) + source.size() + blob.size();
+        if (add > SHADER_BUNDLE_MAX_BYTES - size_ || items_.size() >= SHADER_BUNDLE_MAX_ENTRIES) {
+            fits_ = false;
+            items_.clear();
+            blobs_.clear();
+            return;
+        }
+        size_ += add;
+        blobs_.push_back(std::move(blob));
+        shader_bundle_item item{};
+        item.stage = static_cast<uint32_t>(stage);
+        item.hash = hash;
+        item.source_length = static_cast<uint32_t>(source.size());
+        item.blob_length = static_cast<uint32_t>(blobs_.back().size());
+        item.source = reinterpret_cast<const uint8_t*>(source.data());
+        item.blob = blobs_.back().data();
+        items_.push_back(item);
+    }
+    void save(bool complete) {
+        // A fully reused snapshot needs no merge or disk write. Incoming
+        // entries alone are merged under the shared writer lock when needed.
+        if (complete && fits_ && items_.empty() && hits_) {
+            std::printf("[shader-prepare] bundle_save=reused entries=%u bytes=%zu hits=%u elapsed_ms=0.000\n",
+                view_.count, loaded_size_, hits_);
+            return;
+        }
+        uint32_t entries = 0;
+        size_t bytes = 0;
+        const auto begin = PrepareClock::now();
+        const bool saved = complete && fits_ && !path_.empty() && !items_.empty() &&
+            shader_bundle_persist_file(path_.c_str(), items_.data(), static_cast<uint32_t>(items_.size()), &entries, &bytes);
+        std::printf("[shader-prepare] bundle_save=%s entries=%u bytes=%zu hits=%u elapsed_ms=%.3f\n",
+            saved ? "saved" : "skipped", entries, bytes, hits_, ms(elapsed_ns(begin)));
+    }
+};
 
 bool write_cache(const fs::path& path, const std::string& source, uint64_t hash, char stage, ID3DBlob* blob) {
     static unsigned serial = 0;
@@ -141,6 +230,7 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
     std::set<std::pair<std::vector<uint8_t>, uint32_t>> seen;
     std::set<std::tuple<std::vector<uint8_t>, uint32_t, uint32_t>> seen_pixels;
     std::set<std::pair<char, std::string>> sources;
+    PreparationBundle bundle(cache);
     uint64_t source_bytes = 0, program_bytes = 0;
     unsigned source_duplicates = 0, unsupported_pixels = 0;
     unsigned compiled = 0, hits = 0, failed = 0;
@@ -155,7 +245,7 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         }
         if (sources.size() >= 16384 || source_bytes + source.size() > 128u * 1024u * 1024u)
             throw std::runtime_error("Shader preparation source inventory exceeds its bounded capacity");
-        sources.emplace(stage, source);
+        const auto source_entry = sources.emplace(stage, source).first;
         source_bytes += source.size();
         timings.dedup_ns += elapsed_ns(phase_begin);
         const auto hash = source_hash(source);
@@ -164,10 +254,17 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
             static_cast<unsigned>(source.size()));
         const auto path = cache / name;
         phase_begin = PrepareClock::now();
-        const bool cache_valid = valid_cached_shader(path, source, hash, stage);
+        std::vector<uint8_t> bytecode;
+        const bool bundle_hit = bundle.load(stage, source, hash);
+        const bool cache_valid = bundle_hit ||
+            valid_cached_shader(path, source, hash, stage, bytecode);
         timings.cache_validate_ns += elapsed_ns(phase_begin);
         ++timings.cache_validate_calls;
-        if (cache_valid) { ++hits; ++timings.cache_hits; return; }
+        if (cache_valid) {
+            ++hits; ++timings.cache_hits;
+            if (!bundle_hit) bundle.retain(stage, source_entry->second, hash, std::move(bytecode));
+            return;
+        }
         ComPtr<ID3DBlob> blob, diagnostic;
         phase_begin = PrepareClock::now();
         const HRESULT result = D3DCompile(source.data(), source.size(), stage == 'V' ? "xvs" : "xps",
@@ -186,7 +283,12 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         if (FAILED(result) || !blob || !cache_saved) {
             ++failed;
             std::fprintf(stderr, "[shader-prepare] failed %s hr=%08lX\n", name, static_cast<unsigned long>(result));
-        } else ++compiled;
+        } else {
+            ++compiled;
+            const auto* data = static_cast<const uint8_t*>(blob->GetBufferPointer());
+            bundle.retain(stage, source_entry->second, hash,
+                std::vector<uint8_t>(data, data + blob->GetBufferSize()));
+        }
         if (sources.size() % 16 == 0) {
             std::printf("[shader-prepare] stage=%c unique=%zu compiled=%u cached=%u failed=%u\n",
                 stage, sources.size(), compiled, hits, failed);
@@ -279,6 +381,7 @@ int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t w
         // The archive scanner reports bounded coverage; a successful worker
         // prepares the supported variant, not every runtime pipeline variant.
     }
+    bundle.save(!failed && !sources.empty());
     const uint64_t wall_ns = elapsed_ns(prepare_begin);
     std::printf("[shader-prepare] complete unique=%zu compiled=%u cached=%u failed=%u seconds=%.3f\n",
         sources.size(), compiled, hits, failed, double(wall_ns) / 1000000000.0);
