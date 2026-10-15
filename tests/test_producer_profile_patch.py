@@ -122,9 +122,25 @@ class ProducerProfilePatchTests(unittest.TestCase):
             for match in calls:
                 lr, callee = match.group("lr"), match.group("callee")
                 self.assertIn(f"haze_producer_nested_{lr}(0x{lr}u, 0x{callee}u);", after)
-            altered = before.replace(calls[0].group(0), calls[0].group(0).replace("ctx->lr", "ctx->ctr"), 1)
+            if calls:
+                altered = before.replace(calls[0].group(0), calls[0].group(0).replace("ctx->lr", "ctx->ctr"), 1)
+            else:
+                self.assertTrue(returns, "a profiled phase must contain a call")
+                altered = before.replace("ps3_indirect_call(ctx);", "changed_indirect_call(ctx);", 1)
             with self.assertRaisesRegex(ValueError, f"phase {address} changed"):
                 producer_profile.patch(self.source.replace(before, altered, 1))
+
+    def test_record_callback_return_is_the_elf_link_address(self):
+        from tests.test_render_callback_profile_patch import elf_function
+        elf = ROOT / "game/disc/PS3_GAME/USRDIR/EBOOT.ELF"
+        if not elf.is_file():
+            self.skipTest("requires private ELF")
+        start = 0x006A8AE8
+        code = elf_function(elf, start, 0x98)
+        returns = [start+i+4 for i in range(0, len(code), 4)
+                   if code[i:i+4] == bytes.fromhex("4e800421")]
+        self.assertEqual(returns, [int(lr, 16) for lr in
+                                  producer_profile.PHASE_INDIRECT_RETURNS["006A8AE8"]])
 
 
 if __name__ == "__main__":
