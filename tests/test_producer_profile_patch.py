@@ -24,6 +24,15 @@ class ProducerProfilePatchTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source_path = ROOT / "generated/ppu/ppu_recomp_003.cpp"
         cls.memmove_path = ROOT / "generated/ppu/ppu_recomp_005.cpp"
+        # Native-render diagnostic worktrees share the private generated lift
+        # from their enclosing checkout rather than copying guest content.
+        if not cls.source_path.exists():
+            for checkout in ROOT.parents:
+                candidate = checkout / "generated/ppu/ppu_recomp_003.cpp"
+                if candidate.exists():
+                    cls.source_path = candidate
+                    cls.memmove_path = checkout / "generated/ppu/ppu_recomp_005.cpp"
+                    break
         if not cls.source_path.exists() or not cls.memmove_path.exists():
             raise unittest.SkipTest("Requires the locally generated BLUS30094 PPU lift")
         cls.source = cls.source_path.read_text(encoding="cp1252")
@@ -130,9 +139,49 @@ class ProducerProfilePatchTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, f"phase {address} changed"):
                 producer_profile.patch(self.source.replace(before, altered, 1))
 
+    def test_render_record_callback_targets_and_parent_paths_are_scoped(self):
+        result = producer_profile.patch(self.source)
+        self.assertEqual(producer_profile.strip_profile(result), self.source)
+
+        # These scopes must execute inside the actual generated callback
+        # functions. Their constructor reads CTR before the unchanged guest
+        # trampoline call, preserving the dynamically resolved target.
+        for address, _, return_lr in producer_profile.RENDER_CALLBACK_FUNCTIONS:
+            body = producer_profile.function_body(
+                result, f"void func_{address}(ppu_context* ctx) {{")
+            scope = (f"haze_producer_indirect_{return_lr}(0x{return_lr}u, "
+                     "static_cast<std::uint32_t>(ctx->ctr));")
+            self.assertEqual(body.count(scope), 1)
+            self.assertIn(
+                scope + "\n            ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);",
+                body)
+
+        # 007E41E8 -> 00676938 is explicitly parented, so the 006743F8
+        # indirect target is distinguishable from 00675800 under 007E41E8.
+        parent = producer_profile.function_body(
+            result, "void func_007E41E8(ppu_context* ctx) {")
+        self.assertEqual(parent.count(
+            "haze_producer_nested_007E4974(0x007E4974u, 0x00676938u);"), 1)
+        self.assertIn(
+            "haze_producer_nested_007E4974(0x007E4974u, 0x00676938u);\n"
+            "            ctx->lr = 0x007E4974; func_00676938(ctx); DRAIN_TRAMPOLINE(ctx);",
+            parent)
+
+        # The direct route to 00675800 remains inside 007E41E8, where its
+        # indirect scope inherits the active 007E41E8 call scope.
+        self.assertIn("ctx->lr = 0x007E4520; func_00675800(ctx); DRAIN_TRAMPOLINE(ctx);",
+                      producer_profile.function_body(
+                          self.source, "void func_007E41E8(ppu_context* ctx) {"))
+
     def test_record_callback_return_is_the_elf_link_address(self):
         from tests.test_render_callback_profile_patch import elf_function
         elf = ROOT / "game/disc/PS3_GAME/USRDIR/EBOOT.ELF"
+        if not elf.is_file():
+            for checkout in ROOT.parents:
+                candidate = checkout / "game/disc/PS3_GAME/USRDIR/EBOOT.ELF"
+                if candidate.is_file():
+                    elf = candidate
+                    break
         if not elf.is_file():
             self.skipTest("requires private ELF")
         start = 0x006A8AE8
@@ -141,6 +190,16 @@ class ProducerProfilePatchTests(unittest.TestCase):
                    if code[i:i+4] == bytes.fromhex("4e800421")]
         self.assertEqual(returns, [int(lr, 16) for lr in
                                   producer_profile.PHASE_INDIRECT_RETURNS["006A8AE8"]])
+
+        for start, size, expected in (
+            (0x00675800, 0x1000, 0x00675D64),
+            (0x006743F8, 0x1000, 0x00674688),
+        ):
+            code = elf_function(elf, start, size)
+            returns = [start+i+4 for i in range(0, len(code), 4)
+                       if code[i:i+4] == bytes.fromhex("4e800421")]
+            self.assertTrue(returns, f"no bctrl found in {start:08X}")
+            self.assertEqual(returns[0], expected)
 
 
 if __name__ == "__main__":
