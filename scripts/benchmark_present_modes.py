@@ -196,6 +196,8 @@ def report(args):
         rows = [{key: int(value) for key, value in row.items()}
                 for row in csv.DictReader(stream)]
     summaries = []
+    if any(cur['qpc'] <= prev['qpc'] for prev, cur in zip(rows, rows[1:])):
+        raise ValueError('Nonpositive present interval')
     mode_column = windows.get('mode_column', 'cpu_work')
     worker_modes = None
     if mode_column in ('spu_triplet_copy', 'native_cursor', 'spu_float_native', 'gpu_vertex_pull', 'job_wait', 'vp_packets', 'vp_consumer', 'job0_kernel', 'spu_worker_reuse', 'fifo_idle_wait'):
@@ -243,6 +245,8 @@ def report(args):
     elif mode_column not in ('cpu_work', 'shadow_compare', 'depth_export', 'window_position', 'depth_clear', 'vertex_cache', 'geometry_cache', 'vertex_workers'):
         raise ValueError('Unknown recorded mode column')
     for block in windows['blocks']:
+        if block['end_qpc'] <= block['start_qpc']:
+            raise ValueError('Nonpositive measured block duration')
         if not rows or rows[0]['qpc'] > block['start_qpc'] or rows[-1]['qpc'] < block['end_qpc']:
             raise ValueError('Present CSV does not cover the entire measured block; its fixed ring may have wrapped')
         if worker_modes is not None:
@@ -252,6 +256,49 @@ def report(args):
                     raise ValueError(f'Native mode did not settle for {tid}')
                 if any(block['start_qpc'] < qpc <= block['end_qpc'] for qpc, _ in events):
                     raise ValueError(f'Native mode changed inside the measured block for {tid}')
+        overlapping = [(prev, cur) for prev, cur in zip(rows, rows[1:])
+                       if prev['qpc'] < block['end_qpc'] and cur['qpc'] > block['start_qpc']]
+        for prev, cur in overlapping:
+            if cur['present_id'] != prev['present_id'] + 1:
+                raise ValueError('Missing present inside or crossing a recorded block')
+        boundary_intervals = []
+        for prev, cur in overlapping:
+            boundaries = [name for name, qpc in (('start', block['start_qpc']),
+                                                 ('end', block['end_qpc']))
+                          if prev['qpc'] < qpc < cur['qpc']]
+            if not boundaries:
+                continue
+            # A change outside the window does not invalidate the window's
+            # selected mode, but prevents attributing the entire crossing
+            # interval to it. Never extend the mode-settle requirement here.
+            if worker_modes is None:
+                mode_evidence = dict(previous=prev[mode_column], current=cur[mode_column])
+                mode_scope = ('matching_endpoint_samples_only'
+                              if all(value == block['flags'] for value in mode_evidence.values())
+                              else 'mixed_or_unknown_outside_window')
+            else:
+                mode_evidence = {}
+                for tid, events in worker_modes.items():
+                    before = [mode for qpc, mode in events if qpc <= prev['qpc']]
+                    changes = [(qpc, mode) for qpc, mode in events
+                               if prev['qpc'] < qpc <= cur['qpc']]
+                    mode_evidence[str(tid)] = dict(mode_at_interval_start=before[-1] if before else None,
+                                                  events_during_interval=changes)
+                matching = all(evidence['mode_at_interval_start'] == block['flags'] and
+                               all(mode == block['flags'] for _, mode in evidence['events_during_interval'])
+                               for evidence in mode_evidence.values())
+                mode_scope = ('requested_mode_throughout_interval' if matching
+                              else 'mixed_or_unknown_outside_window')
+            scale = 1000 / windows['qpc_frequency']
+            overlap_ms = (min(cur['qpc'], block['end_qpc']) -
+                          max(prev['qpc'], block['start_qpc'])) * scale
+            full_ms = (cur['qpc'] - prev['qpc']) * scale
+            boundary_intervals.append(dict(previous_present_id=prev['present_id'],
+                present_id=cur['present_id'], guest_frame=cur['guest_frame'],
+                start_qpc=prev['qpc'], end_qpc=cur['qpc'], boundaries=boundaries,
+                full_interval_ms=full_ms, in_window_overlap_ms=overlap_ms,
+                outside_window_ms=full_ms-overlap_ms,
+                over_50_ms=full_ms > 50, mode_scope=mode_scope, mode_evidence=mode_evidence))
         selected = [(prev, cur) for prev, cur in zip(rows, rows[1:])
                     if prev['qpc'] >= block['start_qpc'] and cur['qpc'] <= block['end_qpc']]
         if len(selected) < args.min_frames:
@@ -265,7 +312,25 @@ def report(args):
                 raise ValueError('Nonpositive present interval')
         intervals = [(cur['qpc'] - prev['qpc']) * 1000 / windows['qpc_frequency']
                      for prev, cur in selected]
+        duration_s = (block['end_qpc'] - block['start_qpc']) / windows['qpc_frequency']
+        window_presents = sum(block['start_qpc'] <= row['qpc'] < block['end_qpc'] for row in rows)
+        boundary_hitches = sum(row['over_50_ms'] for row in boundary_intervals)
         summaries.append(dict(block, frames=len(intervals),
+            statistics_scope='fps, frames, frame_ms and frames_over_* use only complete present intervals inside [start_qpc,end_qpc]; boundary intervals are excluded',
+            window_present_throughput=dict(present_count=window_presents, duration_s=duration_s,
+                fps=window_presents/duration_s,
+                scope='Present timestamps in [start_qpc,end_qpc), divided by full window duration; count quantization is one present, not the reciprocal of complete-interval mean'),
+            boundary_pacing_audit=dict(covered=True, intervals=boundary_intervals,
+                intervals_over_50_ms=boundary_hitches,
+                max_full_interval_ms=max((row['full_interval_ms'] for row in boundary_intervals),default=None),
+                status='boundary_hitch_observed' if boundary_hitches else 'no_boundary_interval_over_50_ms_observed',
+                note='Full crossing intervals are reported separately and never added or clipped into frame_ms. Their overlap is elapsed window time, not CPU work or an additional frame. Mixed/unknown mode attribution does not assign outside-window time to the requested mode.'),
+            overlapping_interval_audit=dict(interval_count=len(overlapping),
+                max_full_interval_ms=max((cur['qpc']-prev['qpc'])*1000/windows['qpc_frequency']
+                                         for prev,cur in overlapping),
+                full_intervals_over_50_ms=sum((cur['qpc']-prev['qpc'])*1000/windows['qpc_frequency'] > 50
+                                            for prev,cur in overlapping),
+                scope='Every present interval with positive overlap with the window, using its full unclipped duration; counts include boundary intervals and do not assign their outside-window time to this block'),
             first_frame=selected[0][1]['guest_frame'], last_frame=selected[-1][1]['guest_frame'],
             fps=1000 / statistics.mean(intervals),
             frame_ms=dict(mean=statistics.mean(intervals), min=min(intervals),
@@ -274,6 +339,7 @@ def report(args):
             frames_over_33_333_ms=sum(value > 1000 / 30 for value in intervals),
             frames_over_50_ms=sum(value > 50 for value in intervals)))
     result = dict(source=str(args.csv), windows=str(args.windows), blocks=summaries,
+                  statistics_scope='Legacy complete-interval statistics must be read with boundary_pacing_audit and window_present_throughput; they do not by themselves establish clean pacing.',
                   scenario=windows.get('scenario', 'stationary, no injected input'), note=__doc__)
     if any(block.get('camera_token') is not None for block in windows['blocks']):
         if not getattr(args, 'camera_log', None):

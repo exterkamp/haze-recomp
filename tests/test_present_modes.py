@@ -16,6 +16,109 @@ from benchmark_present_modes import report, verify_process_observation
 
 
 class PresentWindows(unittest.TestCase):
+    def boundary_report(self, timestamps, start, end, modes=None, native_log=None, min_frames=60,
+                        present_ids=None):
+        with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
+            root = Path(folder)
+            args = SimpleNamespace(csv=root/'p.csv',windows=root/'w.json',
+                output=root/'r.json',min_frames=min_frames,queue_mode_log=None)
+            windows = dict(complete=True,qpc_frequency=1000,
+                mode_column='fifo_idle_wait' if native_log is not None else 'cpu_work',
+                blocks=[dict(flags=1,start_qpc=start,end_qpc=end)])
+            args.windows.write_text(json.dumps(windows))
+            if native_log is not None:
+                args.queue_mode_log=root/'native.log'
+                args.queue_mode_log.write_text(native_log)
+            with args.csv.open('w',newline='') as stream:
+                stream.write('# qpc_frequency=1000\npresent_id,guest_frame,qpc,cpu_work\n')
+                for i,qpc in enumerate(timestamps):
+                    present_id=present_ids[i] if present_ids is not None else i+1
+                    stream.write(f'{present_id},{i},{qpc},{modes[i] if modes is not None else 1}\n')
+            with contextlib.redirect_stdout(io.StringIO()): report(args)
+            return json.loads(args.output.read_text())['blocks'][0]
+
+    def test_end_boundary_hitch_and_window_throughput(self):
+        # The legacy mean is 40 ms; most of the actual 623 ms hitch lies
+        # inside the measured window and must be visible separately.
+        timestamps=list(range(0,3441,40))+[4063]
+        b=self.boundary_report(timestamps,400,4000)
+        self.assertEqual(b['frame_ms']['mean'],40)
+        self.assertEqual(b['frame_ms']['max'],40)
+        self.assertEqual(b['frames'],76)
+        self.assertIn('only complete',b['statistics_scope'])
+        t=b['window_present_throughput']
+        self.assertEqual(t['present_count'],77)
+        self.assertEqual(t['duration_s'],3.6)
+        self.assertAlmostEqual(t['fps'],77/3.6)
+        a=b['boundary_pacing_audit']
+        self.assertTrue(a['covered'])
+        self.assertEqual(a['status'],'boundary_hitch_observed')
+        self.assertEqual(a['intervals_over_50_ms'],1)
+        self.assertEqual(len(a['intervals']),1)
+        r=a['intervals'][0]
+        self.assertEqual(r['boundaries'],['end'])
+        self.assertEqual(r['full_interval_ms'],623)
+        self.assertEqual(r['in_window_overlap_ms'],560)
+        self.assertEqual(r['outside_window_ms'],63)
+        self.assertEqual(b['overlapping_interval_audit']['max_full_interval_ms'],623)
+        self.assertEqual(b['overlapping_interval_audit']['interval_count'],77)
+        self.assertEqual(b['overlapping_interval_audit']['full_intervals_over_50_ms'],1)
+
+    def test_start_boundary_hitch(self):
+        b=self.boundary_report([0,623]+list(range(663,5000,40)),600,4000)
+        r=next(r for r in b['boundary_pacing_audit']['intervals'] if 'start' in r['boundaries'])
+        self.assertEqual(r['full_interval_ms'],623)
+        self.assertEqual(r['in_window_overlap_ms'],23)
+        self.assertEqual(r['outside_window_ms'],600)
+        self.assertEqual(b['boundary_pacing_audit']['intervals_over_50_ms'],1)
+        self.assertEqual(b['frame_ms']['max'],40)
+
+    def test_exact_boundaries_have_no_straddlers_and_half_open_count(self):
+        b=self.boundary_report(list(range(0,4001,40)),400,3200)
+        self.assertEqual(b['boundary_pacing_audit']['intervals'],[])
+        self.assertIsNone(b['boundary_pacing_audit']['max_full_interval_ms'])
+        self.assertEqual(b['frames'],70)
+        self.assertEqual(b['window_present_throughput']['present_count'],70)
+        self.assertEqual(b['window_present_throughput']['fps'],25)
+        self.assertEqual(b['overlapping_interval_audit']['interval_count'],70)
+
+    def test_mode_changes_outside_window_annotate_boundary_only(self):
+        timestamps=list(range(0,3441,40))+[4063]
+        modes=[1]*len(timestamps);modes[-1]=0
+        b=self.boundary_report(timestamps,400,4000,modes=modes)
+        self.assertEqual(b['boundary_pacing_audit']['intervals'][0]['mode_scope'],
+                         'mixed_or_unknown_outside_window')
+        log=('[fifo-idle-wait-mode] timeout_ms=1 qpc=100\n'
+             '[fifo-idle-wait-mode] timeout_ms=0 qpc=4020\n')
+        b=self.boundary_report(timestamps,400,4000,native_log=log)
+        r=b['boundary_pacing_audit']['intervals'][0]
+        self.assertEqual(r['mode_scope'],'mixed_or_unknown_outside_window')
+        self.assertEqual(r['mode_evidence']['process']['events_during_interval'],[[4020,0]])
+        # A change inside the window remains invalid, even in a crossing frame.
+        with self.assertRaisesRegex(ValueError,'changed inside'):
+            self.boundary_report(timestamps,400,4000,native_log=log.replace('4020','3990'))
+        start_log=('[fifo-idle-wait-mode] timeout_ms=0 qpc=0\n'
+                   '[fifo-idle-wait-mode] timeout_ms=1 qpc=500\n')
+        b=self.boundary_report([0,623]+list(range(663,5000,40)),600,4000,native_log=start_log)
+        self.assertEqual(b['boundary_pacing_audit']['intervals'][0]['mode_scope'],
+                         'mixed_or_unknown_outside_window')
+
+    def test_whole_window_straddler_still_requires_complete_intervals(self):
+        with self.assertRaisesRegex(ValueError,'Too few complete'):
+            self.boundary_report([0,5000],400,4000)
+
+    def test_boundary_hitch_threshold_is_strict_and_missing_boundary_rejected(self):
+        timestamps=list(range(0,3441,40))+[3490]
+        b=self.boundary_report(timestamps,400,3480)
+        self.assertEqual(b['boundary_pacing_audit']['intervals'][0]['full_interval_ms'],50)
+        self.assertEqual(b['boundary_pacing_audit']['intervals_over_50_ms'],0)
+        ids=list(range(1,len(timestamps)+1));ids[-1]+=1
+        with self.assertRaisesRegex(ValueError,'Missing present inside or crossing'):
+            self.boundary_report(timestamps,400,3480,present_ids=ids)
+        ids=list(range(1,len(timestamps)+1));ids[0]=0
+        # A missing present strictly outside the block does not corrupt its audit.
+        self.boundary_report(timestamps,400,3480,present_ids=ids)
+
     def test_process_isolation_coverage_and_contention(self):
         with tempfile.TemporaryDirectory(dir=ROOT / 'local') as folder:
             log = Path(folder) / 'processes.jsonl'
