@@ -25,16 +25,24 @@ def main():
     p.add_argument('--output-dir',type=Path,required=True)
     p.add_argument('--compiler',required=True)
     p.add_argument('--fixture',type=Path,action='append',default=[])
+    mode=p.add_mutually_exclusive_group()
+    mode.add_argument('--native-divide',action='store_true')
+    mode.add_argument('--division-property',action='store_true')
     a=p.parse_args();out=a.output_dir.resolve();sdk=a.sdk.resolve()
     validate(a.source.read_text(),a.registration.read_text())
     out.mkdir(parents=True,exist_ok=False)
-    original=out/'spu_recomp.c';original.write_text(a.source.read_text())
+    code=a.source.read_text()
+    if a.native_divide:
+        from patch_job13_native_divide import patch
+        code=patch(code,a.registration.read_text())
+    original=out/'spu_recomp.c';original.write_text(code)
     shutil.copy2(a.source.with_suffix('.h'),out/'spu_recomp.h')
     exe=out/'replay_job13_capture.exe'
     cmd=[a.compiler,'/nologo','/TC','/std:c17','/O2','/MD','/DSPU_FLOAT_NATIVE_RUNTIME=1',
         '/DSPU_USE_DISPATCH_MT','/D_CRT_SECURE_NO_WARNINGS','/clang:-msse4.1',
         '/clang:-fno-strict-aliasing','/I'+str(sdk/'runtime/spu'),
-        '/I'+str(ROOT/'port'),'/I'+str(out),str(ROOT/'tests/replay_job13_capture.c'),
+        '/I'+str(ROOT/'port'),'/I'+str(out),str(ROOT/'tests'/(
+            'test_job13_native_divide.c' if a.division_property else 'replay_job13_capture.c')),
         str(original),str(sdk/'runtime/spu/spu_float_native.c'),'/Fe'+str(exe)]
     result=subprocess.run(cmd,cwd=out,capture_output=True,text=True)
     (out/'compile.log').write_text(result.stdout+result.stderr)

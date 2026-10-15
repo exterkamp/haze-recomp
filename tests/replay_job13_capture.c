@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <immintrin.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 static haze_job13_capture_header header;
 static haze_job13_capture_event *events;
@@ -146,7 +148,13 @@ static void read_exact(FILE *f,void *p,size_t bytes) {
     require(fread(p,1,bytes,f)==bytes,"truncated fixture");
 }
 int main(int argc,char **argv) {
-    if(argc!=2) {fprintf(stderr,"Usage: replay_job13_capture fixture.bin\n");return 2;}
+    if(argc!=2 && argc!=3) {fprintf(stderr,"Usage: replay_job13_capture fixture.bin [repetitions]\n");return 2;}
+    unsigned repetitions=1;
+    if(argc==3) {
+        char *end=NULL;unsigned long n=strtoul(argv[2],&end,10);
+        require(end && !*end && n>=2 && n<=1000,"repetitions must be 2..1000");
+        repetitions=(unsigned)n;
+    }
     FILE *f=fopen(argv[1],"rb"); require(f!=NULL,"cannot open fixture");
     read_exact(f,&header,sizeof header);
     require(!memcmp(header.magic,"HZJOB13\0",8) && header.version==HAZE_JOB13_CAPTURE_VERSION &&
@@ -191,16 +199,45 @@ int main(int argc,char **argv) {
     ctx->atomic_stat=header.initial_atomic_stat;atomic_seen=1;
     require(ctx->gpr[0]._u32[0]==0xCE04,"unexpected batch continuation");
     spu_0031_at_00ECEC00_spu_recomp_register();
+    spu_context *initial=(spu_context*)_aligned_malloc(sizeof *initial,16);
+    require(initial!=NULL,"allocate initial state");memcpy(initial,ctx,sizeof *initial);
+    int64_t durations[1000];LARGE_INTEGER frequency;
+    require(QueryPerformanceFrequency(&frequency)!=0,"performance frequency");
+    for(unsigned repeat=0;repeat<repetitions;++repeat) {
+    memcpy(ctx,initial,sizeof *ctx);
+    cursor=0;steps=0;atomic_seen=1;g_spu_trampoline_fn=NULL;
+    LARGE_INTEGER begin,end;
     _mm_setcsr(header.initial_mxcsr);
+    require(QueryPerformanceCounter(&begin)!=0,"begin timer");
     spu_0031_at_00ECEC00_spu_func_00008AD8(ctx);
     spu_drain_call(ctx,0xCE04);
     unsigned final_mxcsr=_mm_getcsr();
+    require(QueryPerformanceCounter(&end)!=0,"end timer");
+    durations[repeat]=end.QuadPart-begin.QuadPart;
     require(cursor==header.event_count,"unconsumed events");
     require(ctx->pc==header.final_pc && ctx->status==header.final_status && ctx->image_id==32,"final continuation mismatch");
     equal_bytes(ctx->gpr,expected_gpr,sizeof ctx->gpr,"final registers");
     equal_bytes(ctx->ls,expected_ls,SPU_LS_SIZE,"final local store");
     require(final_mxcsr==header.final_mxcsr,"floating-point status mismatch");
+    }
     printf("PASS whole original batch events=%u payload=%u steps=%llu\n",cursor,header.payload_size,(unsigned long long)steps);
-    _aligned_free(ctx);free(expected_gpr);free(expected_ls);free(events);free(payload);
+    if(repetitions>1) {
+        /* First iteration warms code/data. Input reset and final-state checks
+         * are outside timed compute; ordered channel/PUT comparisons remain
+         * inside and identical for both builds. Never report this as game FPS. */
+        unsigned n=repetitions-1;int64_t total=0;
+        for(unsigned i=1;i<repetitions;++i) total+=durations[i];
+        for(unsigned i=2;i<repetitions;++i) {
+            int64_t value=durations[i];unsigned j=i;
+            while(j>1 && durations[j-1]>value) {durations[j]=durations[j-1];--j;}
+            durations[j]=value;
+        }
+        double median=(n&1)?(double)durations[1+n/2]:
+            ((double)durations[n/2]+(double)durations[1+n/2])*.5;
+        printf("BENCH samples=%u mean_ms=%.6f median_ms=%.6f min_ms=%.6f max_ms=%.6f\n",
+            n,1000.0*total/n/frequency.QuadPart,1000.0*median/frequency.QuadPart,
+            1000.0*durations[1]/frequency.QuadPart,1000.0*durations[n]/frequency.QuadPart);
+    }
+    _aligned_free(initial);_aligned_free(ctx);free(expected_gpr);free(expected_ls);free(events);free(payload);
     return 0;
 }
