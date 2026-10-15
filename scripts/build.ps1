@@ -593,6 +593,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Completion queue publication/pop diagnostic regression failed.' }
     & $python -m unittest tests.test_analyze_completion_queue
     if ($LASTEXITCODE -ne 0) { throw 'Completion queue timing coverage analysis regression failed.' }
+    & $python "$root/tests/test_coherency_lock_profile.py" --compiler $clang --sdk $sdk --output-dir "$root/local/coherency-lock-fixtures"
+    if ($LASTEXITCODE -ne 0) { throw 'Coherency lock contention diagnostic regression failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
     & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }

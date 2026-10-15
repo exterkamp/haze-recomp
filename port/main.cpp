@@ -36,6 +36,12 @@
 #include "haze_job_profile.h"
 #include "haze_job_trace.h"
 #include "haze_producer_profile.h"
+#if defined(HAZE_JOB_PROFILE) && defined(_WIN32)
+#include "spu_coherency_profile.h"
+#include <atomic>
+static char coherency_profile_path[4096];
+static std::atomic<bool> coherency_profile_dumped{false};
+#endif
 void haze_job_wait_dump_counts();
 #include "haze_job0_capture.h"
 #include "spu_workload.h"
@@ -269,6 +275,14 @@ static const uint8_t* live_guest_ptr(void*, uint32_t location, uint32_t offset, 
 
 static void dump_shutdown_profiles(void)
 {
+#if defined(HAZE_JOB_PROFILE)
+    // Freeze contention before other profile exports perform potentially slow
+    // file I/O. The SDK releases the coherency lock before writing its CSV.
+    if (coherency_profile_path[0] && !coherency_profile_dumped.exchange(true)) {
+        if (!spu_coh_lock_profile_dump(coherency_profile_path))
+            fprintf(stderr, "[coherency-profile] export failed\n");
+    }
+#endif
     spu_float_native_summary();
     haze_vp_upload_summary();
     g_pump_profile.dump();
@@ -719,6 +733,18 @@ int main(int argc, char** argv)
         printf("usage: %s <PPU ELF>\n", argv[0]);
         return 2;
     }
+
+#if defined(HAZE_JOB_PROFILE) && defined(_WIN32)
+    // Internal diagnostic only: ordinary builds neither read this setting nor
+    // enable lock profiling. Configure before any guest workers start.
+    if (const char* path = getenv("HAZE_COHERENCY_LOCK_CSV")) {
+        if (*path && std::strlen(path) < sizeof coherency_profile_path &&
+            spu_coh_lock_profile_start())
+            std::memcpy(coherency_profile_path, path, std::strlen(path) + 1);
+        else
+            fprintf(stderr, "[coherency-profile] invalid path or clock initialization failed\n");
+    }
+#endif
 
 #ifdef _WIN32
 #pragma comment(lib, "winmm.lib")
