@@ -52,6 +52,37 @@ int main(int argc, char** argv) {
     assert(argc == 3);
     const char* mode = argv[1];
     _putenv_s("HAZE_PRODUCER_PROFILE_CSV", argv[2]);
+    _putenv_s("HAZE_PRODUCER_PROFILE_COARSE", "");
+
+    if (std::strcmp(mode, "coarse") == 0) {
+        _putenv_s("HAZE_PRODUCER_PROFILE_COARSE", "1");
+        {
+            haze_producer_profile::frame_scope root(1, kToc, 0x00680FA0, 19);
+            assert(root.active() && root.id() == 1);
+            const unsigned clocks = qpc_calls.load();
+            const unsigned cycles = cycle_calls.load();
+            {
+                haze_producer_profile::call_scope skipped(root, 0x007EBB6C, 0x006C3890);
+                haze_producer_profile::call_scope wrong_callee(root, 0x006812F8, 0x006869F4);
+                assert(!skipped.active() && !wrong_callee.active());
+                assert(qpc_calls == clocks && cycle_calls == cycles);
+                // A skipped wrapper must not hide a selected descendant.
+                haze_producer_profile::call_scope selected(0x006812F8, 0x006869F0);
+                assert(selected.active() && selected.id() == 2);
+                {
+                    haze_producer_profile::call_scope skipped_inner(0x00686A20, 0x0068EC40);
+                    assert(!skipped_inner.active());
+                    haze_producer_profile::call_scope child(0x00686A50, 0x00684ED8);
+                    assert(child.active() && child.id() == 3);
+                }
+            }
+            haze_producer_profile::call_scope sibling(0x00681184, 0x005FBB70);
+            assert(sibling.active() && sibling.id() == 4);
+        }
+        haze_producer_profile::haze_producer_profile_dump();
+        assert(qpc_calls == 9 && cycle_calls == 8);
+        return 0;
+    }
 
     if (std::strcmp(mode, "disabled") == 0) {
         _putenv_s("HAZE_PRODUCER_PROFILE_CSV", "");
@@ -243,10 +274,14 @@ class ProducerProfileTests(unittest.TestCase):
         cls.out_dir.mkdir(parents=True, exist_ok=True)
         cls.exe = cls.out_dir / "producer-profile-fixture.exe"
         cls.fixture = cls.out_dir / "producer-profile-fixture.cpp"
-        cls.fixture.write_text(FIXTURE, encoding="utf-8")
+        cls.fixture.write_text(FIXTURE.replace(
+            '#include "../port/haze_producer_profile.cpp"',
+            '#include "' + (ROOT / 'port/haze_producer_profile.cpp').as_posix() + '"'),
+            encoding="utf-8")
         command = [cls.compiler_arg, "/nologo", "/std:c++17", "/EHsc", "/O2",
             "/DHAZE_PRODUCER_PROFILE_TEST_CLOCKS", "/DHAZE_PRODUCER_PROFILE_TEST_CAPACITY=16",
-            str(cls.fixture), "/Fe" + str(cls.exe)]
+            str(cls.fixture), "/Fe" + str(cls.exe),
+            "/Fo" + str(cls.out_dir / "producer-profile-fixture.obj")]
         result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
         if result.returncode:
             raise RuntimeError("fixture compilation failed:\n" + result.stdout + result.stderr)
@@ -262,6 +297,16 @@ class ProducerProfileTests(unittest.TestCase):
     def test_disabled_is_clock_and_file_free(self):
         path = self.run_mode("disabled")
         self.assertFalse(path.exists())
+
+    def test_coarse_filter_omits_clocks_and_preserves_ancestor_tree(self):
+        metadata, rows = parse_csv(self.run_mode("coarse"))
+        self.assertEqual(metadata["coarse"], "1")
+        self.assertEqual(metadata["begun"], "4")
+        self.assertEqual(metadata["completed"], "4")
+        self.assertEqual([row["parent_id"] for row in rows], ["0", "1", "2", "1"])
+        self.assertEqual([row["generation"] for row in rows], ["19"] * 4)
+        self.assertEqual([int(row["callsite_lr"]) for row in rows],
+                         [0, 0x006812F8, 0x00686A50, 0x00681184])
 
     def test_nested_frame_calls_and_idempotent_dump(self):
         path = self.run_mode("nested")

@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <algorithm>
 
@@ -44,23 +45,50 @@ static_assert(kCapacity > 0, "producer profile ring capacity must be nonzero");
 struct configuration {
     const char* csv_path;
     std::uint64_t qpc_frequency;
+    bool coarse;
 };
+
+// A diagnostic frontier through the main frame and its render-record branch.
+// These pinned call-site pairs occur roughly twenty times per frame in the
+// retained opening/combat captures. In particular, omit per-material and
+// per-item loops. Omitted scopes leave the nearest recorded ancestor active.
+bool coarse_edge(std::uint32_t lr, std::uint32_t callee) noexcept {
+    switch (lr) {
+    case 0x006812F8: return callee == 0x006869F0;
+    case 0x00681184: return callee == 0x005FBB70;
+    case 0x0068128C: return callee == 0x00697C70;
+    case 0x006812A0: return callee == 0x00686810;
+    case 0x006811E8: return callee == 0x006A6BE8;
+    case 0x00686A50: return callee == 0x00684ED8;
+    case 0x006851D0: return callee == 0x006DEC78;
+    // 006DEC78 tail-dispatches into 006DE730; keep the actual call-site LR.
+    case 0x006DE828: return callee == 0x006AC9A8;
+    case 0x006DE814: return callee == 0x0070CF48;
+    case 0x006DEB34: return callee == 0x00713D90;
+    case 0x006DE844: return callee == 0x006F52F8;
+    case 0x006ACB70: return callee == 0x007EB5A8;
+    case 0x007EBBD0: return callee == 0x007E41E8;
+    default: return false;
+    }
+}
 
 const configuration& config() noexcept {
     static const configuration value = []() noexcept {
         const char* path = std::getenv("HAZE_PRODUCER_PROFILE_CSV");
+        const char* mode = std::getenv("HAZE_PRODUCER_PROFILE_COARSE");
+        const bool coarse = mode && std::strcmp(mode, "1") == 0;
 #if defined(HAZE_PRODUCER_PROFILE_TEST_CLOCKS)
         std::uint64_t frequency = 0;
         if (!path || !*path || !haze_producer_test_frequency(&frequency) || !frequency)
-            return configuration{nullptr, 0};
-        return configuration{path, frequency};
+            return configuration{nullptr, 0, coarse};
+        return configuration{path, frequency, coarse};
 #else
         LARGE_INTEGER frequency{};
         if (!path || !*path || !QueryPerformanceFrequency(&frequency) ||
             frequency.QuadPart <= 0) {
-            return configuration{nullptr, 0};
+            return configuration{nullptr, 0, coarse};
         }
-        return configuration{path, static_cast<std::uint64_t>(frequency.QuadPart)};
+        return configuration{path, static_cast<std::uint64_t>(frequency.QuadPart), coarse};
 #endif
     }();
     return value;
@@ -170,7 +198,11 @@ void scope::begin(unsigned kind, const scope* parent, std::uint64_t generation,
     if (generation == 0 && parent)
         generation = parent->generation();
     const configuration& cfg = config();
-    if (!cfg.csv_path || is_frozen())
+    if (!cfg.csv_path)
+        return;
+    if (kind == 1 && cfg.coarse && !coarse_edge(callsite_lr, callee_ea))
+        return;
+    if (is_frozen())
         return;
 
     record fresh{};
@@ -302,7 +334,7 @@ void haze_producer_profile_dump() noexcept {
         "max_discarded_end_qpc,%llu,earliest_overwritten_inflight_begin_qpc,%llu,"
         "capacity,%llu,retained_rows,%llu,retained_completed_rows,%llu,"
         "retained_inflight_rows,%llu,retained_first_id,%llu,retained_last_id,%llu,"
-        "retained_first_begin_qpc,%llu,dump_qpc,%llu,dump_qpc_valid,%u\n",
+        "retained_first_begin_qpc,%llu,dump_qpc,%llu,dump_qpc_valid,%u,coarse,%u\n",
         static_cast<unsigned long long>(cfg.qpc_frequency),
         static_cast<unsigned long long>(total),
         static_cast<unsigned long long>(completed),
@@ -320,7 +352,8 @@ void haze_producer_profile_dump() noexcept {
         static_cast<unsigned long long>(retained_first_id),
         static_cast<unsigned long long>(retained_last_id),
         static_cast<unsigned long long>(retained_first_begin_qpc),
-        static_cast<unsigned long long>(dump_qpc), dump_qpc_valid ? 1u : 0u) < 0;
+        static_cast<unsigned long long>(dump_qpc), dump_qpc_valid ? 1u : 0u,
+        cfg.coarse ? 1u : 0u) < 0;
     write_failed |= std::fprintf(file,
         "kind,id,parent_id,generation,guest_ea,callsite_lr,callee_ea,host_tid,"
         "qpc_begin,qpc_end,qpc_valid,cycles_delta,cycles_valid,completed\n") < 0;
