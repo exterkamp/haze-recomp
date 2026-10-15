@@ -1,7 +1,9 @@
 """Compare native constant batches with the user's private original function.
 
 Run in a Visual Studio developer environment. No game source is committed.
-This tests sufficient-capacity uploads, not refill, guest ownership or drawing.
+With --sdk, also compare both actual SDK state handlers and mixed legacy writes.
+This tests sufficient-capacity uploads and owned packet bytes, not live FIFO
+publication/retirement, guest synchronization, refill or drawing.
 """
 import argparse
 import hashlib
@@ -18,6 +20,7 @@ def main():
     p.add_argument('--source', type=Path, required=True)
     p.add_argument('--compiler', required=True)
     p.add_argument('--output-dir', type=Path, required=True)
+    p.add_argument('--sdk', type=Path, help='SDK checkout containing libs/video')
     a = p.parse_args()
     try: source = a.source.read_text(encoding='utf-8')
     except UnicodeDecodeError: source = a.source.read_text(encoding='cp1252')
@@ -30,19 +33,42 @@ def main():
     out = a.output_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
     (out / 'vertex_parameter_original.inc').write_text(body, encoding='utf-8')
-    commands = [[a.compiler, '/nologo', '/std:c++17', '/EHsc', '/O2',
+    commands = []
+    sdk_inputs = {}
+    extra = []
+    if a.sdk:
+        sdk = a.sdk.resolve()
+        video = sdk / 'libs/video'
+        includes = ['/I' + str(sdk / 'include'), '/I' + str(video)]
+        for name in ['rsx_dispatch', 'rsx_commands']:
+            source_file = video / (name + '.c')
+            obj = out / (name + '.obj')
+            commands.append([a.compiler, '/nologo', '/TC', '/std:c11', '/O2',
+                '/D_CRT_SECURE_NO_WARNINGS', *includes, '/c', str(source_file), '/Fo' + str(obj)])
+            extra.append(str(obj))
+            for suffix in ['.c', '.h']:
+                f = video / (name + suffix)
+                sdk_inputs[str(f)] = hashlib.sha256(f.read_bytes()).hexdigest()
+        extra += includes + ['/DHAZE_TEST_VERTEX_PARAMETER_SDK=1']
+    commands += [[a.compiler, '/nologo', '/std:c++17', '/EHsc', '/O2',
         '/I' + str(ROOT / 'port'), '/I' + str(out),
-        str(ROOT / 'tests/test_vertex_parameter_batch.cpp'), '/Fe' + str(out / 'oracle.exe')],
+        str(ROOT / 'tests/test_vertex_parameter_batch.cpp'), *extra, '/Fe' + str(out / 'oracle.exe')],
         [str(out / 'oracle.exe')]]
-    for label, command in zip(['build', 'oracle'], commands):
+    for i, command in enumerate(commands):
+        label = 'oracle' if i == len(commands) - 1 else f'build-{i}'
         result = subprocess.run(command, cwd=out, env=os.environ.copy(), text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         (out / (label + '.log')).write_text(result.stdout)
         if result.returncode: raise RuntimeError(result.stdout)
     result = dict(passed=True, original_function_sha256=EXPECTED, commands=commands,
-                  native_header_sha256=hashlib.sha256((ROOT / 'port/haze_vertex_parameter_batch.h').read_bytes()).hexdigest(),
+                  source_hashes={str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in [
+                      ROOT / 'port/haze_vertex_parameter_batch.h',
+                      ROOT / 'port/haze_vertex_parameter_packet.h',
+                      ROOT / 'port/haze_vertex_parameter_consumer.h',
+                      ROOT / 'tests/test_vertex_parameter_batch.cpp']},
+                  sdk_inputs=sdk_inputs,
                   result=(out / 'oracle.log').read_text(),
-                  scope='Constant bytes, unchanged lanes, final method window/load and descriptor flag result; no refill, live ownership or GPU parity claim.')
+                  scope='Constant bytes, unchanged lanes, final method window/load, descriptor flag result, and owned packet bytes. With --sdk: both full state mirrors, dirty ranges, coverage counters, and legacy continuation. No refill, live publication/retirement or GPU parity claim.')
     (out / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
     print(result['result'])
 
