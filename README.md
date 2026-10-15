@@ -114,13 +114,15 @@ Menus also support the pointer: left click selects, right click goes back.
 Enter and Esc keep their menu actions regardless of gameplay bindings. Holding
 either key across a menu boundary cannot trigger another action. Space remains
 jump during gameplay; Enter retains the Start binding outside menus by default.
-SDL gamepads connect automatically. Bindings, mouse sensitivity, controller
+SDL gamepads connect automatically. Game vibration plays on the controller in
+use, including PlayStation, Switch and Steam virtual pads, while the game window
+has focus. Bindings, mouse sensitivity, controller
 options, and startup skipping live in [config/input.ini](config/input.ini)
 and reload while running. Action names above assume Haze's default controller
 layout; zoom and crouch can be changed from toggle to hold in the game's settings.
 
 **Settings > Control Setup** opens PC Controls for bindings, sensitivity,
-deadzones and prompt style. Select a binding to capture an input, review any
+deadzones, vibration and prompt style. Select a binding to capture an input, review any
 conflicts, then **Apply**. **Back** discards edits; **Defaults** requires Apply.
 **Game control options** opens the original controller layout and toggle/hold
 settings.

@@ -81,6 +81,8 @@ bool haze_gamepad_initialize(const char*) { return true; }
 void haze_gamepad_configure(const char*) {}
 HazeGamepadState haze_gamepad_update() { return fake_pad; }
 void haze_gamepad_shutdown() {}
+static unsigned rumble_small,rumble_large;
+void haze_gamepad_rumble(u8 small,u8 large) { rumble_small=small; rumble_large=large; }
 void haze_prompts_initialize(const char*) {}
 void haze_prompts_update(HazeInputFamily) {}
 static bool native_menu_active;
@@ -457,6 +459,16 @@ int main() {
     assert(!p.buttons && p.lx==128 && p.ry==128 && !p.l2);
     focused=true; fake_pad={}; ticks+=10; haze_input_update();
     assert(!sample().buttons && sample().lx==128);
+    // Guest actuator requests reach the device only while the game owns input.
+    haze_input_rumble(1,1,99); haze_input_rumble(0,1,200); ticks+=10; haze_input_update();
+    assert(rumble_small==1 && rumble_large==200);
+    focused=false; ticks+=10; haze_input_update(); assert(!rumble_small && !rumble_large);
+    focused=true; native_menu_active=true; ticks+=10; haze_input_update(); assert(!rumble_large);
+    native_menu_active=false; quit_active=true; ticks+=10; haze_input_update(); assert(!rumble_large);
+    quit_active=false; ticks+=10; haze_input_update(); assert(rumble_small==1 && rumble_large==200);
+    controller_enabled=false; ticks+=10; haze_input_update(); assert(!rumble_large);
+    controller_enabled=true; haze_input_rumble(0,0,0); ticks+=10; haze_input_update();
+    assert(!rumble_small && !rumble_large);
     // Saving a real INI changes the running mapper without restarting it.
     GetFullPathNameA("local/test-input-reload.ini",MAX_PATH,config_path,nullptr);
     {
