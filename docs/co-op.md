@@ -4,20 +4,25 @@ Campaign co-op uses invite codes, direct WebRTC peer connections and TURN relay
 fallback. It does not use PSN, Ubisoft accounts or friend lists. Each player must
 run a compatible native build and have their own prepared BLUS30094 game files.
 
-There is no hosted service configured by this repository. Before launching the
-game, set `HAZE_COOP_SERVICE` to your deployed `wss://YOUR-SERVICE/v1` endpoint.
+There is no hosted service configured by this repository. Enter your deployed
+server's address in **Server address** on either co-op screen. A hostname such
+as `coop.example.com` or `coop.example.com:8443` uses secure WebSockets and the
+`/v1` endpoint automatically. A full `wss://YOUR-SERVICE/v1` URL also works.
 The [rendezvous service guide](../services/rendezvous/README.md) explains deployment
-with TLS and a TURN server. This configuration belongs on the machine running
-the launcher so its child game process inherits it. Do not share a TURN secret
-with players. Certificate verification uses Windows trust roots; a private CA
-can be supplied with `HAZE_COOP_CA_FILE`.
+with TLS and a TURN server. The game remembers the server in `co-op-server.txt`
+under its save-data root, separately from campaign saves. The old
+`HAZE_COOP_SERVICE` environment variable is no longer used. Do not share a TURN
+secret with players. Certificate verification uses Windows trust roots; a
+private CA can be supplied with `HAZE_COOP_CA_FILE`.
 
 ## Host and join
 
-1. The host selects **Campaign → Host Co-op → Create invite code**.
-2. Copy the code and share it with the other players. Select **Continue**, then
+1. The host selects **Campaign → Host Co-op → Server address**, types or pastes
+   the address, and selects **Save server**, then **Create invite code**.
+2. Copy the code and share it **and the server address** with the other players. Select **Continue**, then
    continue a campaign or choose a chapter.
-3. Each joining player selects **Campaign → Join Co-op → Enter invite code**.
+3. Each joining player selects **Campaign → Join Co-op**, saves the same
+   **Server address**, then selects **Enter invite code**.
    Type or paste the code with Ctrl+V. Controller users can also add or delete
    characters using the rows below the connection status.
 4. Select **Connect to host**, wait for a connected status, then **Continue**.
@@ -28,6 +33,11 @@ the host leaves its room or the service restarts. Back from the invite page
 closes an unfinished session. Disconnect releases that session and allows a
 new invite. Continue preserves the connection while opening the game's campaign
 or game-list screen. A host departure ends the other players' campaign session.
+
+Server entry uses the keyboard, with Ctrl+V to paste and Ctrl+A to clear the
+field before replacing it. Enter or **Save server** saves it immediately;
+Cancel or losing focus discards the edit. Saving a different server disconnects
+the current co-op session. Invite codes belong to the server that created them.
 
 For LAN play, choose **Local network** on the host and join pages, then Continue.
 For single player, choose **Single Player Campaign**; no co-op service is needed.

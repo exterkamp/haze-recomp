@@ -209,7 +209,7 @@ void Session::start(const Options& options,const std::string& invite) {
     stop(); auto current=std::make_shared<Impl>(); impl_.store(current); auto& s=*current;
     const auto code=normalize_code(invite);
     if(options.endpoint.empty()) {
-        s.fail("Co-op service is not configured. Set HAZE_COOP_SERVICE before starting the game."); return;
+        s.fail("Enter a server address on the Host Co-op or Join Co-op screen."); return;
     }
     const bool loopback=std::regex_match(options.endpoint,std::regex(R"(ws://127\.0\.0\.1:[0-9]{1,5}/[A-Za-z0-9/_-]*)"));
     if(!options.endpoint.starts_with("wss://") && !(options.local_test && loopback)) {

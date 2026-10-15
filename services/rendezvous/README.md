@@ -4,8 +4,11 @@ The native client uses this service for invite codes and WebRTC signaling. Game
 datagrams travel directly between peers when ICE finds a route, with TURN as a
 fallback. No PSN account, Ubisoft login, or friend invitation is involved.
 
-This service is not deployed by the repository. Production clients need
-`HAZE_COOP_SERVICE=wss://YOUR-SERVICE/v1`. TLS certificates are verified against
+This service is not deployed by the repository. Players enter its address in
+**Server address** on the in-game Host Co-op or Join Co-op screen. A hostname
+(optionally with `:port`) defaults to `wss://YOUR-SERVICE/v1`; a full WSS URL
+can specify a different proxy path. Everyone in a room must use the same server.
+The game saves the address between launches. TLS certificates are verified against
 Windows trusted roots; `HAZE_COOP_CA_FILE` can supply a private CA PEM file.
 Never put the TURN shared secret in a game build or client configuration.
 
@@ -18,8 +21,9 @@ $env:HAZE_LOCAL_TEST = '1'
 python services/rendezvous/server.py
 ```
 
-For native game tests, set `HAZE_COOP_SERVICE=ws://127.0.0.1:8765/v1` and
-`HAZE_COOP_LOCAL_TEST=1`. Insecure WebSocket connections are accepted only for
+For native game tests, set `HAZE_COOP_LOCAL_TEST=1` and enter
+`ws://127.0.0.1:8765/v1` in the game's **Server address** field.
+Insecure WebSocket connections are accepted only for
 that explicit loopback test mode. Each game instance needs a separate save root.
 
 Build `port/net` independently with CMake to obtain `test_network_session` and

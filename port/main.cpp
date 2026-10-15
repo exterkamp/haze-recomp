@@ -773,6 +773,8 @@ int main(int argc, char** argv)
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
 #ifdef _WIN32
     extern void haze_coop_register();
+    extern void haze_coop_settings_initialize(const std::filesystem::path&);
+    haze_coop_settings_initialize(std::filesystem::u8path(save_root));
     haze_coop_register();
 #endif
     ppu_hle_init();          /* firmware import NID -> HLE handlers */

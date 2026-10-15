@@ -7,6 +7,7 @@
 #include <mswsock.h>
 #include "ppu_recomp.h"
 #include "haze_coop.h"
+#include "haze_coop_settings.h"
 #include "../external/ps3recomp/libs/network/sysNet.h"
 #include "ps3emu/nid.h"
 #include <array>
@@ -129,7 +130,7 @@ bool bridge_socket(Endpoint& peer) {
 void start(const std::string& code) {
     haze_coop_leave();
     haze::net::Options options;
-    if(const auto value=std::getenv("HAZE_COOP_SERVICE")) options.endpoint=value;
+    options.endpoint=haze_coop_server();
     if(const auto value=std::getenv("HAZE_COOP_CA_FILE")) options.ca_file=value;
     if(const auto value=std::getenv("HAZE_COOP_LOCAL_TEST")) options.local_test=std::string_view(value)=="1";
     enabled=true;
