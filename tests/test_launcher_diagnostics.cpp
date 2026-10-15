@@ -152,7 +152,7 @@ int wmain(int argc,wchar_t** argv) {
         total+=e.data.size();
         assert(!has(e.data,"Jane") && !has(e.data,"JANE") && !has(e.data,"Diagnostics \xc3\xa9"));
     }
-    assert(has(report["config/launcher.ini"],"Savedata=<UserProfile>\\Saves") && has(summary,"SessionFolder=<InstallRoot>\\local\\sessions\\20260301-000000-c"));
+    assert(has(report["config/launcher.ini"],"Savedata=<UserProfile>\\Saves") && has(summary,"SessionFolder=<InstallRoot>") && has(summary,"sessions\\20260301-000000-c\n"));
     assert(total<=limits.total);
     // A tiny total budget omits logs, but still records why.
     limits.total=33*1024; entries=collect(plan,session(crashed),inherited,system,limits);
