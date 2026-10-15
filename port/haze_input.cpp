@@ -1,6 +1,7 @@
 #include "haze_input.h"
 #include "haze_graphics_reload.h"
 #include "haze_menu.h"
+#include "haze_player_profile.h"
 #include "haze_audio_settings.h"
 #include "haze_mouse.h"
 #include "haze_capture.h"
@@ -212,6 +213,9 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 haze_graphics_notice().c_str());
             return CallWindowProc(original_proc,hwnd,msg,wp,(LPARAM)caption);
         }
+        break;
+    case WM_CHAR:
+        if (!startup_skip.owns_input() && haze_menu_capture_text(uint32_t(wp))) return 0;
         break;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
@@ -576,6 +580,7 @@ void haze_input_attach(void* hwnd) {
     haze_audio_menu_register();
     haze_controls_menu_register();
     haze_steam_menu_register();
+    haze_player_profile_menu_register();
     haze_quit_menu_register();
     if (controller_enabled) gamepad_initialized=haze_gamepad_initialize(config_path);
     RAWINPUTDEVICE device{0x01,0x02,0,window};

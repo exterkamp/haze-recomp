@@ -230,7 +230,8 @@ if(EXISTS "${RECOMP_DIR}/ppu_recomp_001.cpp")
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_MENU_SOURCE}")
     list(APPEND RECOMP_SOURCES "${HAZE_MENU_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_menu_guest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_guest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/haze_native_menu.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_native_menu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_menu_cleanup.cpp")
     set_property(SOURCE "${HAZE_MENU_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
@@ -500,6 +501,9 @@ add_executable(${PROJECT_NAME}
     haze_input.cpp
     haze_camera.cpp
     haze_menu.cpp
+    haze_player_profile.cpp
+    haze_player_profile_guest.cpp
+    haze_player_profile_menu.cpp
     haze_guest_pacer.cpp
     haze_job_wait.cpp
     haze_bulk_fill.cpp

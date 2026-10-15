@@ -125,6 +125,14 @@ conflicts, then **Apply**. **Back** discards edits; **Defaults** requires Apply.
 **Game control options** opens the original controller layout and toggle/hold
 settings.
 
+**Player Profile** on the main menu shows your current name. Use **Edit profile
+name** to type with the keyboard (Enter accepts, Escape cancels), or use **Add
+character**, **Delete last character**, and **Clear name** with a controller.
+**Apply** saves the name; **Back** discards pending edits. Names use 3–16 ASCII
+letters, digits, underscores, or hyphens and must start with a letter. The name
+is stored alongside your saves in `player-name.txt`; changing it preserves the
+internal profile key, existing save directories, and campaign progression.
+
 The main-menu footer opens **Desktop Options** through the current Select
 binding (Tab by default) or a mouse click. **Add to Steam** lets you select a
 local account and confirm registration with the executable launcher and artwork;

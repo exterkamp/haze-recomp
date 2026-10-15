@@ -87,6 +87,7 @@ static bool native_menu_active;
 bool haze_menu_active() { return native_menu_active; }
 bool haze_menu_blocks_input() { return native_menu_active; }
 bool haze_menu_capture_key(int) { return false; }
+bool haze_menu_capture_text(uint32_t) { return false; }
 bool haze_menu_has_focus() { return false; }
 void haze_menu_update(void*,const HazeGamepadState&) {}
 static bool menu_exiting_process;
@@ -95,6 +96,7 @@ void haze_video_menu_register() {}
 void haze_audio_menu_register() {}
 void haze_controls_menu_register() {}
 void haze_steam_menu_register() {}
+void haze_player_profile_menu_register() {}
 void haze_quit_menu_register() {}
 static bool quit_active=false,close_accepted=false;
 bool haze_quit_menu_active() { return quit_active; }

@@ -13,6 +13,9 @@
 #include <vector>
 
 extern "C" void ppu_register_function(uint64_t,void (*)(ppu_context*));
+void haze_menu_cleanup(uint32_t);
+void haze_menu_cleanup_restore(uint32_t);
+void haze_player_profile_tick();
 namespace {
 extern "C" PPU_THREAD_LOCAL void (*g_trampoline_fn)(void*);
 constexpr uint32_t gateway=0xfffe7300;
@@ -166,14 +169,14 @@ void action_callback(ppu_context* ctx) {
             }
             ctx->gpr[3]=1; return;
         }
-        if (a.local==4 || a.local==5) {
+        if (a.local==4 || a.local==5 || a.local==8) {
             const auto offer=haze_quit_offer();
             const auto root=main_roots.find(owner);
             if (root!=main_roots.end() && offer.available && !haze_menu_active() &&
                 (a.local==4 || !offer.gameplay)) {
                 target_page=root->second; target_context=vm_read32(owner+0xcc);
                 return_widget=owner;
-                haze_menu_request(a.local==4 ? HazeMenuPage::Quit : HazeMenuPage::Desktop);
+                haze_menu_request(a.local==4 ? HazeMenuPage::Quit : a.local==8 ? HazeMenuPage::Profile : HazeMenuPage::Desktop);
             }
             ctx->gpr[3]=1; return;
         }
@@ -593,12 +596,13 @@ void haze_native_menu_page(ppu_context* ctx,uint32_t page) {
     // Remember every activated native page, not just settings: window-close
     // status must also be renderable from campaign/loading/gameplay contexts.
     target_page=page; target_context=context;
+    haze_menu_cleanup(context);
     if ((!main && !pause) || !valid(target_context) || !register_callback(ctx)) return;
     if (main_handles[page]==vm_read32(page+0x28)) return;
     // The main list is a native resource-owned container. Insert the new handles
     // at its beginning because the list renders handles in reverse order.
     const std::string parent=main ? "fefl_DC_cntr2" : "ingm_DC_cntr2";
-    for (unsigned i=0;i<(main ? 2u:1u);++i) {
+    for (unsigned i=0;i<(main ? 3u:1u);++i) {
         const auto widget=create(ctx,"text",next_id(),props(parent,int(i)));
         if (!widget || !attach(ctx,widget)) return;
         const auto container=call(ctx,func_003141D0,widget+0x40,target_context);
@@ -606,9 +610,9 @@ void haze_native_menu_page(ppu_context* ctx,uint32_t page) {
         const auto last=vm_read64(items+(count-1)*8);
         for (uint32_t j=count-1;j>0;--j) vm_write64(items+j*8,vm_read64(items+(j-1)*8));
         vm_write64(items,last);
-        label(ctx,widget,i ? "Add to Steam" : "Quit to Desktop");
+        label(ctx,widget,i==2 ? "Player Profile" : i ? "Add to Steam" : "Quit to Desktop");
         main_roots[widget]=page;
-        bind(ctx,widget,{0,HazeMenuCommandKind::Activate,{},0,0,int(i)+4});
+        bind(ctx,widget,{0,HazeMenuCommandKind::Activate,{},0,0,i==2 ? 8 : int(i)+4});
     }
     main_handles[page]=vm_read32(page+0x28);
 }
@@ -631,6 +635,7 @@ void haze_native_menu_context_reset(uint32_t context) {
             it=main_roots.erase(it);
         } else ++it;
     }
+    haze_menu_cleanup_restore(context);
     if (displayed.context==context) {
         if (displayed.generation) haze_menu_command({displayed.generation,HazeMenuCommandKind::Departed});
         displayed={};
@@ -638,6 +643,7 @@ void haze_native_menu_context_reset(uint32_t context) {
     if (target_context==context) { target_page=0; target_context=0; return_widget=0; }
 }
 void haze_native_menu_tick(ppu_context* ctx) {
+    haze_player_profile_tick();
     const auto manager=vm_read32(0xf48dd4);
     if (!valid(manager) || !valid(target_page)) return;
     if (vm_read32(manager+0x48)!=target_context) return;

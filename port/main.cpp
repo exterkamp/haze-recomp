@@ -85,6 +85,7 @@ extern "C" void haze_movie_set_root(const char* root);
 #include "haze_input.h"
 #include "haze_camera.h"
 #include "haze_menu.h"
+#include "haze_player_profile.h"
 #include "haze_graphics.h"
 #include "haze_display.h"
 #include "haze_pump_profile.h"
@@ -763,6 +764,7 @@ int main(int argc, char** argv)
     }
     cellSaveData_set_strict_load_errors(1);
     printf("[boot] Save-data root: %s\n", save_root);
+    haze_player_profile_initialize(std::filesystem::u8path(save_root));
     char sfo_path[1200];
     snprintf(sfo_path, sizeof sfo_path, "%s/PS3_GAME/PARAM.SFO", ppu_vfs_root);
     cellGame_init_from_paramsfo(sfo_path);
@@ -770,6 +772,7 @@ int main(int argc, char** argv)
     ppu_recomp_register();   /* lifted function table -> address map */
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
     ppu_hle_init();          /* firmware import NID -> HLE handlers */
+    haze_player_profile_register();
     ppu_sysprx_register();   /* boot-critical CRT */
     ppu_fs_register();       /* cellFs over the game directory */
     lv2_init_syscalls();     /* the lv2 syscall table */
