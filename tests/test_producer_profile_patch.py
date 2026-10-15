@@ -115,6 +115,10 @@ class ProducerProfilePatchTests(unittest.TestCase):
             self.assertEqual(len(calls), count)
             self.assertEqual(after.count("haze_producer_nested_"), count)
             self.assertEqual(after.count("ps3_indirect_call(ctx);"), before.count("ps3_indirect_call(ctx);"))
+            returns = producer_profile.PHASE_INDIRECT_RETURNS.get(address, ())
+            self.assertEqual(after.count("haze_producer_indirect_"), len(returns))
+            for lr in returns:
+                self.assertIn(f"0x{lr}u, static_cast<std::uint32_t>(ctx->ctr));", after)
             for match in calls:
                 lr, callee = match.group("lr"), match.group("callee")
                 self.assertIn(f"haze_producer_nested_{lr}(0x{lr}u, 0x{callee}u);", after)

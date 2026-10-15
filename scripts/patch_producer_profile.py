@@ -17,17 +17,20 @@ from pathlib import Path
 FUNCTION = "void func_00680FA0(ppu_context* ctx) {"
 DISPATCH_FUNCTION = "void func_006869F0(ppu_context* ctx) {"
 DISPATCH_SHA256 = "1c64f130f99ef3f6817bbe2cd11e31c7616b89263bcc7e2e02a6ddfdc31499cd"
-# Opening-deck hitches were localized to these two direct children of the
-# producer. Split their calls without changing their guest operations or
-# assuming that elapsed wall time is active CPU work. Indirect calls in the
-# simulation callback remain in its unprofiled remainder.
+# Split the producer children implicated in hitches and its dominant steady
+# rendering phase without changing guest operations or assuming that elapsed
+# wall time is active CPU work. Unlisted indirect calls in the simulation
+# callback remain in its unprofiled remainder.
 PHASE_FUNCTIONS = (
     ("00686810", "34613d959c4c24225dabc03a9e194b5b4d9fd755bdc63ac495c4d1c00fd8e71f", 4),
     ("005FBB70", "626f4bc455092a532750dafeb2a196504f90785c496584f1c316a5fee945bc90", 58),
+    # Dominant steady producer phase in the prepared-shader opening capture.
+    ("00684ED8", "56c5420e2f8c0f9bf519790f3c65a18ce3e06dbd46982f591cc5d262551abb63", 12),
 )
 # Architectural return addresses verified against bctrl instructions in the ELF.
 MAIN_INDIRECT_RETURNS = ("00681184", "006811DC")
 DISPATCH_INDIRECT_RETURNS = ("00686AC8", "00686BE8", "00686C5C", "00686CFC")
+PHASE_INDIRECT_RETURNS = {"00684ED8": ("00685008", "00685058", "0068511C")}
 ORIGINAL_SHA256 = "0f1c08565667f88ffe25988059165385f35cdbee26b5c6880220c25d0685af52"
 GUEST_PACER_SHA256 = "56f434e9a85787e2471f2569106c05ee280af91f84d1b37efeecf10ffbf0ae1e"
 INCLUDE = '#include "haze_producer_profile.h"\n'
@@ -130,6 +133,8 @@ def _phase_scopes(source: str) -> str:
                      f"haze_producer_profile::call_scope haze_producer_nested_{lr}(0x{lr}u, 0x{callee}u);\n" +
                      inner + f"ctx->lr = 0x{lr}; func_{callee}(ctx); DRAIN_TRAMPOLINE(ctx);\n" + indent + "}")
             changed = changed[:match.start()] + block + changed[match.end():]
+        if address in PHASE_INDIRECT_RETURNS:
+            changed = _indirect_scopes(changed, PHASE_INDIRECT_RETURNS[address], "")
         source = source.replace(body, changed, 1)
     return source
 
@@ -186,8 +191,10 @@ def strip_profile(source: str) -> str:
         r"(?P=indent)\}"
     )
     result, count = indirect.subn(lambda m: m.group("indent") + "ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);", result)
-    if count != 6:
-        raise ValueError(f"expected six indirect scopes, removed {count}")
+    expected_indirect = len(MAIN_INDIRECT_RETURNS) + len(DISPATCH_INDIRECT_RETURNS) + sum(
+        len(returns) for returns in PHASE_INDIRECT_RETURNS.values())
+    if count != expected_indirect:
+        raise ValueError(f"expected {expected_indirect} indirect scopes, removed {count}")
     nested = re.compile(
         r"(?m)^(?P<indent>[ \t]*)\{\n"
         r"(?P=indent)    haze_producer_profile::call_scope haze_producer_nested_(?P<lr>[0-9A-F]+)\("
@@ -230,7 +237,10 @@ def main() -> None:
     result = patch(args.source.read_text(encoding="cp1252"))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(result, encoding="cp1252")
-    print("Producer profile scopes: 59 main direct calls, 14 dispatcher direct calls, 62 phase calls, six indirect sites; excluded helper callees:",
+    phase_calls = sum(count for _, _, count in PHASE_FUNCTIONS)
+    indirect_calls = len(MAIN_INDIRECT_RETURNS) + len(DISPATCH_INDIRECT_RETURNS) + sum(
+        len(returns) for returns in PHASE_INDIRECT_RETURNS.values())
+    print(f"Producer profile scopes: 59 main direct calls, 14 dispatcher direct calls, {phase_calls} phase calls, {indirect_calls} indirect sites; excluded helper callees:",
           ", ".join(sorted(EXCLUDED_CALLEES)))
 
 
