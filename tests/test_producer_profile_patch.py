@@ -51,6 +51,12 @@ class ProducerProfilePatchTests(unittest.TestCase):
         instrumented = producer_profile.patch(slot_copy)
         self.assertEqual(producer_profile.strip_profile(instrumented), slot_copy)
         self.assertIn('#include "haze_producer_profile.h"\n', instrumented)
+        variant = producer_profile.function_body(slot_copy, "void func_0072C368(ppu_context* ctx) {")
+        self.assertEqual(producer_profile._digest(variant+"\n"),
+                         producer_profile.RENDER_CALLBACK_VARIANT_SHA256["0072C368"])
+        changed = variant.replace("haze_vp_upload_begin(ctx)", "changed_vp_upload_begin(ctx)")
+        with self.assertRaisesRegex(ValueError, "render callback 0072C368 changed"):
+            producer_profile.patch(slot_copy.replace(variant, changed, 1))
 
         # Main now composes save/audio/movie hooks after the performance chain.
         # Removing only profiler scopes must yield the identical hooked game.
@@ -146,15 +152,30 @@ class ProducerProfilePatchTests(unittest.TestCase):
         # These scopes must execute inside the actual generated callback
         # functions. Their constructor reads CTR before the unchanged guest
         # trampoline call, preserving the dynamically resolved target.
-        for address, _, return_lr in producer_profile.RENDER_CALLBACK_FUNCTIONS:
+        for address, _, returns in producer_profile.RENDER_CALLBACK_FUNCTIONS:
+            before = producer_profile.function_body(
+                self.source, f"void func_{address}(ppu_context* ctx) {{")
             body = producer_profile.function_body(
                 result, f"void func_{address}(ppu_context* ctx) {{")
-            scope = (f"haze_producer_indirect_{return_lr}(0x{return_lr}u, "
-                     "static_cast<std::uint32_t>(ctx->ctr));")
-            self.assertEqual(body.count(scope), 1)
-            self.assertIn(
-                scope + "\n            ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);",
-                body)
+            self.assertEqual(body.count("haze_producer_indirect_"), len(returns))
+            self.assertEqual(before.count("ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);"), len(returns))
+            # No additional direct helper expansion in these callback bodies.
+            self.assertNotIn("haze_producer_nested_", body)
+            for return_lr in returns:
+                scope = (f"haze_producer_indirect_{return_lr}(0x{return_lr}u, "
+                         "static_cast<std::uint32_t>(ctx->ctr));")
+                self.assertEqual(body.count(scope), 1)
+                self.assertIn(
+                    scope + "\n            ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);",
+                    body)
+            changed = before.replace("ps3_indirect_call(ctx);", "changed_indirect_call(ctx);", 1)
+            with self.assertRaisesRegex(ValueError, f"render callback {address} changed"):
+                producer_profile.patch(self.source.replace(before, changed, 1))
+
+        # A computed switch-tail fallback is not a bctrl callback. Preserve its
+        # guest dispatch and return without introducing a scope across it.
+        switch_body = producer_profile.function_body(result, "void func_0072C368(ppu_context* ctx) {")
+        self.assertIn("default: ps3_indirect_call(ctx); return; } return;", switch_body)
 
         # 007E41E8 -> 00676938 is explicitly parented, so the 006743F8
         # indirect target is distinguishable from 00675800 under 007E41E8.
@@ -166,6 +187,10 @@ class ProducerProfilePatchTests(unittest.TestCase):
             "haze_producer_nested_007E4974(0x007E4974u, 0x00676938u);\n"
             "            ctx->lr = 0x007E4974; func_00676938(ctx); DRAIN_TRAMPOLINE(ctx);",
             parent)
+        self.assertEqual(parent.count("haze_producer_nested_"), len(producer_profile.RENDER_PATH_CALLS))
+        for lr, callee in producer_profile.RENDER_PATH_CALLS:
+            self.assertEqual(parent.count(f"haze_producer_nested_{lr}(0x{lr}u, 0x{callee}u);"), 1)
+            self.assertIn(f"ctx->lr = 0x{lr}; func_{callee}(ctx); DRAIN_TRAMPOLINE(ctx);", parent)
 
         # The direct route to 00675800 remains inside 007E41E8, where its
         # indirect scope inherits the active 007E41E8 call scope.
@@ -191,15 +216,39 @@ class ProducerProfilePatchTests(unittest.TestCase):
         self.assertEqual(returns, [int(lr, 16) for lr in
                                   producer_profile.PHASE_INDIRECT_RETURNS["006A8AE8"]])
 
-        for start, size, expected in (
-            (0x00675800, 0x1000, 0x00675D64),
-            (0x006743F8, 0x1000, 0x00674688),
+        expected_callbacks = dict(producer_profile.PHASE_INDIRECT_RETURNS)
+        expected_callbacks.update((address, returns) for address, _, returns in
+                                  producer_profile.RENDER_CALLBACK_FUNCTIONS)
+        # Exact function extents prevent accidentally accepting a callback
+        # belonging to the next function. Compare every bctrl in source order.
+        for address, size in (
+            ("00675800", 0x760), ("006743F8", 0x34C),
+            ("00673AF0", 0x5F0), ("0072BAD0", 0x898), ("0072C368", 0xFF8),
         ):
+            start = int(address, 16)
             code = elf_function(elf, start, size)
             returns = [start+i+4 for i in range(0, len(code), 4)
                        if code[i:i+4] == bytes.fromhex("4e800421")]
-            self.assertTrue(returns, f"no bctrl found in {start:08X}")
-            self.assertEqual(returns[0], expected)
+            self.assertEqual(returns, [int(lr, 16) for lr in expected_callbacks[address]], address)
+
+        # The two complete state/material direct-call frontiers also use
+        # architectural LR and target values, independently of lifted ctx->lr.
+        for address, size in (("00675800", 0x760), ("006740E0", 0x21C), ("007E41E8", 0xDF0)):
+            start = int(address, 16)
+            code = elf_function(elf, start, size)
+            body = producer_profile.function_body(self.source, f"void func_{address}(ppu_context* ctx) {{")
+            for match in producer_profile.call_sites(body):
+                if address == "007E41E8" and (match.group("lr"), match.group("callee")) not in producer_profile.RENDER_PATH_CALLS:
+                    continue
+                pc = int(match.group("lr"), 16) - 4
+                word = int.from_bytes(code[pc-start:pc-start+4], "big")
+                self.assertEqual(word >> 26, 18, f"expected branch at {pc:08X}")
+                self.assertEqual(word & 1, 1, f"expected link at {pc:08X}")
+                displacement = word & 0x03FFFFFC
+                if displacement & 0x02000000:
+                    displacement -= 0x04000000
+                target = displacement if word & 2 else pc + displacement
+                self.assertEqual(target & 0xFFFFFFFF, int(match.group("callee"), 16))
 
 
 if __name__ == "__main__":

@@ -33,6 +33,10 @@ PHASE_FUNCTIONS = (
     # Dominant record-handler path, with its nested object callback resolved.
     ("007EB5A8", "62e42c0f92175d27e237fe5eed51d57365ad5afa0c18efae6ff6736e1ed5162c", 23),
     ("006A8AE8", "f76929306e7433d6257061c57487f87f3a3f9809ccbd1d9dc1ac10d72b295184", 0),
+    # Consolidated state/material update candidate; elapsed time is not proof
+    # of draw submission. Cover its complete direct-call frontier together.
+    ("00675800", "d1f6ac6d7ef22f17624713bcca17947f7945c4309ab5108cfd73f7bdd42b693a", 23),
+    ("006740E0", "f60f944953d7c0e9bd5fb065ec8c7552164686f98e632fdd7ad9646df8e77d1f", 5),
 )
 # Architectural return addresses verified against bctrl instructions in the ELF.
 MAIN_INDIRECT_RETURNS = ("00681184", "006811DC")
@@ -42,6 +46,7 @@ PHASE_INDIRECT_RETURNS = {
     "006DE730": ("006DE8CC", "006DEBAC"),
     "006AC9A8": ("006ACBB4", "006ACC18"),
     "006A8AE8": ("006A8B68",),
+    "00675800": ("00675D64",),
 }
 # Rendering-record callback probes. These indirect calls load the guest
 # target into CTR from operation descriptors, so the call scope records the
@@ -49,12 +54,26 @@ PHASE_INDIRECT_RETURNS = {
 # 007E4974 distinguishes 00676938 -> 006743F8 from the sibling
 # 007E41E8 -> 00675800 callback in the scope tree.
 RENDER_CALLBACK_FUNCTIONS = (
-    ("00675800", "d1f6ac6d7ef22f17624713bcca17947f7945c4309ab5108cfd73f7bdd42b693a", "00675D64"),
-    ("006743F8", "3f02d2ce24ad741098a90a5dd43868c91b46f8ce72c96b8735f77cd3c873f7f7", "00674688"),
+    ("006743F8", "3f02d2ce24ad741098a90a5dd43868c91b46f8ce72c96b8735f77cd3c873f7f7", ("00674688",)),
+    ("00673AF0", "86ee53bf0baca0e8577769e2f01a9578ec74f01296698e013845edcc4f92aa88", ("00673B7C",)),
+    ("0072BAD0", "d719dd7183a701228247ddf14b2fca1fb54cfb6ea1cd4bd8d8c42d8748a8e913",
+     ("0072C0B4", "0072C18C", "0072C248", "0072C2C4", "0072C2F8", "0072C34C")),
+    # All descriptor bctrl sites, preserving the separate switch-tail fallback.
+    ("0072C368", "16c315e0e8c3e43767b330e6cde60871b1a2ab984b0e2fa7a6292d4b9f4733d1",
+     ("0072C4A0", "0072C8DC", "0072C910", "0072CBD8", "0072CC38", "0072CCD8", "0072CD7C",
+      "0072CE48", "0072CF2C", "0072D014", "0072D12C", "0072D230", "0072D2FC")),
 )
 RENDER_PATH_FUNCTION = "007E41E8"
 RENDER_PATH_SHA256 = "7eff15979bf2cb9e5b8f13fb76b8b694b1bf9d0c62d10e101ce5c3445005ffe4"
-RENDER_PATH_CALL = ("007E4974", "00676938")
+RENDER_PATH_CALLS = (
+    ("007E4520", "00675800"), ("007E4974", "00676938"),
+    ("007E4980", "00675800"), ("007E4B1C", "00675800"),
+)
+# The build applies patch_vp_upload before profiling. Accept its exact pinned
+# 0072C368 body too; no normalization may hide changes in that existing hook.
+RENDER_CALLBACK_VARIANT_SHA256 = {
+    "0072C368": "3d330aa8747b5f5680e37e1e6652a9101c4a9fd259b73d226698cf3037eb2240",
+}
 ORIGINAL_SHA256 = "0f1c08565667f88ffe25988059165385f35cdbee26b5c6880220c25d0685af52"
 GUEST_PACER_SHA256 = "56f434e9a85787e2471f2569106c05ee280af91f84d1b37efeecf10ffbf0ae1e"
 INCLUDE = '#include "haze_producer_profile.h"\n'
@@ -168,26 +187,26 @@ def _render_callback_scopes(source: str) -> str:
     if _digest(body + "\n") != RENDER_PATH_SHA256:
         raise ValueError("render-record parent function changed; re-audit callback paths")
     matches = [m for m in call_sites(body)
-               if (m.group("lr").upper(), m.group("callee").upper()) == RENDER_PATH_CALL]
-    if len(matches) != 1:
-        raise ValueError("render-record 00676938 path callsite changed")
-    match = matches[0]
-    indent = match.group("indent")
-    inner = indent + "    "
-    path_scope = (indent + "{\n" + inner +
-                  "haze_producer_profile::call_scope haze_producer_nested_007E4974("
-                  "0x007E4974u, 0x00676938u);\n" + inner +
-                  "ctx->lr = 0x007E4974; func_00676938(ctx); DRAIN_TRAMPOLINE(ctx);\n" + indent + "}")
-    changed = body[:match.start()] + path_scope + body[match.end():]
+               if (m.group("lr").upper(), m.group("callee").upper()) in RENDER_PATH_CALLS]
+    if [(m.group("lr").upper(), m.group("callee").upper()) for m in matches] != list(RENDER_PATH_CALLS):
+        raise ValueError("render-record parent path callsites changed")
+    changed = body
+    for match in reversed(matches):
+        indent = match.group("indent")
+        inner = indent + "    "
+        lr, callee = match.group("lr"), match.group("callee")
+        path_scope = (indent + "{\n" + inner +
+                      f"haze_producer_profile::call_scope haze_producer_nested_{lr}("
+                      f"0x{lr}u, 0x{callee}u);\n" + inner +
+                      f"ctx->lr = 0x{lr}; func_{callee}(ctx); DRAIN_TRAMPOLINE(ctx);\n" + indent + "}")
+        changed = changed[:match.start()] + path_scope + changed[match.end():]
     source = source.replace(body, changed, 1)
 
-    for address, digest, return_lr in RENDER_CALLBACK_FUNCTIONS:
+    for address, digest, returns in RENDER_CALLBACK_FUNCTIONS:
         body = function_body(source, f"void func_{address}(ppu_context* ctx) {{")
-        if _digest(body + "\n") != digest:
+        if _digest(body + "\n") not in (digest, RENDER_CALLBACK_VARIANT_SHA256.get(address)):
             raise ValueError(f"render callback {address} changed; re-audit indirect target")
-        if body.count("ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);") != 1:
-            raise ValueError(f"render callback {address} indirect-call inventory changed")
-        source = source.replace(body, _indirect_scopes(body, (return_lr,), ""), 1)
+        source = source.replace(body, _indirect_scopes(body, returns, ""), 1)
     return source
 
 
@@ -245,7 +264,8 @@ def strip_profile(source: str) -> str:
     )
     result, count = indirect.subn(lambda m: m.group("indent") + "ps3_indirect_call(ctx); DRAIN_TRAMPOLINE(ctx);", result)
     expected_indirect = len(MAIN_INDIRECT_RETURNS) + len(DISPATCH_INDIRECT_RETURNS) + sum(
-        len(returns) for returns in PHASE_INDIRECT_RETURNS.values()) + len(RENDER_CALLBACK_FUNCTIONS)
+        len(returns) for returns in PHASE_INDIRECT_RETURNS.values()) + sum(
+            len(returns) for _, _, returns in RENDER_CALLBACK_FUNCTIONS)
     if count != expected_indirect:
         raise ValueError(f"expected {expected_indirect} indirect scopes, removed {count}")
     nested = re.compile(
@@ -256,7 +276,7 @@ def strip_profile(source: str) -> str:
         r"(?P=indent)\}"
     )
     result, count = nested.subn(lambda m: m.group("indent") + f"ctx->lr = 0x{m.group('lr')}; func_{m.group('callee')}(ctx); DRAIN_TRAMPOLINE(ctx);", result)
-    expected_nested = 14 + sum(count for _, _, count in PHASE_FUNCTIONS) + 1
+    expected_nested = 14 + sum(count for _, _, count in PHASE_FUNCTIONS) + len(RENDER_PATH_CALLS)
     if count != expected_nested:
         raise ValueError(f"expected {expected_nested} nested direct scopes, removed {count}")
     body = function_body(result)
@@ -292,8 +312,9 @@ def main() -> None:
     args.output.write_text(result, encoding="cp1252")
     phase_calls = sum(count for _, _, count in PHASE_FUNCTIONS)
     indirect_calls = len(MAIN_INDIRECT_RETURNS) + len(DISPATCH_INDIRECT_RETURNS) + sum(
-        len(returns) for returns in PHASE_INDIRECT_RETURNS.values()) + len(RENDER_CALLBACK_FUNCTIONS)
-    print(f"Producer profile scopes: 59 main direct calls, 14 dispatcher direct calls, {phase_calls} phase calls, {indirect_calls} indirect sites, 1 render path call; excluded helper callees:",
+        len(returns) for returns in PHASE_INDIRECT_RETURNS.values()) + sum(
+            len(returns) for _, _, returns in RENDER_CALLBACK_FUNCTIONS)
+    print(f"Producer profile scopes: 59 main direct calls, 14 dispatcher direct calls, {phase_calls} phase calls, {indirect_calls} indirect sites, {len(RENDER_PATH_CALLS)} render path calls; excluded helper callees:",
           ", ".join(sorted(EXCLUDED_CALLEES)))
 
 
