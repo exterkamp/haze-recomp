@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <tuple>
+#include <stdexcept>
+#include <cwchar>
 
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "shell32.lib")
@@ -80,14 +83,14 @@ uint64_t source_hash(const std::string& source) {
     return result;
 }
 
-bool valid_cached_vertex(const fs::path& path, const std::string& source, uint64_t hash) {
+bool valid_cached_shader(const fs::path& path, const std::string& source, uint64_t hash, char stage) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     if (!input) return false;
     const auto size = input.tellg();
     input.seekg(0);
     CacheHeader header{};
     if (!input.read(reinterpret_cast<char*>(&header), sizeof header) ||
-        header.magic != 0x43535A59u || header.version != 2 || header.stage != 'V' ||
+        header.magic != 0x43535A59u || header.version != 2 || header.stage != static_cast<uint32_t>(stage) ||
         header.reserved || header.source_length != source.size() || header.source_hash != hash ||
         !header.blob_length || header.blob_length > max_blob ||
         size != static_cast<std::streamoff>(sizeof header + source.size() + header.blob_length)) return false;
@@ -100,18 +103,19 @@ bool valid_cached_vertex(const fs::path& path, const std::string& source, uint64
         reinterpret_cast<void**>(reflection.GetAddressOf())))) return false;
     D3D11_SHADER_DESC desc{};
     return SUCCEEDED(reflection->GetDesc(&desc)) &&
-        D3D11_SHVER_GET_TYPE(desc.Version) == D3D11_SHVER_VERTEX_SHADER &&
+        D3D11_SHVER_GET_TYPE(desc.Version) ==
+            (stage == 'V' ? D3D11_SHVER_VERTEX_SHADER : D3D11_SHVER_PIXEL_SHADER) &&
         D3D11_SHVER_GET_MAJOR(desc.Version) == 5 && D3D11_SHVER_GET_MINOR(desc.Version) == 0;
 }
 
-bool write_cache(const fs::path& path, const std::string& source, uint64_t hash, ID3DBlob* blob) {
+bool write_cache(const fs::path& path, const std::string& source, uint64_t hash, char stage, ID3DBlob* blob) {
     static unsigned serial = 0;
     const fs::path temporary = path.wstring() + L".prepare." + std::to_wstring(GetCurrentProcessId()) +
         L"." + std::to_wstring(++serial) + L".tmp";
     HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) return false;
     const auto length = blob->GetBufferSize();
-    CacheHeader header{0x43535A59u, 2, 'V', static_cast<uint32_t>(source.size()),
+    CacheHeader header{0x43535A59u, 2, static_cast<uint32_t>(stage), static_cast<uint32_t>(source.size()),
         static_cast<uint32_t>(length), 0, hash};
     bool ok = source.size() <= max_source && length && length <= max_blob;
     const void* parts[] = {&header, source.data(), blob->GetBufferPointer()};
@@ -120,55 +124,61 @@ bool write_cache(const fs::path& path, const std::string& source, uint64_t hash,
         DWORD written = 0;
         ok = WriteFile(file, parts[i], sizes[i], &written, nullptr) && written == sizes[i];
     }
-    if (ok) ok = FlushFileBuffers(file) != FALSE;
+    // This is rebuildable cache data, not a save. Close before atomically
+    // replacing the entry, but do not force a disk barrier for every shader.
+    // A lost or damaged entry after power loss is rejected and recompiled by
+    // the exact-source/header/bytecode validation above.
     if (!CloseHandle(file)) ok = false;
-    if (ok) ok = MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+    if (ok) ok = MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != FALSE;
     if (!ok) DeleteFileW(temporary.c_str()); // Only this invocation's CREATE_NEW file.
     return ok;
 }
 
-int prepare(const fs::path& disc, const fs::path& cache) {
+int prepare(const fs::path& disc, const fs::path& cache, bool pixels, uint32_t width, uint32_t height) {
     const auto prepare_begin = PrepareClock::now();
     fs::create_directories(cache);
     std::vector<char> text(max_source);
     std::set<std::pair<std::vector<uint8_t>, uint32_t>> seen;
+    std::set<std::tuple<std::vector<uint8_t>, uint32_t, uint32_t>> seen_pixels;
+    std::set<std::pair<char, std::string>> sources;
+    uint64_t source_bytes = 0, program_bytes = 0;
+    unsigned source_duplicates = 0, unsupported_pixels = 0;
     unsigned compiled = 0, hits = 0, failed = 0;
     PrepareTimings timings;
-    const auto visitor = [&](const HazeArchiveVertexProgram& program) {
-        auto phase_begin = PrepareClock::now();
-        const bool inserted = seen.emplace(program.code, program.start).second;
-        timings.dedup_ns += elapsed_ns(phase_begin);
-        ++timings.dedup_calls;
-        if (!inserted) { ++timings.duplicate_programs; return true; }
-
-        phase_begin = PrepareClock::now();
-        const bool generated = haze_shader_prepare_vertex_source(program.code.data(),
-            static_cast<uint32_t>(program.code.size()), program.start,
-            text.data(), static_cast<uint32_t>(text.size())) != 0;
-        timings.source_ns += elapsed_ns(phase_begin);
-        ++timings.source_calls;
-        if (!generated) { ++failed; return true; }
+    const auto store_source = [&](char stage) {
         const std::string source(text.data());
+        auto phase_begin = PrepareClock::now();
+        if (sources.contains({stage, source})) {
+            ++source_duplicates;
+            timings.dedup_ns += elapsed_ns(phase_begin);
+            return;
+        }
+        if (sources.size() >= 16384 || source_bytes + source.size() > 128u * 1024u * 1024u)
+            throw std::runtime_error("Shader preparation source inventory exceeds its bounded capacity");
+        sources.emplace(stage, source);
+        source_bytes += source.size();
+        timings.dedup_ns += elapsed_ns(phase_begin);
         const auto hash = source_hash(source);
         char name[64];
-        std::snprintf(name, sizeof name, "V_%016llX_%08X.bin", static_cast<unsigned long long>(hash),
+        std::snprintf(name, sizeof name, "%c_%016llX_%08X.bin", stage, static_cast<unsigned long long>(hash),
             static_cast<unsigned>(source.size()));
         const auto path = cache / name;
         phase_begin = PrepareClock::now();
-        const bool cache_valid = valid_cached_vertex(path, source, hash);
+        const bool cache_valid = valid_cached_shader(path, source, hash, stage);
         timings.cache_validate_ns += elapsed_ns(phase_begin);
         ++timings.cache_validate_calls;
-        if (cache_valid) { ++hits; ++timings.cache_hits; return true; }
+        if (cache_valid) { ++hits; ++timings.cache_hits; return; }
         ComPtr<ID3DBlob> blob, diagnostic;
         phase_begin = PrepareClock::now();
-        const HRESULT result = D3DCompile(source.data(), source.size(), "xvs", nullptr, nullptr,
-            "main", "vs_5_0", 0, 0, blob.GetAddressOf(), diagnostic.GetAddressOf());
+        const HRESULT result = D3DCompile(source.data(), source.size(), stage == 'V' ? "xvs" : "xps",
+            nullptr, nullptr, "main", stage == 'V' ? "vs_5_0" : "ps_5_0", 0, 0,
+            blob.GetAddressOf(), diagnostic.GetAddressOf());
         timings.compile_ns += elapsed_ns(phase_begin);
         ++timings.compile_calls;
         bool cache_saved = false;
         if (SUCCEEDED(result) && blob) {
             phase_begin = PrepareClock::now();
-            cache_saved = write_cache(path, source, hash, blob.Get());
+            cache_saved = write_cache(path, source, hash, stage, blob.Get());
             timings.cache_write_ns += elapsed_ns(phase_begin);
             ++timings.cache_write_calls;
             if (!cache_saved) ++timings.cache_write_failures;
@@ -177,9 +187,58 @@ int prepare(const fs::path& disc, const fs::path& cache) {
             ++failed;
             std::fprintf(stderr, "[shader-prepare] failed %s hr=%08lX\n", name, static_cast<unsigned long>(result));
         } else ++compiled;
-        if (seen.size() % 16 == 0) {
-            std::printf("[shader-prepare] unique=%zu compiled=%u cached=%u failed=%u\n", seen.size(), compiled, hits, failed);
+        if (sources.size() % 16 == 0) {
+            std::printf("[shader-prepare] stage=%c unique=%zu compiled=%u cached=%u failed=%u\n",
+                stage, sources.size(), compiled, hits, failed);
             std::fflush(stdout);
+        }
+    };
+    const auto reserve_program = [&](size_t bytes) {
+        if (seen.size() + seen_pixels.size() > 8192 || program_bytes + bytes > 64u * 1024u * 1024u)
+            throw std::runtime_error("Shader preparation program inventory exceeds its bounded capacity");
+        program_bytes += bytes;
+    };
+    const auto visitor = [&](const HazeArchiveVertexProgram& program) {
+        auto phase_begin = PrepareClock::now();
+        const bool inserted = seen.emplace(program.code, program.start).second;
+        timings.dedup_ns += elapsed_ns(phase_begin);
+        ++timings.dedup_calls;
+        if (!inserted) { ++timings.duplicate_programs; return true; }
+        reserve_program(program.code.size());
+        phase_begin = PrepareClock::now();
+        const bool generated = haze_shader_prepare_vertex_source(program.code.data(),
+            static_cast<uint32_t>(program.code.size()), program.start,
+            text.data(), static_cast<uint32_t>(text.size())) != 0;
+        timings.source_ns += elapsed_ns(phase_begin);
+        ++timings.source_calls;
+        if (!generated) { ++failed; return true; }
+        store_source('V');
+        return true;
+    };
+    HazePixelShaderVariant variants[6]{};
+    if (pixels && !haze_shader_prepare_pixel_variants(width, height, variants))
+        throw std::runtime_error("Invalid shader preparation render extent");
+    const auto pixel_visitor = [&](const HazeArchiveFragmentProgram& program) {
+        if (program.unsupported_sampler_metadata) { ++unsupported_pixels; return true; }
+        const uint32_t control = (program.output_from_h0 ? 0u : 0x40u) |
+            (program.depth_replace ? 0x0Eu : 0u);
+        auto phase_begin = PrepareClock::now();
+        const bool inserted = seen_pixels.emplace(program.code, control, program.cube_mask).second;
+        timings.dedup_ns += elapsed_ns(phase_begin);
+        ++timings.dedup_calls;
+        if (!inserted) { ++timings.duplicate_programs; return true; }
+        reserve_program(program.code.size());
+        for (auto variant : variants) {
+            variant.control = control;
+            variant.cube_mask = program.cube_mask;
+            phase_begin = PrepareClock::now();
+            const bool generated = haze_shader_prepare_pixel_source(program.code.data(),
+                static_cast<uint32_t>(program.code.size()), &variant,
+                text.data(), static_cast<uint32_t>(text.size())) != 0;
+            timings.source_ns += elapsed_ns(phase_begin);
+            ++timings.source_calls;
+            if (!generated) { ++failed; continue; }
+            store_source('P');
         }
         return true;
     };
@@ -203,14 +262,31 @@ int prepare(const fs::path& disc, const fs::path& cache) {
         std::printf("[shader-prepare] archive_timing archive=%s wall_ms=%.3f\n",
             name, ms(archive_ns));
         if (stats.invalid_shader) ++failed;
+        if (pixels) {
+            HazeShaderArchiveStats pixel_stats{};
+            if (!haze_visit_archive_fragment_programs(pak, pixel_visitor, pixel_stats, error)) {
+                std::fprintf(stderr, "[shader-prepare] %s: %s\n", name, error.c_str());
+                print_timings(timings, elapsed_ns(prepare_begin));
+                return 1;
+            }
+            std::printf("[shader-prepare] archive=%s fragment_programs=%llu large=%llu decode_skips=%llu invalid=%llu\n",
+                name, static_cast<unsigned long long>(pixel_stats.fragment_programs),
+                static_cast<unsigned long long>(pixel_stats.skipped_large),
+                static_cast<unsigned long long>(pixel_stats.unsupported_decode),
+                static_cast<unsigned long long>(pixel_stats.invalid_shader));
+            if (pixel_stats.invalid_shader) ++failed;
+        }
         // The archive scanner reports bounded coverage; a successful worker
         // prepares the supported variant, not every runtime pipeline variant.
     }
     const uint64_t wall_ns = elapsed_ns(prepare_begin);
     std::printf("[shader-prepare] complete unique=%zu compiled=%u cached=%u failed=%u seconds=%.3f\n",
-        seen.size(), compiled, hits, failed, double(wall_ns) / 1000000000.0);
+        sources.size(), compiled, hits, failed, double(wall_ns) / 1000000000.0);
+    std::printf("[shader-prepare] coverage vertex_recipes=%zu pixel_recipes=%zu source_duplicates=%u "
+        "unsupported_pixel_records=%u pixel_variants=%u width=%u height=%u\n",
+        seen.size(), seen_pixels.size(), source_duplicates, unsupported_pixels, pixels ? 6u : 0u, width, height);
     print_timings(timings, wall_ns);
-    return failed || seen.empty() ? 1 : 0;
+    return failed || sources.empty() ? 1 : 0;
 }
 }
 
@@ -219,13 +295,30 @@ int haze_shader_prepare_cli() {
     LPWSTR* args = CommandLineToArgvW(GetCommandLineW(), &count);
     if (!args) return 2;
     fs::path disc, cache;
-    if (count == 4) { disc = args[2]; cache = args[3]; }
+    const bool pixels = count > 1 && std::wcscmp(args[1], L"--prepare-shaders") == 0;
+    uint32_t width = 0, height = 0;
+    const auto extent = [](const wchar_t* value) {
+        uint32_t result = 0;
+        if (!*value) return 0u;
+        for (; *value; ++value) {
+            if (*value < L'0' || *value > L'9') return 0u;
+            result = result * 10 + (*value - L'0');
+            if (result > 8192) return 0u;
+        }
+        return result;
+    };
+    const bool valid_arguments = (!pixels && count == 4) || (pixels && count == 6);
+    if (valid_arguments) {
+        disc = args[2]; cache = args[3];
+        if (pixels) { width = extent(args[4]); height = extent(args[5]); }
+    }
     LocalFree(args);
-    if (count != 4) {
-        std::fprintf(stderr, "Usage: HazeRecomp --prepare-vertex-shaders <disc directory> <cache directory>\n");
+    if (!valid_arguments || (pixels && (!width || !height))) {
+        std::fprintf(stderr, "Usage: HazeRecomp --prepare-vertex-shaders <disc directory> <cache directory>\n"
+            "   or: HazeRecomp --prepare-shaders <disc directory> <cache directory> <render width> <render height>\n");
         return 2;
     }
-    try { return prepare(disc, cache); }
+    try { return prepare(disc, cache, pixels, width, height); }
     catch (const std::exception& error) {
         std::fprintf(stderr, "[shader-prepare] %s\n", error.what());
         return 1;

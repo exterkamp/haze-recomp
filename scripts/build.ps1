@@ -584,6 +584,11 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Shader archive fixture compilation failed.' }
     & $shaderArchiveTest
     if ($LASTEXITCODE -ne 0) { throw 'Shader archive bounds/decode regression failed.' }
+    $shaderPrepareTest = Join-Path $root 'local/test_shader_prepare_source.exe'
+    & $clang /nologo /W0 /O2 /std:c11 /UNDEBUG "/I$sdk/include" "/I$sdk/libs/video" "/Fe$shaderPrepareTest" "/Fo$root/local/" "$root/tests/test_shader_prepare_source.c" "$root/port/haze_shader_prepare_source.c" "$sdk/libs/video/rsx_fp_decompiler.c" "$sdk/libs/video/rsx_vp_decompiler.c"
+    if ($LASTEXITCODE -ne 0) { throw 'Shader preparation source fixture compilation failed.' }
+    & $shaderPrepareTest
+    if ($LASTEXITCODE -ne 0) { throw 'Shader preparation source/extent regression failed.' }
     & $python "$root/tests/test_completion_queue_profile.py" --compiler $clang --sdk $sdk --output-dir "$root/local/completion-queue-fixtures"
     if ($LASTEXITCODE -ne 0) { throw 'Completion queue publication/pop diagnostic regression failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })

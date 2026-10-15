@@ -13,6 +13,7 @@ namespace {
 
 constexpr uint32_t kPbckMagic = 0x5042434b;
 constexpr uint32_t kCgVertexProfile = 7003;
+constexpr uint32_t kCgFragmentProfile = 7004;
 constexpr uint32_t kCgRevision = 6;
 constexpr uint64_t kEntryLimit = 16 * 1024;
 constexpr uint64_t kCompressedLimit = 64 * 1024;
@@ -23,6 +24,7 @@ constexpr uint64_t kMaxPbckIndexBytes = 32 * 1024 * 1024;
 constexpr uint64_t kCgHeaderSize = 8 * 4;
 constexpr uint64_t kCgParameterSize = 48;
 constexpr uint64_t kCgProgramSize = 24;
+constexpr uint32_t kCgMaxInstructionCount = 4096;
 
 uint32_t read_be32(const uint8_t* p) {
     return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) |
@@ -98,6 +100,98 @@ bool parse_vertex_program(const std::vector<uint8_t>& bytes, CgView& out) {
     return true;
 }
 
+bool parse_fragment_program(const std::vector<uint8_t>& bytes,
+                            HazeArchiveFragmentProgram& out) {
+    if (bytes.size() < kCgHeaderSize ||
+        read_be32(bytes.data()) != kCgFragmentProfile)
+        return false;
+
+    const uint32_t revision = read_be32(bytes.data() + 4);
+    const uint32_t total_size = read_be32(bytes.data() + 8);
+    const uint32_t parameter_count = read_be32(bytes.data() + 12);
+    const uint32_t parameter_offset = read_be32(bytes.data() + 16);
+    const uint32_t program_offset = read_be32(bytes.data() + 20);
+    const uint32_t ucode_size = read_be32(bytes.data() + 24);
+    const uint32_t ucode_offset = read_be32(bytes.data() + 28);
+    const uint64_t total = bytes.size();
+
+    if (revision != kCgRevision || total_size != total)
+        return false;
+    if (parameter_count > std::numeric_limits<uint64_t>::max() / kCgParameterSize)
+        return false;
+    const uint64_t parameter_bytes = uint64_t(parameter_count) * kCgParameterSize;
+    if (parameter_count) {
+        if (parameter_offset < kCgHeaderSize || (parameter_offset & 3u) ||
+            !range_fits(parameter_offset, parameter_bytes, total))
+            return false;
+    } else if (parameter_offset > total) {
+        return false;
+    }
+    if (program_offset < kCgHeaderSize || (program_offset & 3u) ||
+        !range_fits(program_offset, kCgProgramSize, total))
+        return false;
+    if (ucode_offset < kCgHeaderSize || (ucode_offset & 15u) ||
+        !ucode_size || (ucode_size & 15u) || ucode_size > kEntryLimit ||
+        !range_fits(ucode_offset, ucode_size, total))
+        return false;
+
+    const uint8_t* program = bytes.data() + program_offset;
+    const uint32_t instruction_count = read_be32(program + 0);
+    if (!instruction_count || instruction_count > kCgMaxInstructionCount)
+        return false;
+    if (overlaps(program_offset, kCgProgramSize, ucode_offset, ucode_size) ||
+        (parameter_count &&
+         (overlaps(parameter_offset, parameter_bytes, program_offset, kCgProgramSize) ||
+          overlaps(parameter_offset, parameter_bytes, ucode_offset, ucode_size))))
+        return false;
+
+    out.instruction_count = instruction_count;
+    out.input_mask = read_be32(program + 4);
+    out.partial_texture_type = read_be32(program + 8);
+    out.texture_coord_mask = uint16_t((uint16_t(program[12]) << 8) | program[13]);
+    out.texture_coord2d_mask = uint16_t((uint16_t(program[14]) << 8) | program[15]);
+    out.centroid_mask = uint16_t((uint16_t(program[16]) << 8) | program[17]);
+    out.register_count = program[18];
+    out.output_from_h0 = program[19];
+    out.depth_replace = program[20];
+    out.kill = program[21];
+
+    for (uint32_t index = 0; index < parameter_count; ++index) {
+        const uint8_t* parameter = bytes.data() + parameter_offset +
+                                   uint64_t(index) * kCgParameterSize;
+        const uint32_t type = read_be32(parameter + 0);
+        const uint32_t resource = read_be32(parameter + 4);
+        const uint32_t referenced = read_be32(parameter + 40);
+        if (!referenced)
+            continue;
+
+        const bool sampler2d = type == 1066;
+        const bool sampler_cube = type == 1069;
+        if (resource >= 2048 && resource <= 2063) {
+            const uint16_t bit = uint16_t(1u << (resource - 2048));
+            if (sampler2d || sampler_cube) {
+                if ((out.sampler_mask & bit) &&
+                    bool(out.cube_mask & bit) != sampler_cube) {
+                    out.unsupported_sampler_mask |= bit;
+                    out.unsupported_sampler_metadata = true;
+                }
+                out.sampler_mask |= bit;
+                if (sampler_cube)
+                    out.cube_mask |= bit;
+            } else {
+                out.unsupported_sampler_mask |= bit;
+                out.unsupported_sampler_metadata = true;
+            }
+        } else if (sampler2d || sampler_cube) {
+            out.unsupported_sampler_metadata = true;
+        }
+    }
+
+    out.code.assign(bytes.begin() + ucode_offset,
+                    bytes.begin() + ucode_offset + ucode_size);
+    return true;
+}
+
 std::filesystem::path shard_name(const std::filesystem::path& pak, unsigned shard) {
     auto result = pak;
     result += ".";
@@ -117,20 +211,11 @@ bool read_at(std::ifstream& file, uint64_t offset, uint8_t* output, size_t size)
     return file.good() || (file.eof() && size_t(file.gcount()) == size);
 }
 
-} // namespace
-
-bool haze_visit_archive_vertex_programs(
+bool visit_archive_entries(
     const std::filesystem::path& pak,
-    const std::function<bool(const HazeArchiveVertexProgram&)>& visitor,
+    const std::function<bool(const std::vector<uint8_t>&)>& visitor,
     HazeShaderArchiveStats& stats,
     std::string& error) {
-    stats = {};
-    error.clear();
-    if (!visitor) {
-        error = "Missing vertex-program visitor";
-        return false;
-    }
-
     std::error_code ec;
     const uint64_t pak_size = std::filesystem::file_size(pak, ec);
     if (ec || pak_size < kPbckHeaderSize ||
@@ -189,10 +274,8 @@ bool haze_visit_archive_vertex_programs(
             ++stats.skipped_large;
             continue;
         }
-        if (!decoded_size || !stored_size) {
-            // Empty records cannot contain a VP program.
+        if (!decoded_size || !stored_size)
             continue;
-        }
 
         if (!shard_files[shard]) {
             const auto name = shard_name(pak, shard);
@@ -231,13 +314,32 @@ bool haze_visit_archive_vertex_programs(
         } else {
             decoded = std::move(stored);
         }
+        if (!visitor(decoded))
+            return true;
+    }
+    return true;
+}
 
+} // namespace
+
+bool haze_visit_archive_vertex_programs(
+    const std::filesystem::path& pak,
+    const std::function<bool(const HazeArchiveVertexProgram&)>& visitor,
+    HazeShaderArchiveStats& stats,
+    std::string& error) {
+    stats = {};
+    error.clear();
+    if (!visitor) {
+        error = "Missing vertex-program visitor";
+        return false;
+    }
+    return visit_archive_entries(pak, [&](const std::vector<uint8_t>& decoded) {
         if (decoded.size() < 4 || read_be32(decoded.data()) != kCgVertexProfile)
-            continue;
+            return true;
         CgView view{};
         if (!parse_vertex_program(decoded, view)) {
             ++stats.invalid_shader;
-            continue;
+            return true;
         }
 
         HazeArchiveVertexProgram program;
@@ -251,8 +353,31 @@ bool haze_visit_archive_vertex_programs(
             program.code[offset + 3] = uint8_t(word >> 24);
         }
         ++stats.vertex_programs;
-        if (!visitor(program)) return true;
+        return visitor(program);
+    }, stats, error);
+}
+
+bool haze_visit_archive_fragment_programs(
+    const std::filesystem::path& pak,
+    const std::function<bool(const HazeArchiveFragmentProgram&)>& visitor,
+    HazeShaderArchiveStats& stats,
+    std::string& error) {
+    stats = {};
+    error.clear();
+    if (!visitor) {
+        error = "Missing fragment-program visitor";
+        return false;
     }
-    return true;
+    return visit_archive_entries(pak, [&](const std::vector<uint8_t>& decoded) {
+        if (decoded.size() < 4 || read_be32(decoded.data()) != kCgFragmentProfile)
+            return true;
+        HazeArchiveFragmentProgram program;
+        if (!parse_fragment_program(decoded, program)) {
+            ++stats.invalid_shader;
+            return true;
+        }
+        ++stats.fragment_programs;
+        return visitor(program);
+    }, stats, error);
 }
 

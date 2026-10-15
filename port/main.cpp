@@ -667,7 +667,8 @@ extern "C" int spu_float_native_set_mode(int requested);
 int main(int argc, char** argv)
 {
 #ifdef _WIN32
-    if (argc > 1 && std::strcmp(argv[1], "--prepare-vertex-shaders") == 0)
+    if (argc > 1 && (std::strcmp(argv[1], "--prepare-vertex-shaders") == 0 ||
+                     std::strcmp(argv[1], "--prepare-shaders") == 0))
         return haze_shader_prepare_cli();
     // Exact whole-image fingerprints; no generic/persistent controller jobs.
     // Each invocation retains fresh context/LS and existing completion cleanup.

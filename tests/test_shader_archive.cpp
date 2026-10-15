@@ -55,6 +55,48 @@ std::vector<uint8_t> make_cg(uint32_t start = 1) {
     return cg;
 }
 
+std::vector<uint8_t> make_fp() {
+    // Five 48-byte Cg parameters and a 24-byte FP record precede a 48-byte
+    // ucode block. The declared instruction count is deliberately not
+    // ucode_size / 16: FP ucode can contain inline constants.
+    std::vector<uint8_t> cg(352, 0);
+    put_be32(cg, 0, 7004);
+    put_be32(cg, 4, 6);
+    put_be32(cg, 8, uint32_t(cg.size()));
+    put_be32(cg, 12, 5);
+    put_be32(cg, 16, 32);
+    put_be32(cg, 20, 272);
+    put_be32(cg, 24, 48);
+    put_be32(cg, 28, 304);
+
+    auto parameter = [&](uint32_t index, uint32_t type, uint32_t resource,
+                         uint32_t referenced) {
+        const size_t offset = 32 + size_t(index) * 48;
+        put_be32(cg, offset + 0, type);
+        put_be32(cg, offset + 4, resource);
+        put_be32(cg, offset + 40, referenced);
+    };
+    parameter(0, 1066, 2048, 1); // referenced sampler2D, unit 0
+    parameter(1, 1069, 2051, 1); // referenced samplerCUBE, unit 3
+    parameter(2, 1066, 2052, 0); // unreferenced sampler does not affect masks
+    parameter(3, 1067, 2049, 1); // unknown referenced sampler type, unit 1
+    parameter(4, 1066, 2064, 1); // recognized sampler outside supported range
+
+    put_be32(cg, 272 + 0, 1); // instruction count
+    put_be32(cg, 272 + 4, 0x11223344); // input mask
+    put_be32(cg, 272 + 8, 0x55667788); // partial texture type
+    cg[272 + 12] = 0x12; cg[272 + 13] = 0x34; // texture coord mask
+    cg[272 + 14] = 0x56; cg[272 + 15] = 0x78; // 2D coord mask
+    cg[272 + 16] = 0x9a; cg[272 + 17] = 0xbc; // centroid mask
+    cg[272 + 18] = 7; // register count
+    cg[272 + 19] = 1; // output from h0
+    cg[272 + 20] = 1; // depth replace
+    cg[272 + 21] = 1; // kill
+    for (size_t i = 0; i < 48; ++i)
+        cg[304 + i] = uint8_t(0x80 + i);
+    return cg;
+}
+
 std::vector<uint8_t> zlib_stored(const std::vector<uint8_t>& raw) {
     assert(raw.size() <= 65535);
     const uint16_t len = uint16_t(raw.size());
@@ -173,6 +215,68 @@ int main() {
     assert(!haze_visit_archive_vertex_programs(bad_shard_pak,
         [](const HazeArchiveVertexProgram&) { assert(false); return true; }, stats, error));
     assert(error.find("beyond shard") != std::string::npos);
+
+    const auto fp_pak = root / "fragment-programs.pak";
+    const auto raw_fp = make_fp();
+    const auto compressed_fp = zlib_stored(raw_fp);
+    auto bad_fp_overlap = raw_fp;
+    put_be32(bad_fp_overlap, 28, 272); // code overlaps program metadata
+    auto bad_fp_alignment = raw_fp;
+    put_be32(bad_fp_alignment, 28, 308); // ucode must be 16-byte aligned
+    write_archive(fp_pak, {
+        {uint32_t(raw_fp.size()), 0, 0, 0, raw_fp},
+        {uint32_t(raw_fp.size()), uint32_t(compressed_fp.size()), 512, 0, compressed_fp},
+        {uint32_t(bad_fp_overlap.size()), 0, 1024, 0, bad_fp_overlap},
+        {uint32_t(bad_fp_alignment.size()), 0, 1536, 0, bad_fp_alignment},
+        {20 * 1024, 0, 0, 0, {}}
+    });
+
+    std::vector<HazeArchiveFragmentProgram> fragment_programs;
+    assert(haze_visit_archive_fragment_programs(fp_pak,
+        [&](const HazeArchiveFragmentProgram& program) {
+            fragment_programs.push_back(program);
+            return true;
+        }, stats, error));
+    assert(error.empty());
+    assert(stats.entries == 5 && stats.fragment_programs == 2);
+    assert(stats.skipped_large == 1 && stats.invalid_shader == 2);
+    assert(fragment_programs.size() == 2);
+    const auto& fp = fragment_programs[0];
+    assert(fp.instruction_count == 1 && fp.code.size() == 48);
+    assert(fp.code.front() == 0x80 && fp.code.back() == 0xaf); // raw byte order
+    assert(fp.input_mask == 0x11223344 && fp.partial_texture_type == 0x55667788);
+    assert(fp.texture_coord_mask == 0x1234 && fp.texture_coord2d_mask == 0x5678 &&
+           fp.centroid_mask == 0x9abc);
+    assert(fp.register_count == 7 && fp.output_from_h0 == 1 &&
+           fp.depth_replace == 1 && fp.kill == 1);
+    assert(fp.sampler_mask == ((1u << 0) | (1u << 3)) && fp.cube_mask == (1u << 3));
+    assert(fp.unsupported_sampler_mask == (1u << 1) && fp.unsupported_sampler_metadata);
+    assert(fragment_programs[1].code == fp.code);
+
+    size_t fp_callbacks = 0;
+    assert(haze_visit_archive_fragment_programs(fp_pak,
+        [&](const HazeArchiveFragmentProgram&) { ++fp_callbacks; return false; }, stats, error));
+    assert(fp_callbacks == 1 && stats.fragment_programs == 1);
+
+    const auto bad_fp_pak = root / "bad-fragment-profile.pak";
+    auto bad_fp = make_fp();
+    put_be32(bad_fp, 4, 5); // unsupported Cg revision
+    write_archive(bad_fp_pak, {{uint32_t(bad_fp.size()), 0, 0, 0, bad_fp}});
+    assert(haze_visit_archive_fragment_programs(bad_fp_pak,
+        [](const HazeArchiveFragmentProgram&) { assert(false); return true; }, stats, error));
+    assert(stats.fragment_programs == 0 && stats.invalid_shader == 1);
+
+    auto conflicting_fp = make_fp();
+    // Both referenced declarations claim unit zero with incompatible types.
+    put_be32(conflicting_fp, 32 + 48 + 4, 2048);
+    write_archive(bad_fp_pak, {{uint32_t(conflicting_fp.size()), 0, 0, 0, conflicting_fp}});
+    assert(haze_visit_archive_fragment_programs(bad_fp_pak,
+        [](const HazeArchiveFragmentProgram& program) {
+            assert(program.unsupported_sampler_metadata);
+            assert(program.unsupported_sampler_mask & 1u);
+            return true;
+        }, stats, error));
+    assert(stats.fragment_programs == 1 && stats.invalid_shader == 0);
 
     assert(std::filesystem::canonical(root).parent_path() ==
         std::filesystem::canonical(std::filesystem::temp_directory_path()));
