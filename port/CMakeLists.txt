@@ -530,7 +530,7 @@ add_executable(${PROJECT_NAME}
     ${SPU_SOURCES}
 )
 if(WIN32)
-    target_sources(${PROJECT_NAME} PRIVATE haze_profile_transaction.cpp)
+    target_sources(${PROJECT_NAME} PRIVATE haze_profile_transaction.cpp haze_save_backup.cpp)
 endif()
 set_property(SOURCE haze_spu_idle.c APPEND PROPERTY
     INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")
