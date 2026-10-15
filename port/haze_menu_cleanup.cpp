@@ -51,12 +51,14 @@ void haze_menu_cleanup(uint32_t context) {
     }
 }
 
-void haze_menu_cleanup_restore(uint32_t context) {
+void haze_menu_cleanup_restore(uint32_t context,bool (*reserve)(void*,uint32_t,uint32_t)=nullptr,void* owner=nullptr) {
     // Restore ownership before 00317300 recursively deletes the GUI roots.
     // This is not a page-close operation: the rows stay absent on Back.
     for (auto it=removed_rows.begin();it!=removed_rows.end();) {
         if (it->context!=context) { ++it; continue; }
-        const auto count=vm_read32(it->parent+0x60), items=vm_read32(it->parent+0x64);
+        const auto count=vm_read32(it->parent+0x60);
+        if(count>=vm_read32(it->parent+0x5c) && reserve) reserve(owner,it->parent,count+1);
+        const auto items=vm_read32(it->parent+0x64);
         if (valid(items) && count<vm_read32(it->parent+0x5c)) {
             vm_write64(items+count*8,it->entry);
             vm_write32(it->parent+0x60,count+1);

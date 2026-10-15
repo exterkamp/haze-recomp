@@ -771,6 +771,10 @@ int main(int argc, char** argv)
 
     ppu_recomp_register();   /* lifted function table -> address map */
     ps3_load_prx_modules();  /* this game's lifted system PRX, if it has any */
+#ifdef _WIN32
+    extern void haze_coop_register();
+    haze_coop_register();
+#endif
     ppu_hle_init();          /* firmware import NID -> HLE handlers */
     haze_player_profile_register();
     ppu_sysprx_register();   /* boot-critical CRT */

@@ -6,7 +6,7 @@
 #include <array>
 #include "haze_gamepad.h"
 
-enum class HazeMenuPage { None, Video, Audio, Controls, Desktop, Quit, Profile, Count };
+enum class HazeMenuPage { None, Video, Audio, Controls, Desktop, Quit, Profile, CoopHost, CoopJoin, Count };
 enum class HazeMenuApply { Applied, Pending, Failed };
 struct HazeMenuChoice { std::string value,label; bool operator==(const HazeMenuChoice&) const = default; };
 struct HazeMenuRow {
@@ -39,6 +39,7 @@ struct HazeMenuProvider {
     std::function<HazeMenuApply(std::string&)> poll;
     std::function<void(const std::string&)> activate;
     std::function<void(bool)> update;
+    std::function<void(bool)> end; // true: Back; false: guest page transition
     std::function<HazeMenuModal()> modal;
     std::function<void(int)> modal_key,modal_choose;
     std::function<void(uint32_t)> modal_text;

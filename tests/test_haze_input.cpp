@@ -97,6 +97,9 @@ void haze_audio_menu_register() {}
 void haze_controls_menu_register() {}
 void haze_steam_menu_register() {}
 void haze_player_profile_menu_register() {}
+void haze_coop_menu_register() {}
+void haze_coop_update() {}
+void haze_coop_leave() {}
 void haze_quit_menu_register() {}
 static bool quit_active=false,close_accepted=false;
 bool haze_quit_menu_active() { return quit_active; }

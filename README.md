@@ -12,7 +12,10 @@ and installs a ready-to-play launcher. It uses a per-user MSI internally. See
 Menus, opening-scene gameplay, audio output, and checkpoint saves have been
 tested. Keyboard/mouse and SDL controller support are implemented. Performance,
 rendering, and campaign compatibility are still in development. Full campaign
-completion is not validated; online co-op is not implemented. Native PAMF movies
+completion is not validated. Experimental invite-code campaign co-op has passed
+two-instance local gameplay, departure and rejoin tests; separate-machine and
+home-router validation is pending. Internet play requires a configured service;
+see [co-op setup and limitations](docs/co-op.md). Native PAMF movies
 play with synchronized video and audio; Escape or the current confirm binding skips them.
 
 ## Install

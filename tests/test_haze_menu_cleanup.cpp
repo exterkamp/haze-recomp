@@ -45,5 +45,20 @@ int main() {
     haze_menu_cleanup(context);
     assert(removed_rows.size()==1 && removed_rows[0].widget==parent+0x3000);
     haze_menu_cleanup_restore(context);
+    // A later native row can consume all spare capacity. Restoration must ask
+    // the guest allocator for room, preserving the live entries after growth.
+    haze_menu_cleanup(context);
+    const auto live=vm_read32(parent+0x60);
+    vm_write32(parent+0x5c,live);
+    bool grew=false;
+    auto reserve=[](void* owner,uint32_t parent,uint32_t needed) {
+        *static_cast<bool*>(owner)=true;
+        const auto before=vm_read32(parent+0x64),count=vm_read32(parent+0x60);
+        for(uint32_t i=0;i<count;++i) vm_write64(0x50000+i*8,vm_read64(before+i*8));
+        vm_write32(parent+0x64,0x50000); vm_write32(parent+0x5c,needed+4); return true;
+    };
+    haze_menu_cleanup_restore(context,reserve,&grew);
+    assert(grew && removed_rows.empty() && vm_read32(parent+0x60)==live+1);
+    assert(vm_read64(0x50000)==first && vm_read32(parent+0x3000+0x30)==7);
     puts("Online menu cleanup: compact traversal, repeat activation, ownership and handle generations passed.");
 }

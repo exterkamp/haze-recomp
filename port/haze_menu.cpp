@@ -45,6 +45,7 @@ void publish() {
 void close_page(bool pop) {
     if (current_view.page==HazeMenuPage::None) return;
     const bool guest_back=provider().guest_back;
+    if (provider().end) provider().end(pop);
     if (provider().update) provider().update(false);
     current_view.page=HazeMenuPage::None;
     current_view.rows.clear(); current_view.modal={};
