@@ -606,7 +606,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 if(HAZE_RSX_PROFILE OR HAZE_JOB_DIAGNOSTICS)
-    set_property(SOURCE "${HAZE_MAIN_LOOP_PATCHED}" main.cpp haze_job_profile.cpp
+    set_property(SOURCE "${HAZE_MAIN_LOOP_PATCHED}" main.cpp haze_job_profile.cpp haze_job_trace.cpp
         APPEND PROPERTY COMPILE_DEFINITIONS HAZE_JOB_PROFILE)
     set_property(SOURCE "${HAZE_MAIN_LOOP_PATCHED}" main.cpp haze_job_trace.cpp
         haze_job0_capture.cpp "${HAZE_JOB0_PATCHED}"

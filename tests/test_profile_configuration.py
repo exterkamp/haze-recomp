@@ -47,6 +47,13 @@ class ProfileConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'job trace compile gate'):
             check_rules(ninja, False, True)
 
+    def test_queue_submits_require_profile_gate_on_trace_source(self):
+        ninja = synthetic_ninja(False, True).replace(
+            'haze_job_trace.cpp.obj: CXX_COMPILER__HazeRecomp_ haze_job_trace.cpp\n  DEFINES = -DHAZE_JOB_PROFILE -DHAZE_JOB_TRACE',
+            'haze_job_trace.cpp.obj: CXX_COMPILER__HazeRecomp_ haze_job_trace.cpp\n  DEFINES = -DHAZE_JOB_TRACE')
+        with self.assertRaisesRegex(ValueError, 'completion profiler compile gate'):
+            check_rules(ninja, False, True)
+
 
 if __name__ == '__main__':
     unittest.main()

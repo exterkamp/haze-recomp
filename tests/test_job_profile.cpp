@@ -6,8 +6,22 @@
 #include <string>
 #include <algorithm>
 
+// This accounting fixture disables the independent queue diagnostic. Actual
+// queue/VM linkage is exercised by test_completion_queue_profile.cpp.
+extern "C" {
+uint8_t* vm_base;
+int ppu_native_memory_range(uint32_t, uint32_t) { return 0; }
+int ppu_native_memory_available(void) { return 0; }
+void spu_lockline_lock(void) {}
+void spu_lockline_unlock(void) {}
+int spu_queue_diag_configure_locked(uint32_t,void*,void*,uint32_t,uint32_t) { return 0; }
+void spu_queue_diag_submit_locked(uint32_t) {}
+void spu_queue_diag_stop(spu_queue_diag_snapshot* snapshot) { *snapshot = {}; }
+}
+
 int main(int argc,char** argv) {
     assert(argc==2);
+    _putenv_s("HAZE_COMPLETION_QUEUE_CSV","");
     _putenv_s("HAZE_JOB_PROFILE_CSV",argv[1]);
     { HazeJobProfileScope wrong_thread(2,0xE94EE0,1,1);
       HazeJobProfileScope wrong_toc(1,0,1,1);

@@ -42,7 +42,7 @@ public:
     HazeJobTraceScope& operator=(const HazeJobTraceScope&) = delete;
 
     void set_slot(std::uint32_t slot) noexcept;
-    void set_route(std::uint32_t mode) noexcept { if (active_) route_ = mode; }
+    void set_route(std::uint32_t mode) noexcept;
     void set_slot_base(std::uint32_t base) noexcept { if (active_) slot_base_ = base; }
     void set_dispatch(std::uint64_t code, std::uint64_t toc) noexcept {
         if (active_) {
@@ -59,6 +59,7 @@ private:
     HazeJobTraceScope* previous_;
     bool active_;
     bool submit_generation_assigned_;
+    bool completion_submit_assigned_;
     unsigned kind_, guest_thread_, arg_count_, depth_;
     std::uint32_t host_tid_, slot_, route_, slot_base_;
     std::int64_t begin_qpc_;

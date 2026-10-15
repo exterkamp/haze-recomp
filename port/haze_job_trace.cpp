@@ -1,4 +1,5 @@
 #include "haze_job_trace.h"
+#include "haze_job_profile.h"
 
 #if defined(HAZE_JOB_TRACE) && defined(_WIN32)
 
@@ -175,6 +176,7 @@ HazeJobTraceScope::HazeJobTraceScope(unsigned kind, unsigned guest_thread,
     std::uint64_t toc, std::uint64_t caller, const std::uint64_t* args,
     unsigned arg_count) noexcept
     : previous_(nullptr), active_(false), submit_generation_assigned_(false),
+      completion_submit_assigned_(false),
       kind_(kind), guest_thread_(guest_thread), arg_count_(0), depth_(0),
       host_tid_(0), slot_(kInvalidSlot), route_(kInvalidSlot), slot_base_(0), begin_qpc_(0), toc_(toc), caller_(caller),
       args_{}, generation_(0), dispatch_code_(0), dispatch_toc_(0), span_id_(0), parent_id_(0), external_end_qpc_(0) {
@@ -223,7 +225,14 @@ HazeJobTraceScope::~HazeJobTraceScope() noexcept {
 }
 
 void HazeJobTraceScope::set_slot(std::uint32_t slot) noexcept {
-    if (!active_) return;
+    if (slot_ != slot) completion_submit_assigned_ = false;
+    if (!active_) {
+        if (kind_ == static_cast<unsigned>(HazeJobTraceKind::Submit)) {
+            slot_ = slot;
+            submit_generation_assigned_ = true;
+        }
+        return;
+    }
     if (slot >= 512) {
         slot_ = kInvalidSlot;
         generation_ = 0;
@@ -239,6 +248,17 @@ void HazeJobTraceScope::set_slot(std::uint32_t slot) noexcept {
         }
     } else {
         generation_ = g_generation[slot].load(std::memory_order_seq_cst);
+    }
+}
+
+void HazeJobTraceScope::set_route(std::uint32_t mode) noexcept {
+    route_ = mode;
+    // The source patch supplies effective route after mode-3 dispatch lookup,
+    // before any job work. Other routes do not publish this completion queue.
+    if (kind_ == static_cast<unsigned>(HazeJobTraceKind::Submit) && mode == 2 &&
+        slot_ < 512 && !completion_submit_assigned_) {
+        haze_completion_queue_submit(guest_thread_, toc_, slot_);
+        completion_submit_assigned_ = true;
     }
 }
 

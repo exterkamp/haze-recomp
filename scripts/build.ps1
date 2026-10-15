@@ -353,7 +353,7 @@ if ($Test) {
         if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op compilation failed.' }
         & "$root/local/test_job_trace_noop.exe"
         if ($LASTEXITCODE -ne 0) { throw 'Ordinary job trace no-op test failed.' }
-        & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/Fe$root/local/test_job_profile.exe" "/Fo$root/local/test_job_profile.obj" "$root/tests/test_job_profile.cpp"
+        & $clang /nologo /EHsc /W0 /O2 /std:c++20 "/I$sdk/runtime/spu" "/Fe$root/local/test_job_profile.exe" "/Fo$root/local/test_job_profile.obj" "$root/tests/test_job_profile.cpp"
         if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler test compilation failed.' }
         & "$root/local/test_job_profile.exe" "$root/local/test-job-profile.csv"
         if ($LASTEXITCODE -ne 0) { throw 'Job completion profiler accounting failed.' }
@@ -584,6 +584,8 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'Shader archive fixture compilation failed.' }
     & $shaderArchiveTest
     if ($LASTEXITCODE -ne 0) { throw 'Shader archive bounds/decode regression failed.' }
+    & $python "$root/tests/test_completion_queue_profile.py" --compiler $clang --sdk $sdk --output-dir "$root/local/completion-queue-fixtures"
+    if ($LASTEXITCODE -ne 0) { throw 'Completion queue publication/pop diagnostic regression failed.' }
     $textureLibrary = Join-Path $build $(if ($RuntimeOnly) { 'ps3recomp_runtime.lib' } else { 'ps3recomp_sdk/ps3recomp_runtime.lib' })
     & $clang /nologo /W0 /O1 /MD /Gy /Gw "/I$sdk/include" "/Fe$textureTest" "/Fo$root/local/test_live_textures.obj" "$sdk/libs/video/tests/test_live_textures.c" /link /OPT:REF $textureLibrary
     if ($LASTEXITCODE -ne 0) { throw 'Live texture test compilation failed.' }

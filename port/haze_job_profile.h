@@ -1,6 +1,14 @@
 #pragma once
 #include <cstdint>
 
+// Independent completion-queue diagnostic at the guarded Submit boundary.
+// This declaration stays available when ordinary job tracing is disabled.
+#if defined(HAZE_JOB_PROFILE) && defined(_WIN32)
+void haze_completion_queue_submit(unsigned thread, uint64_t toc, uint32_t slot);
+#else
+inline void haze_completion_queue_submit(unsigned, uint64_t, uint32_t) {}
+#endif
+
 // Diagnostic-only scopes around the original completion loop. Stages include
 // their callees; nested loop rows must not be added to their parents.
 #if defined(HAZE_JOB_PROFILE) && defined(_WIN32)

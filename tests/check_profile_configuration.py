@@ -48,7 +48,7 @@ def check_rules(ninja, renderer_enabled, jobs_enabled=False, inline_reads=None):
             raise ValueError(f'{target}/{source}: profiling flag is {profiled}, expected {expected}')
     print(f'Actual compile rules: renderer={int(renderer_enabled)} jobs={int(jobs_enabled)} verified on SDK sources')
 
-    for source in ('main.cpp', 'haze_job_profile.cpp', 'ppu_recomp_003.cpp'):
+    for source in ('main.cpp', 'haze_job_profile.cpp', 'haze_job_trace.cpp', 'ppu_recomp_003.cpp'):
         blocks = [block for block in ninja.split('\n\n') if block.startswith('build ')
                   and re.search(r'[\\/]' + re.escape(source) + r'\.obj:', block.splitlines()[0])
                   and '__HazeRecomp_' in block.splitlines()[0]]
