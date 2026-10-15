@@ -77,12 +77,18 @@ Options parse(const std::vector<std::wstring>& args) {
     for (size_t i=0;i<args.size();++i) {
         if (args[i]==L"--no-ui") { options.no_ui=true; continue; }
         if (args[i]==L"--check") { options.check=true; continue; }
+        if (args[i]==L"--diagnostics") { options.diagnostics=true; continue; }
         const auto key=flags.find(args[i]);
-        if (key==flags.end() && args[i]!=L"--config") throw std::runtime_error("Unknown launcher option: "+utf8(args[i]));
+        const bool other=args[i]==L"--config" || args[i]==L"--export-diagnostics" || args[i]==L"--session";
+        if (key==flags.end() && !other) throw std::runtime_error("Unknown launcher option: "+utf8(args[i]));
         if (i+1==args.size() || args[i+1].empty() || args[i+1].starts_with(L"--")) throw std::runtime_error("A launcher option is missing its value.");
         if (args[i]==L"--config") { if (!options.config.empty()) throw std::runtime_error("Duplicate --config option."); options.config=args[++i]; }
+        else if (args[i]==L"--export-diagnostics") { if (!options.export_to.empty()) throw std::runtime_error("Duplicate --export-diagnostics option."); options.export_to=args[++i]; }
+        else if (args[i]==L"--session") { if (!options.session.empty()) throw std::runtime_error("Duplicate --session option."); options.session=args[++i]; }
         else { const auto name=key->second; if (!options.overrides.emplace(name,args[++i]).second) throw std::runtime_error("Duplicate launcher option."); }
     }
+    if (!options.session.empty() && options.export_to.empty() && !options.diagnostics) throw std::runtime_error("--session requires --export-diagnostics or --diagnostics.");
+    if (options.check && (options.diagnostics || !options.export_to.empty())) throw std::runtime_error("--check cannot be combined with a diagnostics export.");
     return options;
 }
 Values environment() {
@@ -109,11 +115,15 @@ Plan resolve(const fs::path& launcher,const Options& options,const Values& inher
     auto env=[&](const wchar_t* key) { auto item=inherited.find(key); return item==inherited.end() ? std::wstring{} : item->second; };
     p.config=absolute(!options.config.empty() ? options.config.wstring() : !env(L"HAZE_LAUNCHER_CONFIG").empty() ? env(L"HAZE_LAUNCHER_CONFIG") : L"launcher.ini",folder);
     const auto saved=read_config(p.config,!options.config.empty() || !env(L"HAZE_LAUNCHER_CONFIG").empty());
+    // Sources keep configured values distinguishable from launch overrides in
+    // launcher.log and exported diagnostics.
     auto value=[&](const wchar_t* key,const wchar_t* variable=L"") {
-        auto item=options.overrides.find(key); if (item!=options.overrides.end()) return item->second;
-        if (*variable && !env(variable).empty()) return env(variable);
-        item=saved.find(key); if (item!=saved.end() && !item->second.empty()) return item->second;
-        item=defaults.find(key); return item==defaults.end() ? std::wstring{} : item->second;
+        auto& source=p.sources[key];
+        auto item=options.overrides.find(key); if (item!=options.overrides.end()) { source=L"command line"; return item->second; }
+        if (*variable && !env(variable).empty()) { source=std::wstring(L"environment ")+variable; return env(variable); }
+        item=saved.find(key); if (item!=saved.end() && !item->second.empty()) { source=L"launcher configuration"; return item->second; }
+        item=defaults.find(key); if (item!=defaults.end() && !item->second.empty()) { source=L"launcher-defaults.ini"; return item->second; }
+        source=L"built-in default"; return std::wstring{};
     };
     auto path=[&](const wchar_t* key,const wchar_t* variable,const fs::path& fallback,const fs::path& base) {
         auto text=value(key,variable); return text.empty() ? fallback : absolute(text,base);

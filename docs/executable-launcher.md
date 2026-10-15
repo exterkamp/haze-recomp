@@ -116,7 +116,88 @@ Normal saved input/graphics changes continue to use the same INI files.
 
 For diagnostics, `--no-ui` prints errors to inherited stderr and suppresses
 dialogs; `--check` validates the resolved configuration without starting the
-game. Neither is required for normal play.
+game. `--diagnostics` and `--export-diagnostics FOLDER [--session NAME]` export
+a report (see below). None is required for normal play.
+
+## Diagnostics reports
+
+**Export diagnostics...** creates one local ZIP for an issue report. It is
+offered beside **Open session logs** whenever a launch fails or the game exits
+with a nonzero code. For a problem that does not end in an error (a hang,
+rendering or audio fault, or a crash from an earlier run), use the **Haze Recomp
+diagnostics** Start menu shortcut or run `HazeLauncher.exe --diagnostics`. It
+lists the ten newest sessions with their recorded status; choose one, then a
+destination folder. Exporting runs in a fresh launcher process after the game
+has exited, so a run that crashed before the menu can still be exported, and it
+does not require a launchable configuration. Without dialogs:
+
+```powershell
+HazeLauncher.exe --no-ui --export-diagnostics D:\reports              # newest session
+HazeLauncher.exe --no-ui --export-diagnostics D:\reports --session 20261015-120000-...
+```
+
+The report is `haze-diagnostics-<session>.zip`. An existing report is never
+replaced: a repeat export becomes `-2.zip`, `-3.zip` and so on. The ZIP is staged
+beside the destination and published only after it is completely written and
+flushed, so a read-only folder or full disk reports the Windows error, offers
+another folder and leaves earlier reports and session logs unchanged. Nothing is
+uploaded. The archive is uncompressed so Explorer, `tar` and text editors can
+inspect it directly.
+
+| File | Contents |
+| --- | --- |
+| `summary.txt` | Session name and status (normal exit, exit code with its NTSTATUS name such as access violation, did not start, or incomplete), `haze_crash_filter` context and guest LR lines from stderr, the last `[haze-boot]` progress line, build identification, game revision and path traits |
+| `manifest.txt` | Each item and whether it was included, truncated, missing, unreadable or omitted for size |
+| `system.txt` | Windows version/build, architecture, CPU, memory, primary display mode, and each DXGI adapter with PCI IDs, video memory and driver version, collected at export time |
+| `settings.txt` | Every launcher setting resolved at export time with its source (command line, environment variable, launcher configuration, generated or built-in default), and the HAZE_/RSX_/PS3_/SDL_/YDKJ_ variables passed to the game, marked inherited or set by the launcher |
+| `config/` | `launcher.ini`, `launcher-defaults.ini`, the input INI and graphics INI as configured (current contents) |
+| `build/build-info.json` | Release provenance (version, source and SDK commits, file hashes) when the package has it |
+| `session/` | `launcher.log`, `game.stderr.log`, `game.stdout.log` and other text files from the session |
+
+`launcher.log` now records `Finished`, the source of each resolved setting and
+the diagnostics-relevant environment overrides used by that launch, so the
+session's own values remain distinguishable from current configuration. A
+session whose launcher never recorded its exit is reported as incomplete.
+
+Build identification combines the launcher's version, source commit and SDK
+gitlink (recorded when the launcher build is configured; `-modified` marks
+uncommitted tracked changes), SHA-256 of both executables, the game's PE
+timestamp/SizeOfImage and its CodeView PDB name and GUID/age symbol key, and
+whether the game matches `build-info.json`. Game data is identified by EBOOT.ELF's
+size and SHA-256 and the PARAM.SFO TITLE_ID/VERSION/APP_VER fields; the supported
+title is BLUS30094. A developer can therefore match the report with a release
+build and its PDB without the user's game files.
+
+Size is bounded: each log keeps at most 4 MiB (its first 1 MiB and the final
+bytes, where crash context is written, with an omission marker), configuration
+files 256 KiB, at most 32 session text files, and the whole archive about
+32 MiB. Later logs are omitted, and listed in the manifest, once that limit is
+reached. Session folders are not deleted or rotated by the export.
+
+### Privacy
+
+Before archiving, every text file is redacted: the InstallRoot and SharedRoot
+folders, the user profile (`USERPROFILE`, `HOMEDRIVE`/`HOMEPATH`) and OneDrive
+folders become `<InstallRoot>`, `<SharedRoot>`, `<UserProfile>` and `<OneDrive>`,
+and the Windows user, computer and domain names become `<user>`, `<computer>` and
+`<domain>` where they appear as whole words. Matching ignores ASCII case and path
+separator style; names shorter than three characters and drive roots are left
+alone. Path length, spaces and non-ASCII characters in InstallRoot are reported
+instead. Only the PDB file name is kept, not its build path.
+
+Redaction is best effort. It does not recognize other names (for example a
+Steam persona or a folder named differently from the account), short 8.3 path
+forms or text the game writes in another encoding. Review the files before
+sharing them.
+
+The report never includes game or firmware files, EBOOT/ELF contents, saves,
+the shader cache, keys, non-text session files, environment variables outside
+the prefixes above, or names containing TOKEN, SECRET, PASSWORD or CREDENTIAL.
+Minidumps are not written or collected. `haze_crash_filter` runs inside the
+failing process and already records the exception, registers, last HLE call and
+guest link registers; a full or heap dump would contain guest memory with
+decrypted game code and data and possibly personal data, so any future optional
+dump needs a separate, explained opt-in and an out-of-process writer.
 
 ## Evidence and remaining acceptance
 
@@ -127,7 +208,19 @@ round-trips, atomic/locked configuration writes, input validation, an empty
 PATH (no shell lookup), no console window, restricted handle inheritance,
 persistent paths across launches, separate logs, actual child waiting and exit
 code propagation. The real GUI-subsystem launcher is also invoked with
-`--no-ui`, including an actual missing imported DLL (`0xC0000135`).
+`--no-ui`, including an actual missing imported DLL (`0xC0000135`). Fresh
+launcher processes then export the previous failed runs with
+`--export-diagnostics`, and an unknown session is rejected.
+
+`HazeLaunchDiagnosticsTests` covers the collection logic without dialogs:
+archive structure and CRCs (checked by an independent reader and, when present,
+Windows' bundled `tar`), redaction of profile/root paths, user and computer
+names across separators and case, head/tail log bounds, the overall size limit,
+session ordering and status, missing and non-text files, setting sources and the
+environment allowlist, PARAM.SFO and PE symbol identification, and exports that
+never replace an existing report or leave a partial file. The Explorer dialogs
+and **Show in folder** have not been exercised interactively, and no export has
+been made from a real game crash.
 
 A native probe used the tested game from the menu/Steam branch with an isolated
 copy of the previously saved profile and paths containing spaces. The launcher

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <crtdbg.h>
+#include <algorithm>
 using namespace haze_launch;
 static void put(const fs::path& path,const std::string& text) { fs::create_directories(path.parent_path()); std::ofstream f(path,std::ios::binary); f<<text; assert(f.good()); }
 static std::string bytes(const fs::path& path) { std::ifstream f(path,std::ios::binary); assert(f.good()); return {std::istreambuf_iterator<char>(f),{}}; }
@@ -91,6 +92,7 @@ int wmain(int argc,wchar_t** argv) {
     assert(output.find("RSX_SHADER_CACHE_DIR="+utf8(plan.cache.wstring()))!=std::string::npos);
     assert(bytes(first.session/L"game.stderr.log").find("Fixture stderr")!=std::string::npos);
     assert(bytes(first.session/L"launcher.log").find("ExitCode=0")!=std::string::npos);
+    assert(bytes(first.session/L"launcher.log").find("Finished=1")!=std::string::npos && bytes(first.session/L"launcher.log").find("Source.InputMode=launcher configuration")!=std::string::npos);
     plan.environment[L"HAZE_TEST_EXIT"]=L"37"; auto second=run(plan);
     assert(second.started && second.exit_code==37 && !second.error.empty() && second.session!=first.session);
     assert(bytes(second.session/L"game.stdout.log").find("PS3_SAVEDATA_ROOT="+utf8(plan.saves.wstring()))!=std::string::npos);
@@ -104,11 +106,22 @@ int wmain(int argc,wchar_t** argv) {
     // Exercise the real GUI-subsystem launcher with dialogs explicitly disabled.
     assert(launch(module,L"--no-ui --check",root/L"unrelated cwd")==0);
     SetEnvironmentVariableW(L"HAZE_TEST_EXIT",L"37"); assert(launch(module,L"--no-ui",root/L"unrelated cwd")==37); SetEnvironmentVariableW(L"HAZE_TEST_EXIT",nullptr);
+    // A fresh launcher process exports the previous failed run without dialogs.
+    const auto reports=root/L"diagnostics reports",export_args=L"--no-ui --export-diagnostics "+quote(reports.wstring());
+    auto exported=[&] { std::vector<fs::path> found; for (const auto& item:fs::directory_iterator(reports)) found.push_back(item.path()); std::sort(found.begin(),found.end()); return found; };
+    assert(launch(module,export_args,root/L"unrelated cwd")==0 && exported().size()==1);
+    assert(bytes(exported()[0]).find("Status=exited with 0x00000025")!=std::string::npos);
+    assert(launch(module,export_args+L" --session missing",root/L"unrelated cwd")==1 && exported().size()==1);
+    assert(launch(module,L"--no-ui --session missing",root/L"unrelated cwd")==1);
     assert(launch(module,L"--no-ui --unknown",root/L"unrelated cwd")==1);
     fs::remove(root/L"bin/HazeLaunchFixtureRuntime.dll"); assert(launch(module,L"--no-ui",root/L"unrelated cwd")==0xc0000135u);
+    assert(launch(module,export_args,root/L"unrelated cwd")==0 && exported().size()==2);
+    {
+        bool found=false; for (const auto& report:exported()) found=found || bytes(report).find("0xC0000135 (missing DLL)")!=std::string::npos; assert(found);
+    }
     fs::current_path(original_cwd);
     // Only the per-process fixture below the provided test directory is removed.
     fs::remove_all(root);
-    std::puts("Launcher: configuration precedence, cwd independence, UTF-16/spaced paths, quoting, atomic settings, validation, restricted handles, console-free direct process launch, persistent paths, logs, waiting and GUI exit-code propagation passed.");
+    std::puts("Launcher: configuration precedence, cwd independence, UTF-16/spaced paths, quoting, atomic settings, validation, restricted handles, console-free direct process launch, persistent paths, logs, waiting, GUI exit-code propagation and fresh-process diagnostics export passed.");
     } catch (const std::exception& e) { std::fprintf(stderr,"Launcher test exception: %s\n",e.what()); return 1; }
 }

@@ -12,7 +12,7 @@ struct Handle {
     explicit operator bool() const { return value && value!=INVALID_HANDLE_VALUE; }
     Handle(const Handle&)=delete; Handle& operator=(const Handle&)=delete;
 };
-static std::wstring windows_error(const wchar_t* action,DWORD code=GetLastError()) {
+std::wstring windows_error(const wchar_t* action,DWORD code) {
     wchar_t* text=nullptr;
     FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER|FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_IGNORE_INSERTS,nullptr,code,0,(wchar_t*)&text,0,nullptr);
     std::wstring result=std::wstring(action)+L" (Windows error "+std::to_wstring(code)+L").";
@@ -22,7 +22,7 @@ static std::string contents(const fs::path& path) {
     std::ifstream file(path,std::ios::binary); if (!file) throw std::runtime_error("Cannot read existing launcher configuration.");
     return {std::istreambuf_iterator<char>(file),{}};
 }
-static std::wstring serial() {
+std::wstring serial() {
     static std::atomic<unsigned> sequence{0}; FILETIME time{}; GetSystemTimeAsFileTime(&time);
     return std::to_wstring((uint64_t(time.dwHighDateTime)<<32)|time.dwLowDateTime)+L"-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(++sequence);
 }
@@ -79,8 +79,37 @@ void write_report(const Plan& p,const Result& r) {
     path("Launcher",p.launcher); path("Configuration",p.config); path("InstallRoot",p.root); path("SharedRoot",p.shared);
     path("Executable",p.executable); path("ELF",p.elf); path("Firmware",p.firmware); path("Savedata",p.saves);
     path("ShaderCache",p.cache); path("InputConfig",p.input); path("GraphicsConfig",p.graphics); path("Session",r.session);
-    file<<"InputMode="<<utf8(p.mode)<<"\nRenderResolution="<<utf8(p.resolution)<<"\nStarted="<<r.started<<"\nExitCode="<<r.exit_code<<"\nError="<<utf8(r.error)<<"\n";
+    file<<"InputMode="<<utf8(p.mode)<<"\nRenderResolution="<<utf8(p.resolution)<<"\nStarted="<<r.started<<"\nFinished="<<r.finished<<"\nExitCode="<<r.exit_code<<"\nError="<<utf8(r.error)<<"\n";
+    for (const auto& [key,source]:p.sources) file<<"Source."<<utf8(key)<<"="<<utf8(source)<<"\n";
+    for (const auto& [key,value]:p.environment) if (diagnostic_variable(key)) file<<"Environment."<<utf8(key)<<"="<<utf8(value)<<"\n";
     file.flush(); if (!file) throw std::runtime_error("Cannot finish writing launcher.log.");
+}
+fs::path save_report(const std::string& bytes,const fs::path& folder,const std::wstring& base,std::wstring& error) {
+    try {
+        std::error_code ec; fs::create_directories(folder,ec);
+        if (!fs::is_directory(folder,ec)) throw std::runtime_error("The diagnostics destination is not a usable folder: "+utf8(folder.wstring()));
+        if (bytes.size()>0xffffffffu) throw std::runtime_error("The diagnostics report is too large.");
+        for (unsigned n=1;n<1000;++n) {
+            const auto target=folder/(base+(n>1 ? L"-"+std::to_wstring(n) : L"")+L".zip");
+            if (fs::exists(target,ec) || ec) continue;
+            // Stage beside the destination, then publish without replacement:
+            // an existing or concurrently created report is never overwritten.
+            const auto temporary=folder/(base+L".partial-"+serial());
+            Handle file(CreateFileW(temporary.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr));
+            if (!file) throw std::runtime_error(utf8(windows_error(L"Cannot create a diagnostics report in this folder. Choose a writable folder")));
+            DWORD written=0;
+            if (!WriteFile(file.value,bytes.data(),DWORD(bytes.size()),&written,nullptr) || written!=bytes.size() || !FlushFileBuffers(file.value)) {
+                const auto code=GetLastError(); file.close(); DeleteFileW(temporary.c_str());
+                throw std::runtime_error(utf8(windows_error(L"Could not finish writing the diagnostics report; no partial report was kept",code ? code : ERROR_WRITE_FAULT)));
+            }
+            file.close();
+            if (MoveFileExW(temporary.c_str(),target.c_str(),MOVEFILE_WRITE_THROUGH)) return target;
+            const auto code=GetLastError(); DeleteFileW(temporary.c_str());
+            if (code!=ERROR_ALREADY_EXISTS && code!=ERROR_FILE_EXISTS) throw std::runtime_error(utf8(windows_error(L"Cannot finish the diagnostics report",code)));
+        }
+        throw std::runtime_error("Too many diagnostics reports for this session already exist in that folder.");
+    } catch (const std::exception& e) { error=error_text(e.what()); }
+    return {};
 }
 struct Attributes {
     std::vector<unsigned char> storage;
@@ -141,9 +170,9 @@ Result run(const Plan& p) {
             }
         }
         FlushFileBuffers(output.value); FlushFileBuffers(errors.value);
-        write_report(p,result);
+        result.finished=true; write_report(p,result);
     } catch (const std::exception& e) {
-        result.error=error_text(e.what()); if (!result.exit_code) result.exit_code=1;
+        result.error=error_text(e.what()); if (!result.exit_code) result.exit_code=1; result.finished=true;
         if (!result.session.empty()) { try { write_report(p,result); } catch (...) {} }
     }
     return result;
