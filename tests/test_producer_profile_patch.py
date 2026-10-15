@@ -104,6 +104,24 @@ class ProducerProfilePatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dispatcher changed"):
             producer_profile.patch(changed)
 
+    def test_hitch_phase_scopes_preserve_calls_and_reject_changed_code(self):
+        result = producer_profile.patch(self.source)
+        self.assertEqual(producer_profile.strip_profile(result), self.source)
+        for address, _, count in producer_profile.PHASE_FUNCTIONS:
+            name = f"void func_{address}(ppu_context* ctx) {{"
+            before = producer_profile.function_body(self.source, name)
+            after = producer_profile.function_body(result, name)
+            calls = producer_profile.call_sites(before)
+            self.assertEqual(len(calls), count)
+            self.assertEqual(after.count("haze_producer_nested_"), count)
+            self.assertEqual(after.count("ps3_indirect_call(ctx);"), before.count("ps3_indirect_call(ctx);"))
+            for match in calls:
+                lr, callee = match.group("lr"), match.group("callee")
+                self.assertIn(f"haze_producer_nested_{lr}(0x{lr}u, 0x{callee}u);", after)
+            altered = before.replace(calls[0].group(0), calls[0].group(0).replace("ctx->lr", "ctx->ctr"), 1)
+            with self.assertRaisesRegex(ValueError, f"phase {address} changed"):
+                producer_profile.patch(self.source.replace(before, altered, 1))
+
 
 if __name__ == "__main__":
     unittest.main()

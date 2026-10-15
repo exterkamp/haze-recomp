@@ -17,6 +17,14 @@ from pathlib import Path
 FUNCTION = "void func_00680FA0(ppu_context* ctx) {"
 DISPATCH_FUNCTION = "void func_006869F0(ppu_context* ctx) {"
 DISPATCH_SHA256 = "1c64f130f99ef3f6817bbe2cd11e31c7616b89263bcc7e2e02a6ddfdc31499cd"
+# Opening-deck hitches were localized to these two direct children of the
+# producer. Split their calls without changing their guest operations or
+# assuming that elapsed wall time is active CPU work. Indirect calls in the
+# simulation callback remain in its unprofiled remainder.
+PHASE_FUNCTIONS = (
+    ("00686810", "34613d959c4c24225dabc03a9e194b5b4d9fd755bdc63ac495c4d1c00fd8e71f", 4),
+    ("005FBB70", "626f4bc455092a532750dafeb2a196504f90785c496584f1c316a5fee945bc90", 58),
+)
 # Architectural return addresses verified against bctrl instructions in the ELF.
 MAIN_INDIRECT_RETURNS = ("00681184", "006811DC")
 DISPATCH_INDIRECT_RETURNS = ("00686AC8", "00686BE8", "00686C5C", "00686CFC")
@@ -105,6 +113,27 @@ def _dispatch_scopes(source: str) -> str:
     return source.replace(body, changed, 1)
 
 
+def _phase_scopes(source: str) -> str:
+    for address, digest, count in PHASE_FUNCTIONS:
+        body = function_body(source, f"void func_{address}(ppu_context* ctx) {{")
+        if _digest(body + "\n") != digest:
+            raise ValueError(f"Haze producer phase {address} changed; audit before profiling")
+        matches = call_sites(body)
+        if len(matches) != count:
+            raise ValueError(f"producer phase {address} direct-call inventory changed")
+        changed = body
+        for match in reversed(matches):
+            indent = match.group("indent")
+            inner = indent + "    "
+            lr, callee = match.group("lr"), match.group("callee")
+            block = (indent + "{\n" + inner +
+                     f"haze_producer_profile::call_scope haze_producer_nested_{lr}(0x{lr}u, 0x{callee}u);\n" +
+                     inner + f"ctx->lr = 0x{lr}; func_{callee}(ctx); DRAIN_TRAMPOLINE(ctx);\n" + indent + "}")
+            changed = changed[:match.start()] + block + changed[match.end():]
+        source = source.replace(body, changed, 1)
+    return source
+
+
 def patch(source: str) -> str:
     body = function_body(source)
     # The original guard digest is defined over the source slice through the
@@ -141,7 +170,7 @@ def patch(source: str) -> str:
         result = source.replace(INCLUDE, INCLUDE, 1)
     else:
         result = INCLUDE + source
-    return _dispatch_scopes(result.replace(body, changed, 1))
+    return _phase_scopes(_dispatch_scopes(result.replace(body, changed, 1)))
 
 
 def strip_profile(source: str) -> str:
@@ -167,8 +196,9 @@ def strip_profile(source: str) -> str:
         r"(?P=indent)\}"
     )
     result, count = nested.subn(lambda m: m.group("indent") + f"ctx->lr = 0x{m.group('lr')}; func_{m.group('callee')}(ctx); DRAIN_TRAMPOLINE(ctx);", result)
-    if count != 14:
-        raise ValueError(f"expected 14 dispatcher direct scopes, removed {count}")
+    expected_nested = 14 + sum(count for _, _, count in PHASE_FUNCTIONS)
+    if count != expected_nested:
+        raise ValueError(f"expected {expected_nested} nested direct scopes, removed {count}")
     body = function_body(result)
     if body.count(FRAME_LINE) != 1:
         raise ValueError("missing or repeated producer frame scope")
@@ -200,7 +230,7 @@ def main() -> None:
     result = patch(args.source.read_text(encoding="cp1252"))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(result, encoding="cp1252")
-    print("Producer profile scopes: 59 main direct calls, 14 dispatcher direct calls, six indirect sites; excluded helper callees:",
+    print("Producer profile scopes: 59 main direct calls, 14 dispatcher direct calls, 62 phase calls, six indirect sites; excluded helper callees:",
           ", ".join(sorted(EXCLUDED_CALLEES)))
 
 
