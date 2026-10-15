@@ -10,9 +10,9 @@ buttons, controller movement/look axes, mouse sensitivity and inversion,
 controller deadzones and trigger threshold, controller look inversion,
 vibration and its intensity, prompt family and an optional SDL mapping file.
 Action names describe Haze's Default layout. **Game control options** opens
-the original page for its controller layouts, toggle aim/crouch and other game preferences, discarding unapplied PC
-edits. Those game preferences can further change the actions or inversion
-associated with the emulated buttons and sticks.
+the original page for its controller layouts, toggle aim/crouch and other game
+preferences, discarding unapplied PC edits. Those game preferences can further
+change the actions or inversion associated with the emulated buttons and sticks.
 
 ## Editing
 
