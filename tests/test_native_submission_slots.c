@@ -207,6 +207,17 @@ static void session(ID3D12Device* device)
     buffers(outputs[3],3);ld_submit_frame();assert(g.ready && g_ld_postprocess.pipeline==settings_pipeline);
     ld_flush(LD_FLUSH_PRESENT);
     verify_buffers(outputs[2],2);verify_buffers(outputs[3],3);
+    assert(g_ld_slot_observation_count==4);
+    assert(g_ld_slot_observations[0].wait_ticks==0);
+    assert(g_ld_slot_observations[0].reuse_age_ticks==0);
+    for(u32 i=0;i<4;++i) {
+        assert(g_ld_slot_observations[i].end>=g_ld_slot_observations[i].begin);
+        assert(g_ld_slot_observations[i].wait_ticks<=
+            g_ld_slot_observations[i].end-g_ld_slot_observations[i].begin);
+    }
+    /* Native quit reports without taking over resource cleanup. */
+    ld_slots_report();
+    assert(g_ld_slots.initialized && g_ld_slots.submitted==4);
 #if defined(YZ_PERF_PROFILE)
     assert(g_ld_slots.gpu_lists>=2);
 #endif
@@ -214,6 +225,7 @@ static void session(ID3D12Device* device)
     (void)ld_gpu_profile_frame_valid(); /* Frame attribution is validated by integration. */
 #endif
     ld_slots_shutdown();assert(!g_ld_slots.initialized && !g_ld_slots.unavailable);
+    assert(!g_ld_slot_observation_count);
 #if defined(YZ_PERF_PROFILE)
     ld_gpu_profile_cleanup();
 #endif

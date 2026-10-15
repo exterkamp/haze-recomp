@@ -15,6 +15,7 @@ typedef struct {
     ID3D12Resource* retired[MAX_RETIRED_TEXTURES];
     u32 retired_count;
     u64 fence;
+    u64 submitted_qpc;
 #if defined(YZ_PERF_PROFILE)
     ID3D12QueryHeap* queries;
     ID3D12Resource* query_readback;
@@ -30,6 +31,16 @@ static struct {
     u64 gpu_bytes;
     u64 gpu_lists, gpu_ticks, gpu_frequency;
 } g_ld_slots;
+
+/* Retain bounded observations in memory. Dump only after rendering stops so
+ * file I/O cannot create the hitches being measured. Reuse age includes CPU
+ * preparation and delayed observation; it is NOT GPU or input latency. */
+#define LD_SLOT_OBSERVATIONS 4096u
+static struct {
+    u64 begin, end, wait_ticks, reuse_age_ticks;
+    u64 gpu_ticks, gpu_frequency;
+} g_ld_slot_observations[LD_SLOT_OBSERVATIONS];
+static u64 g_ld_slot_observation_count;
 
 static u64 ld_slots_clock(void)
 {
@@ -193,6 +204,7 @@ static void ld_submit_frame(void)
         g_ld_native_payload.phase==2 || !ld_slots_initialize()) {
         ++g_ld_slots.sync_fallbacks; ld_flush(LD_FLUSH_PRESENT); return;
     }
+    const u64 began=ld_slots_clock(), wait_before=g_ld_slots.wait_ticks;
     ld_frame_storage* submitted=&g_ld_slots.slots[g_ld_slots.active];
     ld_frame_storage* next=&g_ld_slots.slots[g_ld_slots.active^1u];
     /* Capture postprocess lazy initialization/replacement and transfer all
@@ -211,6 +223,7 @@ static void ld_submit_frame(void)
     submitted->fence=++g.fence_value;
     hr=g.queue->lpVtbl->Signal(g.queue,g.fence,submitted->fence);
     if(FAILED(hr)) goto fail;
+    submitted->submitted_qpc=ld_slots_clock();
     memcpy(submitted->retired,g.retired_textures,g.n_retired_textures*sizeof(g.retired_textures[0]));
     submitted->retired_count=g.n_retired_textures; g.n_retired_textures=0;
 #if defined(YZ_PERF_PROFILE)
@@ -220,12 +233,22 @@ static void ld_submit_frame(void)
     /* At most two submissions outstanding. Only reuse the OTHER slot after
      * its completion, never the just-submitted slot's storage. */
     if(!ld_slots_wait(next->fence)) return;
+    const u64 reused=ld_slots_clock();
+    const u32 observation=(u32)(g_ld_slot_observation_count++%LD_SLOT_OBSERVATIONS);
+    g_ld_slot_observations[observation].begin=began;
+    g_ld_slot_observations[observation].end=reused;
+    g_ld_slot_observations[observation].wait_ticks=g_ld_slots.wait_ticks-wait_before;
+    g_ld_slot_observations[observation].reuse_age_ticks=next->submitted_qpc ? reused-next->submitted_qpc : 0;
+    g_ld_slot_observations[observation].gpu_ticks=0;
+    g_ld_slot_observations[observation].gpu_frequency=0;
 #if defined(YZ_PERF_PROFILE)
     if(next->query_pending) {
         if(next->query_results[1]>=next->query_results[0] && next->query_frequency) {
             ++g_ld_slots.gpu_lists;
             g_ld_slots.gpu_ticks+=next->query_results[1]-next->query_results[0];
             g_ld_slots.gpu_frequency=next->query_frequency;
+            g_ld_slot_observations[observation].gpu_ticks=next->query_results[1]-next->query_results[0];
+            g_ld_slot_observations[observation].gpu_frequency=next->query_frequency;
         }
         next->query_pending=0;
     }
@@ -244,6 +267,33 @@ fail:
     g.ready=0; ld_dump_dred("native-frame-submit",hr);
 }
 
+/* Call on the renderer owner after draws stop. No waits, resource releases or
+ * assumption of successful final GPU completion. Safe for native quit, which
+ * intentionally skips full SDK teardown. */
+static void ld_slots_report(void)
+{
+    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
+    fprintf(stderr,"[native-frame-slots] submissions=%llu rotations=%llu waits=%llu wait_ms=%.3f max_wait_ms=%.3f sync_fallbacks=%llu extra_upload_bytes=%llu\n",
+        g_ld_slots.submitted,g_ld_slots.rotations,g_ld_slots.waits,
+        1000.0*(double)g_ld_slots.wait_ticks/(double)f.QuadPart,
+        1000.0*(double)g_ld_slots.max_wait_ticks/(double)f.QuadPart,
+        g_ld_slots.sync_fallbacks,g_ld_slots.gpu_bytes);
+    fprintf(stderr,"[native-frame-slots] completed_async_gpu_lists=%llu aggregate_gpu_ms=%.3f per_present_gpu_attribution=invalid\n",
+        g_ld_slots.gpu_lists,g_ld_slots.gpu_frequency ?
+        1000.0*(double)g_ld_slots.gpu_ticks/(double)g_ld_slots.gpu_frequency : -1.0);
+    fprintf(stderr,"[native-frame-slot-samples] total=%llu capacity=%u qpc_frequency=%llu reuse_age_is_not_gpu_or_input_latency=1\n",
+        g_ld_slot_observation_count,LD_SLOT_OBSERVATIONS,(u64)f.QuadPart);
+    const u64 first=g_ld_slot_observation_count>LD_SLOT_OBSERVATIONS ?
+        g_ld_slot_observation_count-LD_SLOT_OBSERVATIONS : 0;
+    for(u64 n=first;n<g_ld_slot_observation_count;++n) {
+        const u32 i=(u32)(n%LD_SLOT_OBSERVATIONS);
+        fprintf(stderr,"[native-frame-slot-sample] seq=%llu begin=%llu end=%llu wait_ticks=%llu reuse_age_ticks=%llu completed_gpu_ticks=%llu gpu_frequency=%llu\n",
+            n,g_ld_slot_observations[i].begin,g_ld_slot_observations[i].end,
+            g_ld_slot_observations[i].wait_ticks,g_ld_slot_observations[i].reuse_age_ticks,
+            g_ld_slot_observations[i].gpu_ticks,g_ld_slot_observations[i].gpu_frequency);
+    }
+}
+
 /* Called only after the original synchronous shutdown flush succeeds. The
  * current slot remains owned by the original shutdown code; release the other. */
 static void ld_slots_shutdown(void)
@@ -257,14 +307,7 @@ static void ld_slots_shutdown(void)
                 g_ld_slots.slots[g_ld_slots.active].postprocess_heap);
         memset(&g_ld_slots.slots[g_ld_slots.active],0,sizeof(ld_frame_storage));
     }
-    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
-    fprintf(stderr,"[native-frame-slots] submissions=%llu rotations=%llu waits=%llu wait_ms=%.3f max_wait_ms=%.3f sync_fallbacks=%llu extra_upload_bytes=%llu\n",
-        g_ld_slots.submitted,g_ld_slots.rotations,g_ld_slots.waits,
-        1000.0*(double)g_ld_slots.wait_ticks/(double)f.QuadPart,
-        1000.0*(double)g_ld_slots.max_wait_ticks/(double)f.QuadPart,
-        g_ld_slots.sync_fallbacks,g_ld_slots.gpu_bytes);
-    fprintf(stderr,"[native-frame-slots] completed_async_gpu_lists=%llu aggregate_gpu_ms=%.3f per_present_gpu_attribution=invalid\n",
-        g_ld_slots.gpu_lists,g_ld_slots.gpu_frequency ?
-        1000.0*(double)g_ld_slots.gpu_ticks/(double)g_ld_slots.gpu_frequency : -1.0);
+    ld_slots_report();
+    g_ld_slot_observation_count=0;
     memset(&g_ld_slots,0,sizeof g_ld_slots);
 }
