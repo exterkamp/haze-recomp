@@ -26,7 +26,7 @@ if ($env:HAZE_LLVM_ROOT) { $clang = Join-Path $env:HAZE_LLVM_ROOT 'bin/clang-cl.
 if (-not $Python) { $Python = "$assets/.venv/Scripts/python.exe" }
 New-Item -ItemType Directory -Path "$root/local" -Force | Out-Null
 $ErrorActionPreference='Continue' # Windows PowerShell promotes native stderr warnings.
-foreach ($test in @('test_haze_input','test_haze_camera','test_haze_title','test_haze_graphics','test_haze_video_backend','test_haze_display_preview','test_haze_menu_guest','test_haze_menu','test_haze_menu_pointer','test_haze_save_status','test_haze_controls','test_haze_quit','test_haze_audio_shutdown','test_haze_quit_ui','test_haze_steam_menu','test_haze_profile_transaction')) {
+foreach ($test in @('test_haze_input','test_haze_camera','test_haze_title','test_haze_graphics','test_haze_video_backend','test_haze_display_preview','test_haze_menu_guest','test_haze_menu','test_haze_menu_pointer','test_haze_save_status','test_haze_controls','test_haze_quit','test_haze_audio_shutdown','test_haze_audio_limiter','test_haze_quit_ui','test_haze_steam_menu','test_haze_profile_transaction')) {
     $extraFlags=@()
     if ($test -eq 'test_haze_profile_transaction') { $extraFlags += '/EHsc' }
     & $clang /nologo /W4 /O1 /std:c++20 @extraFlags "/I$root/tests/fixtures/camera" "/I$root/tests/fixtures/video" "/I$root/tests/fixtures/audio" "/I$sdk/include" "/I$sdk/libs/input" "/I$sdk/libs/codec" "/I$sdk/libs/video" "/I$sdk/libs/system" "/Fe$root/local/$test.exe" "/Fo$root/local/$test.obj" "$root/tests/$test.cpp" /link user32.lib gdi32.lib comdlg32.lib
@@ -34,6 +34,22 @@ foreach ($test in @('test_haze_input','test_haze_camera','test_haze_title','test
     & "$root/local/$test.exe"
     if ($LASTEXITCODE -ne 0) { throw "$test failed" }
 }
+# Exercise the production DSP wrappers against the SDK's independent integer
+# oracle, including extended values, rounding modes and runtime fallback.
+$audioFloatTest=Join-Path $root 'local/test_haze_audio_spu_float.exe'
+$audioFloatObjects=@()
+foreach ($source in @('port/haze_audio_spu_float.c','port/haze_audio_spu_double.c','tests/test_haze_audio_spu_float.c')) {
+    $object=Join-Path $root ('local/' + [IO.Path]::GetFileNameWithoutExtension($source) + '.obj')
+    $floatFlags=@('-msse4.1','-ffp-contract=off')
+    if ($source -ne 'port/haze_audio_spu_float.c') { $floatFlags += '-ffp-model=strict' }
+    & $clang /nologo /W0 /O2 /Ob1 /std:c11 /DSPU_FLOAT_NATIVE_RUNTIME=1 @floatFlags "/I$sdk/runtime/spu" "/I$sdk/include" /c "/Fo$object" "$root/$source"
+    if ($LASTEXITCODE -ne 0) { throw "Audio DSP arithmetic compilation failed: $source" }
+    $audioFloatObjects += $object
+}
+& $clang /nologo @audioFloatObjects "/Fe$audioFloatTest"
+if ($LASTEXITCODE -ne 0) { throw 'Audio DSP arithmetic oracle link failed.' }
+& $audioFloatTest
+if ($LASTEXITCODE -ne 0) { throw 'Audio DSP arithmetic/fallback oracle failed.' }
 & $Python "$root/tests/test_savedata_patch.py" "$sdk/libs/system/cellSaveData.c"
 if ($LASTEXITCODE -ne 0) { throw 'Save-data transaction patch guard failed.' }
 if ($AssetFree) {

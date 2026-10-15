@@ -326,11 +326,19 @@ if(WIN32)
     file(READ "${HAZE_AUDIO_SOURCE}" HAZE_AUDIO_TEXT)
     string(REPLACE "\r\n" "\n" HAZE_AUDIO_TEXT "${HAZE_AUDIO_TEXT}")
     string(SHA256 HAZE_AUDIO_HASH "${HAZE_AUDIO_TEXT}")
-    # SDK 3cd8e81 changes downmix routing and a per-port diagnostic counter.
-    # The mixer thread flag/handle, locks and shutdown path remain unchanged.
+    # Audit both the output shutdown and pre-clamp limiter hooks on SDK changes.
     if(NOT HAZE_AUDIO_HASH STREQUAL "b174688dc8ae62fa67f35888477b5543310cdfee33e6f613e9bb796b7b0c0504")
-        message(FATAL_ERROR "Audio backend changed: audit native output shutdown before building")
+        message(FATAL_ERROR "Audio backend changed: audit native output shutdown and limiter before building")
     endif()
+    string(REPLACE "    /* Clip to [-1.0, 1.0] */"
+        "    haze_audio_limiter_process(&s_haze_audio_limiter, s_mix_buffer);\n    /* Clip to [-1.0, 1.0] */"
+        HAZE_AUDIO_TEXT "${HAZE_AUDIO_TEXT}")
+    string(REPLACE "    if (audio_start_mix_thread() < 0) {"
+        "    haze_audio_limiter_reset(&s_haze_audio_limiter);\n    if (audio_start_mix_thread() < 0) {"
+        HAZE_AUDIO_TEXT "${HAZE_AUDIO_TEXT}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/haze_cell_audio.c" "${HAZE_AUDIO_TEXT}")
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_backend.c"
+        TARGET_DIRECTORY ps3recomp_runtime APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
     list(REMOVE_ITEM HAZE_SDK_SOURCES "${HAZE_AUDIO_SOURCE}")
     list(APPEND HAZE_SDK_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_backend.c")
     file(READ "${PS3RECOMP_DIR}/libs/codec/cellSail.c" HAZE_SAIL_TEXT)
@@ -562,6 +570,36 @@ if(SPU_SOURCES)
             endif()
         endif()
     endif()
+endif()
+
+# Scope the fast float environment to the Multistream audio worker. Do not
+# change the SDK checkout: wrap its halt boundary in this build only.
+if(PORT_ENABLE_SPU AND PS3RECOMP_NATIVE_FLOAT_RUNTIME AND WIN32
+        AND CMAKE_C_COMPILER_ID MATCHES "Clang"
+        AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|amd64|x86_64")
+    file(READ "${PS3RECOMP_DIR}/runtime/spu/spu_channels.c" HAZE_SPU_CHANNELS_TEXT)
+    string(REPLACE "\r\n" "\n" HAZE_SPU_CHANNELS_TEXT "${HAZE_SPU_CHANNELS_TEXT}")
+    string(SHA256 HAZE_SPU_CHANNELS_HASH "${HAZE_SPU_CHANNELS_TEXT}")
+    if(NOT HAZE_SPU_CHANNELS_HASH STREQUAL "d524a6455cc709c751b23e3c83c041677d345b049042f41a69f2e92dbeb87f0f")
+        message(FATAL_ERROR "SPU halt boundary changed: audit audio float environment restoration before building")
+    endif()
+    file(GLOB HAZE_AUDIO_DSP_SOURCES "${SPU_DIR}/audio_pic_*/spu_recomp.c"
+        "${SPU_DIR}/firmware_atrac/spu_recomp.c"
+        "${SPU_DIR}/spu_0026_at_00DAFD00/spu_recomp.c")
+    set_property(SOURCE ${HAZE_AUDIO_DSP_SOURCES} APPEND PROPERTY COMPILE_OPTIONS
+        "/FI${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_spu_float.h" "-ffp-contract=off")
+    set(HAZE_AUDIO_FLOAT_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_spu_float.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_spu_double.c")
+    target_sources(ps3recomp_runtime PRIVATE ${HAZE_AUDIO_FLOAT_SOURCES})
+    set_property(SOURCE ${HAZE_AUDIO_FLOAT_SOURCES} TARGET_DIRECTORY ps3recomp_runtime
+        APPEND PROPERTY INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")
+    set_property(SOURCE ${HAZE_AUDIO_FLOAT_SOURCES} TARGET_DIRECTORY ps3recomp_runtime
+        APPEND PROPERTY COMPILE_OPTIONS "-msse4.1" "-ffp-contract=off")
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_spu_double.c"
+        TARGET_DIRECTORY ps3recomp_runtime APPEND PROPERTY COMPILE_OPTIONS "-ffp-model=strict")
+    set_property(SOURCE "${PS3RECOMP_DIR}/runtime/spu/spu_channels.c"
+        TARGET_DIRECTORY ps3recomp_runtime APPEND PROPERTY COMPILE_DEFINITIONS
+        spu_run_with_halt=haze_sdk_spu_run_with_halt)
 endif()
 
 # LLVM 24's Wasm SIMD selector crashes when vectorizing this image's packed
