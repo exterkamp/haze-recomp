@@ -203,7 +203,11 @@ if(EXISTS "${HAZE_TITLE_SOURCE}")
     add_custom_command(OUTPUT "${HAZE_TITLE_PATCHED}"
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_title_prompt.py"
             "${HAZE_TITLE_SOURCE}" "${HAZE_TITLE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_render_callback_profile.py"
+            "${HAZE_TITLE_PATCHED}" "${HAZE_TITLE_PATCHED}"
         DEPENDS "${HAZE_TITLE_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_title_prompt.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_render_callback_profile.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_producer_profile.py"
         VERBATIM)
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_TITLE_SOURCE}")
     list(APPEND RECOMP_SOURCES "${HAZE_TITLE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_title.cpp")

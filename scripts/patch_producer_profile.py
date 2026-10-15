@@ -28,6 +28,8 @@ PHASE_FUNCTIONS = (
     ("00684ED8", "56c5420e2f8c0f9bf519790f3c65a18ce3e06dbd46982f591cc5d262551abb63", 12),
     # 006DEC78 tail-dispatches here inside the profiled caller's lifetime.
     ("006DE730", "c52f06ee56d847115caaeb6897b207dd38d92e1bf3d0ab979f787e27c107fd61", 42),
+    # Accounts for most of that stage in the opening-deck capture.
+    ("006AC9A8", "e83000f0f51401a94edfdd7dbb61ce72712a281a783b9dd727237b35f8be3e7b", 21),
 )
 # Architectural return addresses verified against bctrl instructions in the ELF.
 MAIN_INDIRECT_RETURNS = ("00681184", "006811DC")
@@ -35,6 +37,7 @@ DISPATCH_INDIRECT_RETURNS = ("00686AC8", "00686BE8", "00686C5C", "00686CFC")
 PHASE_INDIRECT_RETURNS = {
     "00684ED8": ("00685008", "00685058", "0068511C"),
     "006DE730": ("006DE8CC", "006DEBAC"),
+    "006AC9A8": ("006ACBB4", "006ACC18"),
 }
 ORIGINAL_SHA256 = "0f1c08565667f88ffe25988059165385f35cdbee26b5c6880220c25d0685af52"
 GUEST_PACER_SHA256 = "56f434e9a85787e2471f2569106c05ee280af91f84d1b37efeecf10ffbf0ae1e"
