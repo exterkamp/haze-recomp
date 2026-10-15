@@ -64,8 +64,11 @@ foreach ($source in @('port/haze_save_backup.cpp','port/haze_profile_transaction
     $saveObjects += $object
 }
 $saveTest=Join-Path $root 'local/test_haze_savedata_backup.exe'
-& $clang /nologo /W0 /O1 "/I$(Split-Path $saveSource -Parent)" "/I$sdk/include" "/Fe$saveTest" "/Fo$root/local/test_haze_savedata_backup.obj" "$root/tests/test_haze_savedata_backup.c" @saveObjects
+$saveTestObject=Join-Path $root 'local/test_haze_savedata_backup.obj'
+& $clang /nologo /W0 /O1 "/I$(Split-Path $saveSource -Parent)" "/I$sdk/include" /c "/Fo$saveTestObject" "$root/tests/test_haze_savedata_backup.c"
 if ($LASTEXITCODE -ne 0) { throw 'Patched save-data backup test compilation failed.' }
+& $clang /nologo $saveTestObject @saveObjects "/Fe$saveTest"
+if ($LASTEXITCODE -ne 0) { throw 'Patched save-data backup test link failed.' }
 & $saveTest
 if ($LASTEXITCODE -ne 0) { throw 'Patched save-data backup test failed.' }
 if ($AssetFree) {
