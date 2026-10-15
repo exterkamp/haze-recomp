@@ -107,7 +107,7 @@ int wmain(int argc,wchar_t** argv) {
     assert(launch(module,L"--no-ui --check",root/L"unrelated cwd")==0);
     SetEnvironmentVariableW(L"HAZE_TEST_EXIT",L"37"); assert(launch(module,L"--no-ui",root/L"unrelated cwd")==37); SetEnvironmentVariableW(L"HAZE_TEST_EXIT",nullptr);
     // A fresh launcher process exports the previous failed run without dialogs.
-    const auto reports=root/L"diagnostics reports",export_args=L"--no-ui --export-diagnostics "+quote(reports.wstring());
+    const auto reports=root/L"diagnostics reports"; const auto export_args=L"--no-ui --export-diagnostics "+quote(reports.wstring());
     auto exported=[&] { std::vector<fs::path> found; for (const auto& item:fs::directory_iterator(reports)) found.push_back(item.path()); std::sort(found.begin(),found.end()); return found; };
     assert(launch(module,export_args,root/L"unrelated cwd")==0 && exported().size()==1);
     assert(bytes(exported()[0]).find("Status=exited with 0x00000025")!=std::string::npos);

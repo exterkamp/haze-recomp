@@ -63,7 +63,7 @@ int wmain(int argc,wchar_t** argv) {
     auto files=unzip(zip(sample)); assert(files.size()==sample.size());
     for (const auto& e:sample) assert(files.at(e.name)==e.data);
     // Windows' bundled bsdtar is an independent reader where it is present.
-    wchar_t system[MAX_PATH]{}; GetSystemDirectoryW(system,MAX_PATH); const auto tar=fs::path(system)/L"tar.exe";
+    wchar_t system_folder[MAX_PATH]{}; GetSystemDirectoryW(system_folder,MAX_PATH); const auto tar=fs::path(system_folder)/L"tar.exe";
     if (fs::exists(tar)) {
         put(plain/L"sample.zip",zip({sample[0],sample[1],sample[2]})); fs::create_directories(plain/L"extracted");
         assert(run_tool(tar,L"-xf "+quote((plain/L"sample.zip").wstring())+L" -C "+quote((plain/L"extracted").wstring()))==0);
