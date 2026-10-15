@@ -130,23 +130,23 @@ int main() {
     assert(contents(live)==version(7)); tidy();
     // Disk full while committing.
     { void* tx=haze_backup_begin(path_text.c_str()); assert(tx); write_stage(tx,version(8)); full=true;
-      assert(haze_backup_finish(tx,0)==access_error); full=false; assert(contents(live)==version(7)); tidy(); }
+      assert(haze_backup_finish(tx,0)==haze_save_backup::access_error); full=false; assert(contents(live)==version(7)); tidy(); }
     // Disk full while staging refuses the save before the guest writes.
     full=true; assert(!haze_backup_begin(path_text.c_str())); full=false; assert(contents(live)==version(7)); tidy();
     // Incomplete metadata or secure-file bookkeeping is a failed save.
     { void* tx=haze_backup_begin(path_text.c_str()); assert(tx); auto files=version(8); files["PARAM.SFO"]="TITLE=HAZE\nSUB_TI";
-      write_stage(tx,files); haze_backup_metadata_written(tx); assert(haze_backup_finish(tx,0)==access_error);
+      write_stage(tx,files); haze_backup_metadata_written(tx); assert(haze_backup_finish(tx,0)==haze_save_backup::access_error);
       assert(contents(live)==version(7)); }
     { void* tx=haze_backup_begin(path_text.c_str()); assert(tx); auto files=version(8); files["PARAM.SFO"]="TITLE=HAZE\nSUB_TITLE=Two\nlines\nDETAIL=\nATTRIBUTE=0\nLIST_PARAM=\n";
       write_stage(tx,files); haze_backup_metadata_written(tx); haze_backup_secure_written(tx,"DATA.BIN");
-      haze_backup_secure_written(tx,"OTHER.BIN"); assert(haze_backup_finish(tx,0)==access_error); assert(contents(live)==version(7)); }
+      haze_backup_secure_written(tx,"OTHER.BIN"); assert(haze_backup_finish(tx,0)==haze_save_backup::access_error); assert(contents(live)==version(7)); }
     // Another instance holding the save cannot write it, and loads stay read-only.
     { HANDLE other=CreateFileW((area/L"lock").c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_ALWAYS,FILE_FLAG_DELETE_ON_CLOSE,nullptr);
       assert(other!=INVALID_HANDLE_VALUE); assert(save(version(8))==-1); disk::remove_all(live); recover();
       assert(!disk::exists(live)); assert(CloseHandle(other)); recover(); assert(contents(live)==version(7)); tidy(); }
     // An external edit during the save is kept rather than overwritten.
     { void* tx=haze_backup_begin(path_text.c_str()); assert(tx); write_stage(tx,version(8)); put(live/"DATA.BIN","edited");
-      assert(haze_backup_finish(tx,0)==access_error); assert(contents(live).at("DATA.BIN")=="edited"); }
+      assert(haze_backup_finish(tx,0)==haze_save_backup::access_error); assert(contents(live).at("DATA.BIN")=="edited"); }
 
     // Truncated, corrupted and missing saves come back from the newest backup.
     history(9); { std::ofstream f(live/"DATA.BIN",std::ios::binary|std::ios::trunc); f << "short"; }

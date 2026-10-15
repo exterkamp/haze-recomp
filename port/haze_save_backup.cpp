@@ -295,9 +295,7 @@ bool lock(const Paths& p,Guard& guard) {
     return guard.handle!=INVALID_HANDLE_VALUE;
 }
 Transaction::~Transaction() { erase(p.stage); }
-}
-
-using namespace haze_save_backup;
+// C-linkage definitions here are the header's global functions.
 extern "C" void* haze_backup_begin(const char* directory) {
     try {
         if (!directory || !*directory) return nullptr;
@@ -393,4 +391,5 @@ extern "C" void haze_backup_recover_all(const char* root) {
             if (folder(it->path())) names.push_back((base/it->path().filename()).string());
         for (const auto& name:names) haze_backup_recover(name.c_str());
     } catch (...) { std::fprintf(stderr,"[save-backup] Save recovery failed.\n"); }
+}
 }
