@@ -84,11 +84,16 @@ int main() {
     restored_display=0;
     g.queue=&queue; g.fence=&fence; g.swap=&swap_chain; g.ready=1; g_ld_fullscreen_requested=1;
     const auto retained=g_ld_postprocess.output;
+    bundle_stop_cost=8;
     assert(haze_video_stop(123));
-    assert(wait_limit==123 && restored_display==1 && timer_destroyed==1 && !g.ready && !g_ld_fullscreen_requested);
+    assert(bundle_stop_calls==1 && bundle_stop_ready==1 && bundle_stop_limit==123);
+    assert(wait_limit==115 && restored_display==1 && timer_destroyed==1 && !g.ready && !g_ld_fullscreen_requested);
     assert(g.queue==&queue && g.fence==&fence && g_ld_postprocess.output==retained); // No in-flight resource release.
     g.ready=1; wait_result=WAIT_TIMEOUT; wait_limit=0;
-    assert(!haze_video_stop(17)); assert(wait_limit==17 && restored_display==2 && !g.ready);
+    bundle_stop_cost=25;
+    assert(!haze_video_stop(17)); assert(wait_limit==0 && restored_display==2 && !g.ready);
+    assert(bundle_stop_calls==2 && bundle_stop_ready==1 && bundle_stop_limit==17);
+    bundle_stop_cost=0;
     g.ready=1; signal_failure=1; wait_limit=0;
     assert(!haze_video_stop(19)); assert(wait_limit==0 && restored_display==3);
     signal_failure=0; g.ready=1; event_failure=1;

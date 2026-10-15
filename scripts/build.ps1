@@ -119,6 +119,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'VP burst reporting regression failed.' }
     & $python "$root/tests/test_shader_cache_bundle.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/shader-cache-bundle"
     if ($LASTEXITCODE -ne 0) { throw 'Shader cache bundle regression failed.' }
+    $previousBundleCompiler=$env:CLANG_CL
+    try {
+        $env:CLANG_CL=$clang
+        & $python "$sdk/libs/video/tests/test_shader_bundle_shutdown.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Terminal shader bundle ownership regression failed.' }
+    } finally { $env:CLANG_CL=$previousBundleCompiler }
     & $clang /nologo /TC /W4 /WX /O2 "/Fe$root/local/test_shader_store.exe" "/Fo$root/local/test_shader_store.obj" "$sdk/libs/video/tests/test_shader_store.c"
     if ($LASTEXITCODE -ne 0) { throw 'Owned shader cache worker compilation failed.' }
     & "$root/local/test_shader_store.exe"
