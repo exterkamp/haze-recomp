@@ -369,6 +369,14 @@ if ($Test) {
         if ($LASTEXITCODE -ne 0) { throw 'Native slot-copy source/boundary differential regression failed.' }
         & $python -m unittest tests.test_producer_profile_patch
         if ($LASTEXITCODE -ne 0) { throw 'Main producer phase patch preservation failed.' }
+        & $python -m unittest tests.test_native_render_parameters_patch
+        if ($LASTEXITCODE -ne 0) { throw 'Native render parameter patch guard failed.' }
+        & $python "$root/scripts/patch_native_render_parameters.py" "$assets/generated/ppu/ppu_recomp_003.cpp" "$root/local/render_parameters_reference.inc" --oracle
+        if ($LASTEXITCODE -ne 0) { throw 'Native render parameter reference extraction failed.' }
+        & $clang /nologo /EHsc /W3 /O2 /std:c++20 "/I$assets/generated/ppu" "/I$root/port" "/I$root/local" "/Fe$root/local/test_native_render_parameters.exe" "/Fo$root/local/test_native_render_parameters.obj" "$root/tests/test_native_render_parameters.cpp"
+        if ($LASTEXITCODE -ne 0) { throw 'Native render parameter differential fixture compilation failed.' }
+        & "$root/local/test_native_render_parameters.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Native render parameter differential regression failed.' }
         & $python -m unittest tests.test_analyze_producer_profile
         if ($LASTEXITCODE -ne 0) { throw 'Main producer phase analysis validation failed.' }
         & $python "$root/tests/test_producer_profile.py" --compiler $clang --output-dir "$root/local"

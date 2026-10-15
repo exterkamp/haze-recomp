@@ -137,8 +137,12 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
             "${HAZE_PRODUCER_PROFILE_PATCHED}" "${HAZE_SAVE_PATCHED}"
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_audio_tick.py"
             "${HAZE_SAVE_PATCHED}" "${HAZE_SAVE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_native_render_parameters.py"
+            "${HAZE_SAVE_PATCHED}" "${HAZE_SAVE_PATCHED}"
         DEPENDS "${HAZE_PRODUCER_PROFILE_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_save_status.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_audio_tick.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patch_native_render_parameters.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/haze_native_render_parameters.h"
         VERBATIM)
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PRODUCER_PROFILE_PATCHED}")
     list(APPEND RECOMP_SOURCES "${HAZE_SAVE_PATCHED}")
