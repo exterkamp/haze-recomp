@@ -56,12 +56,34 @@ change the saved bindings.
 
 ## Input and prompts
 
-Keyboard names include A-Z, 0-9, Space, Enter, Escape, Tab, Shift, Ctrl, Alt,
-arrows, Mouse1-Mouse5, Backspace, Delete, Insert, Home, End, PageUp, PageDown,
-and F2-F12 except F6/F7. F1 controls mouse capture, F6 reloads graphics settings,
-and F7 cycles the performance overlay.
+Keyboard names include A-Z, 0-9, Space, Enter, Tab, Shift, Ctrl, Alt, arrows,
+Backspace, Delete, Insert, Home, End, PageUp, PageDown, F2-F12 except F6/F7,
+Num0-Num9, NumMultiply, NumAdd, NumSubtract, NumDecimal, NumDivide, Semicolon,
+Equals, Comma, Minus, Period, Slash, Grave, LeftBracket, Backslash,
+RightBracket, Apostrophe, Mouse1-Mouse5, WheelUp and WheelDown. One table in
+`port/haze_input_key.h` defines these names for parsing, display and prompts.
+
+Numpad keys bind separately from the main-row digits and symbols. Windows
+reports numpad digits only while Num Lock is on; otherwise they arrive as Home,
+End, arrows, Insert and Delete and act as those bindings. Numpad Enter is
+Enter. Punctuation names are Windows virtual keys named after the US layout;
+another layout may put them on different physical keys or characters.
+
+WheelUp and WheelDown are separate one-report pulses while gameplay owns the
+mouse. Scrolling during capture binds a wheel direction. A wheel direction that
+no action uses keeps the original Circle (switch weapon) pulse, so older
+input.ini files keep their wheel behavior. Menus still use the wheel for
+scrolling.
+
+Prompts use the Kenney PNG for each key. Keys without one, such as numpad
+digits, get a generated keycap label instead of a blank prompt.
+
+F1 controls mouse capture, F6 reloads graphics settings, and F7 cycles the
+performance overlay. These cannot be bound: capture explains the reservation,
+and an INI binding to them is logged and disabled.
 Escape is reserved for pause during gameplay, Back in menus, and cancelling a
-binding capture. Enter confirms in menus regardless of its gameplay binding.
+binding capture. An existing INI binding to Escape is logged and only acts on
+startup screens. Enter confirms in menus regardless of its gameplay binding.
 These menu actions override conflicting button and movement bindings; Space
 keeps its default gameplay jump binding. Held Enter/Escape input is suppressed
 until release when entering or leaving a menu.
