@@ -100,13 +100,18 @@ Redactor redactor(const Plan& p,const Values& env) {
 // NAME=value assignments of sensitive variables, independent of the current
 // environment, so a historical launcher.log or a game message is still scrubbed.
 static bool ident(unsigned char c) { return (c>='0' && c<='9') || (c>='a' && c<='z') || (c>='A' && c<='Z') || c=='_'; }
+// Prose such as "Expected Key=Value" is not a variable assignment.
+static bool sensitive_assignment(const std::string& name) {
+    const bool prose=name.find('_')==name.npos && std::any_of(name.begin(),name.end(),[](char c) { return c>='a' && c<='z'; });
+    return !prose && sensitive_variable(std::wstring(name.begin(),name.end()));
+}
 static std::string scrub(const std::string& s) {
     std::string out; out.reserve(s.size());
     for (size_t i=0;i<s.size();) {
         if (!ident(s[i]) || (i && ident(s[i-1]))) { out+=s[i++]; continue; }
         size_t j=i; while (j<s.size() && ident(s[j])) ++j;
         size_t k=j; while (k<s.size() && (s[k]==' ' || s[k]=='\t')) ++k;
-        if (k>=s.size() || s[k]!='=' || j-i>96 || !sensitive_variable(std::wstring(s.begin()+i,s.begin()+j))) { out.append(s,i,j-i); i=j; continue; }
+        if (k>=s.size() || s[k]!='=' || j-i>96 || !sensitive_assignment(s.substr(i,j-i))) { out.append(s,i,j-i); i=j; continue; }
         ++k; while (k<s.size() && (s[k]==' ' || s[k]=='\t')) ++k;
         out.append(s,i,k-i); out+="<redacted>";
         if (k<s.size() && (s[k]=='"' || s[k]=='\'')) { const auto close=s.find_first_of(std::string(1,s[k])+"\r\n",k+1); k=close==s.npos ? s.size() : s[close]==s[k] ? close+1 : close; }

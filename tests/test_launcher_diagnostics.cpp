@@ -90,6 +90,7 @@ int wmain(int argc,wchar_t** argv) {
     assert(redact("Environment.PS3_RIF_KEY=00112233445566778899aabbccddeeff\nnext",Redactor{})=="Environment.PS3_RIF_KEY=<redacted>\nnext");
     assert(redact("set PS3_OPEN_PSID = \"0011 2233\" done; MONKEY=1 HAZE_INPUT=keyboard",Redactor{})=="set PS3_OPEN_PSID = <redacted> done; MONKEY=1 HAZE_INPUT=keyboard");
     assert(redact("$env:PS3_NP_ONLINE_ID='marge'",Redactor{})=="$env:PS3_NP_ONLINE_ID=<redacted>");
+    assert(redact("Expected Key=Value; Token=1",Redactor{})=="Expected Key=Value; Token=1" && redact("ps3_rif_key=0011",Redactor{})=="ps3_rif_key=<redacted>");
 
     // Bounded reads keep the head and tail and never read past the limit.
     std::string big; for (int i=0;i<2000;++i) big+="line "+std::to_string(i)+"\n";
