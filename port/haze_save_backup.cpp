@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,7 +40,8 @@ struct Transaction {
     Guard guard;
     Manifest before;
     std::string stage;
-    bool existed=false,failed=false;
+    std::set<std::string> damaged; // Known-bad files the guest must fully rewrite.
+    bool owner=false,existed=false,failed=false;
     ~Transaction();
 };
 std::string utf8(const fs::path& path) { const auto text=path.u8string(); return {text.begin(),text.end()}; }
@@ -294,7 +296,13 @@ bool lock(const Paths& p,Guard& guard) {
         FILE_ATTRIBUTE_TEMPORARY|FILE_FLAG_DELETE_ON_CLOSE,nullptr);
     return guard.handle!=INVALID_HANDLE_VALUE;
 }
-Transaction::~Transaction() { erase(p.stage); }
+// Only the lock holder owns the stage; a refused contender must not touch it.
+Transaction::~Transaction() { if (owner) erase(p.stage); }
+std::string names(const std::set<std::string>& files) {
+    std::string out;
+    for (const auto& name:files) out+=(out.empty() ? "" : ", ")+name;
+    return out;
+}
 // C-linkage definitions here are the header's global functions.
 extern "C" void* haze_backup_begin(const char* directory) {
     try {
@@ -302,9 +310,22 @@ extern "C" void* haze_backup_begin(const char* directory) {
         auto tx=std::make_unique<Transaction>(); tx->p=paths(fs::path(directory));
         const auto& p=tx->p;
         if (!lock(p,tx->guard)) { fail(p,"Another instance is using this save; save refused."); return nullptr; }
+        tx->owner=true;
         if (!recover(p)) { fail(p,"Save refused."); return nullptr; }
         protect(p);
         tx->existed=folder(p.live);
+        // Recovery restores whatever a backup can. Anything still differing from
+        // the last commit is known damage that a commit must never certify.
+        Manifest current,live;
+        if (load(p.current,current)) {
+            if (tx->existed && !scan(p.live,live)) { fail(p,"Cannot read the save."); return nullptr; }
+            for (const auto& [name,value]:current) {
+                const auto found=live.find(name);
+                if (found==live.end() || found->second!=value) tx->damaged.insert(name);
+            }
+            if (!tx->damaged.empty())
+                note(p,"Damaged without a verified backup (%s); only a save that rewrites these files is accepted. See docs/native-saves.md.",names(tx->damaged).c_str());
+        }
         if (tx->existed ? !scan(p.live,tx->before) || !populate(p.live,p.stage,tx->before,false)
                         : !erase(p.stage) || !CreateDirectoryW(p.stage.c_str(),nullptr)) {
             fail(p,"Cannot stage the save."); return nullptr;
@@ -322,7 +343,7 @@ extern "C" void haze_backup_metadata_written(void* transaction) {
         bool ok=slurp(tx.p.stage/L"PARAM.SFO",bytes) && !bytes.compare(0,6,"TITLE=") && bytes.back()=='\n';
         for (const char* key:{"\nSUB_TITLE=","\nDETAIL=","\nATTRIBUTE=","\nLIST_PARAM="})
             ok=ok && (at=bytes.find(key,at))!=std::string::npos;
-        if (ok) return;
+        if (ok) { tx.damaged.erase("PARAM.SFO"); return; }
     } catch (...) {}
     tx.failed=true; note(tx.p,"Save metadata was not written completely.");
 }
@@ -339,11 +360,18 @@ extern "C" void haze_backup_secure_written(void* transaction,const char* name) {
     } catch (...) {}
     tx.failed=true; note(tx.p,"Secure-file bookkeeping was not written.");
 }
+extern "C" void haze_backup_file_replaced(void* transaction,const char* name) {
+    if (name) static_cast<Transaction*>(transaction)->damaged.erase(name);
+}
 extern "C" int32_t haze_backup_finish(void* transaction,int32_t result) {
     std::unique_ptr<Transaction> tx(static_cast<Transaction*>(transaction));
     const auto& p=tx->p;
     try {
         if (!result && tx->failed) result=access_error;
+        if (!result && !tx->damaged.empty()) {
+            note(p,"Refused: this save does not rewrite the damaged %s, which has no verified backup.",names(tx->damaged).c_str());
+            result=access_error;
+        }
         if (result) {
             if (!tx->existed) RemoveDirectoryW(p.live.c_str()); // Only the empty directory the SDK made.
             note(p,"Save not completed (0x%08x); the previous save is retained.",unsigned(result));

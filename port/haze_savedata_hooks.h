@@ -10,6 +10,15 @@ static thread_local void* haze_backup_pending;
 static _Thread_local void* haze_profile_pending;
 static _Thread_local void* haze_backup_pending;
 #endif
+static const char* haze_backup_file_name(const CellSaveDataFileSet* set) {
+    switch (set->fileType) {
+    case CELL_SAVEDATA_FILETYPE_CONTENT_ICON0: return "ICON0.PNG";
+    case CELL_SAVEDATA_FILETYPE_CONTENT_ICON1: return "ICON1.PAM";
+    case CELL_SAVEDATA_FILETYPE_CONTENT_PIC1: return "PIC1.PNG";
+    case CELL_SAVEDATA_FILETYPE_CONTENT_SND0: return "SND0.AT3";
+    default: return set->fileName;
+    }
+}
 static s32 process_file_op(const char* path,CellSaveDataFileSet* set) {
     if (haze_profile_pending) {
         if (!set || set->fileOperation!=CELL_SAVEDATA_FILEOP_WRITE || set->fileOffset ||
@@ -22,6 +31,9 @@ static s32 process_file_op(const char* path,CellSaveDataFileSet* set) {
     if (result>=0 && set->fileType==CELL_SAVEDATA_FILETYPE_SECUREFILE &&
         (set->fileOperation==CELL_SAVEDATA_FILEOP_WRITE || set->fileOperation==CELL_SAVEDATA_FILEOP_WRITE_NOTRUNC))
         haze_backup_secure_written(haze_backup_pending,set->fileName);
+    if (result>=0 && (set->fileOperation==CELL_SAVEDATA_FILEOP_DELETE ||
+        (set->fileOperation==CELL_SAVEDATA_FILEOP_WRITE && !set->fileOffset)))
+        haze_backup_file_replaced(haze_backup_pending,haze_backup_file_name(set));
     return result;
 }
 static void write_param_sfo(const char* path,const CellSaveDataSystemFileParam* param) {
@@ -52,6 +64,6 @@ static s32 savedata_execute(const char* directory,int saving,CellSaveDataSetBuf*
     haze_backup_pending=backup; haze_profile_pending=profile;
     s32 result=savedata_execute_original(directory,saving,buffers,stat,file,userdata);
     haze_profile_pending=NULL; haze_backup_pending=NULL;
-    if (profile) result=haze_profile_finish(profile,result);
+    if (profile && !(result=haze_profile_finish(profile,result))) haze_backup_file_replaced(backup,"_PROFILE.DAT");
     return haze_backup_finish(backup,result);
 }

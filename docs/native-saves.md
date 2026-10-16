@@ -33,6 +33,15 @@ unreadable or modified save is moved to `damaged.1` and replaced by the newest
 backup that verifies, preferring the copy of the current save. Every step is
 logged with a `[save-backup]` prefix in the session log.
 
+If no backup verifies, the damaged save is left in place, loads still read it,
+and the damage stays flagged: `current.manifest` keeps describing the last good
+commit, and a save is refused (reported to the game as a save error) unless it
+rewrites every damaged file from the start or deletes it. A save that rewrites
+the whole slot is therefore accepted and clears the damage; a save that changes
+only some files is not, so it cannot make the damaged files look valid. The log
+names the damaged files. To keep playing with the damaged save as it is, follow
+the manual steps below.
+
 Saves made before this feature have no manifest; they are adopted and backed
 up unchanged the first time they are loaded or saved.
 
@@ -41,7 +50,8 @@ up unchanged the first time they are loaded or saved.
 With the game closed, delete the save directory's files and copy the files of
 the chosen `.haze-saves/<save>/backup.N` into it, leaving out `HAZE.MANIFEST`.
 The next launch accepts it because it matches that backup. To keep a save you
-edited with an external tool, also delete `current.manifest`; otherwise it is
-treated as damaged and replaced. To delete a save permanently, delete both the
+edited with an external tool, or to accept a damaged save that has no backup,
+delete `current.manifest`; otherwise it is treated as damaged and replaced (or,
+without a backup, partial saves to it are refused). To delete a save permanently, delete both the
 save directory and its `.haze-saves/<save>` directory, or a missing save is
 restored from its backup.

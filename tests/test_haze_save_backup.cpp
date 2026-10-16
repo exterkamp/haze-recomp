@@ -48,6 +48,9 @@ static std::string path_text;
 static void put(const disk::path& p,const std::string& data) {
     std::ofstream f(p,std::ios::binary|std::ios::trunc); f.write(data.data(),data.size()); f.close(); assert(f);
 }
+static std::string read(const disk::path& p) {
+    std::ifstream f(p,std::ios::binary); assert(f); return {std::istreambuf_iterator<char>(f),{}};
+}
 static Files contents(const disk::path& directory) {
     Files out;
     for (const auto& file:disk::directory_iterator(directory)) {
@@ -65,10 +68,17 @@ static Files version(int n) {
     return {{"PARAM.SFO","TITLE=HAZE\nSUB_TITLE=Chapter "+std::to_string(n)+"\nDETAIL=\nATTRIBUTE=0\nLIST_PARAM=\n"},
             {"PARAM.PFD","DATA.BIN\n"},{"DATA.BIN",std::string(70000+n,char('a'+n))},{"ICON0.PNG",std::string(16,char(n))}};
 }
+// Guest writes as the hooks report them: whole-file rewrites and deletes.
+static void update(void* tx,const Files& files) {
+    const disk::path stage=haze_backup_stage(tx);
+    for (const auto& [name,data]:files) { put(stage/name,data); haze_backup_file_replaced(tx,name.c_str()); }
+}
 static void write_stage(void* tx,const Files& files) {
     const disk::path stage=haze_backup_stage(tx);
-    for (const auto& entry:disk::directory_iterator(stage)) if (!files.count(entry.path().filename().string())) disk::remove(entry.path());
-    for (const auto& [name,data]:files) put(stage/name,data);
+    for (const auto& entry:disk::directory_iterator(stage)) if (!files.count(entry.path().filename().string())) {
+        disk::remove(entry.path()); haze_backup_file_replaced(tx,entry.path().filename().string().c_str());
+    }
+    update(tx,files);
 }
 static int save(const Files& files,int result=0) {
     void* tx=haze_backup_begin(path_text.c_str());
@@ -211,6 +221,51 @@ int main() {
         either(version(14),version(15),result); ++transient;
         if (!reached) break;
     }
+    // A contender refused the lock leaves the holder's populated stage alone,
+    // as do load and boot recovery; the holder's partial update keeps the rest.
+    { disk::remove_all(live); disk::remove_all(area);
+      place(live,{{"PROFILE.DAT","profile 1"},{"CHECKPOINT.DAT",std::string(5000,'c')},{"PARAM.SFO","TITLE=HAZE\n"}});
+      void* a=haze_backup_begin(path_text.c_str()); assert(a);
+      const auto staged=contents(haze_backup_stage(a)); assert(staged==contents(live));
+      assert(!haze_backup_begin(path_text.c_str()));
+      recover(); haze_backup_recover_all(root.string().c_str());
+      assert(contents(haze_backup_stage(a))==staged);
+      update(a,{{"PROFILE.DAT","profile 2"}}); assert(haze_backup_finish(a,0)==0);
+      auto expected=staged; expected["PROFILE.DAT"]="profile 2";
+      assert(contents(live)==expected); recover(); assert(contents(live)==expected); tidy(); }
+    // Damage that no backup repairs is never certified by a partial save, and
+    // stays flagged until every damaged file is rewritten (or the manifest is
+    // deleted by hand as an explicit decision).
+    for (const bool remove_backups:{true,false}) {
+        disk::remove_all(live); disk::remove_all(area);
+        const Files good={{"PROFILE.DAT","profile 1"},{"CHECKPOINT.DAT",std::string(5000,'c')},{"PARAM.SFO","TITLE=HAZE\n"}};
+        place(live,good); assert(save(good)==0); // Adopts and backs it up.
+        { void* tx=haze_backup_begin(path_text.c_str()); assert(tx); update(tx,{{"PROFILE.DAT","profile 2"}}); assert(haze_backup_finish(tx,0)==0); }
+        for (int n=1;n<=3;++n) {
+            const auto backup=area/("backup."+std::to_string(n));
+            if (!disk::exists(backup)) continue;
+            if (remove_backups) disk::remove_all(backup); else put(backup/"CHECKPOINT.DAT","bad backup");
+        }
+        const auto manifest=read(area/"current.manifest");
+        put(live/"CHECKPOINT.DAT","cut");
+        recover(); assert(contents(live).at("CHECKPOINT.DAT")=="cut");
+        void* tx=haze_backup_begin(path_text.c_str()); assert(tx);
+        update(tx,{{"PROFILE.DAT","profile 3"}});
+        assert(haze_backup_finish(tx,0)==haze_save_backup::access_error);
+        assert(contents(live).at("PROFILE.DAT")=="profile 2" && contents(live).at("CHECKPOINT.DAT")=="cut");
+        assert(read(area/"current.manifest")==manifest);
+        // Still admitted, so a save that rewrites every damaged file repairs it.
+        { void* again=haze_backup_begin(path_text.c_str()); assert(again);
+          update(again,{{"PROFILE.DAT","profile 3"},{"CHECKPOINT.DAT",std::string(5000,'d')}});
+          assert(haze_backup_finish(again,0)==0); }
+        assert(contents(live).at("CHECKPOINT.DAT")==std::string(5000,'d')); recover(); tidy();
+        assert(contents(area/"backup.1").at("CHECKPOINT.DAT")==std::string(5000,'d'));
+    }
+    // Deleting current.manifest by hand accepts the damaged save as it is.
+    put(live/"CHECKPOINT.DAT","cut"); for (int n=1;n<=3;++n) disk::remove_all(area/("backup."+std::to_string(n)));
+    disk::remove(area/"current.manifest");
+    { void* tx=haze_backup_begin(path_text.c_str()); assert(tx); update(tx,{{"PROFILE.DAT","profile 4"}});
+      assert(haze_backup_finish(tx,0)==0); assert(contents(live).at("CHECKPOINT.DAT")=="cut"); tidy(); }
     // Startup recovery finds interrupted commits for every save directory.
     fresh(); disk::rename(live,area/"previous"); haze_backup_recover_all(root.string().c_str());
     assert(contents(live)==version(14)); tidy();
