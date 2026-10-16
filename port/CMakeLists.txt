@@ -300,7 +300,10 @@ if(WIN32)
     # Dedicated packed-depth descriptors remain owned by the renderer.
     # SDK d6a543a preserves producer AA metadata and corrects packed-depth
     # sample coordinates/bounds. Resource and descriptor ownership is unchanged.
-    if(NOT HAZE_RSX_HASH STREQUAL "0f6f593a68c38a7dc1e248ec529b776c2f0ec12c55b753faacc956301018fa1d")
+    # Terminal shader-bundle persistence detaches only source/blob caches after
+    # the final draw. Its worker owns those allocations; settings transactions
+    # and GPU resource/display lifetime remain on the renderer owner thread.
+    if(NOT HAZE_RSX_HASH STREQUAL "c1cfbde5394d0fcbe2d75d321ca9c2778f76152ea655904a0ecff8db3ad03859")
         message(FATAL_ERROR "Renderer changed: audit the Haze live-settings transaction before building")
     endif()
     # Capture while DXGI still owns this backbuffer, before Present rotates it.

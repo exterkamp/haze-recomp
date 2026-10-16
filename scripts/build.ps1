@@ -119,6 +119,12 @@ if ($Test) {
     if ($LASTEXITCODE -ne 0) { throw 'VP burst reporting regression failed.' }
     & $python "$root/tests/test_shader_cache_bundle.py" --compiler $clang --source "$sdk/libs/video/rsx_live_draw.c" --output-dir "$root/build/shader-cache-bundle"
     if ($LASTEXITCODE -ne 0) { throw 'Shader cache bundle regression failed.' }
+    $previousBundleCompiler=$env:CLANG_CL
+    try {
+        $env:CLANG_CL=$clang
+        & $python "$sdk/libs/video/tests/test_shader_bundle_shutdown.py"
+        if ($LASTEXITCODE -ne 0) { throw 'Terminal shader bundle ownership regression failed.' }
+    } finally { $env:CLANG_CL=$previousBundleCompiler }
     & $python "$root/tests/test_analyze_slow_drains.py"
     if ($LASTEXITCODE -ne 0) { throw 'Slow-drain/flush QPC attribution regression failed.' }
     & $python "$root/tests/test_pad_file_detach.py" --compiler $clang --sdk $sdk --output-dir "$root/build/pad-file-detach"

@@ -127,7 +127,14 @@ void haze_video_finish(int commit) {
 }
 int haze_video_stop(unsigned timeout_ms) {
     if (GetWindowThreadProcessId(g_ld_display_hwnd,NULL)!=GetCurrentThreadId()) return 0;
+    const ULONGLONG began=GetTickCount64();
     haze_video_finish(0);
+    /* Native quit does not call the full SDK teardown. Persist the learned
+     * shader bundle before ready is cleared, sharing the existing display
+     * shutdown wait budget. The cache worker owns its detached data. */
+    rsx_live_draw_finish_shader_bundle(timeout_ms);
+    const ULONGLONG elapsed=GetTickCount64()-began;
+    const DWORD remaining=elapsed>=timeout_ms ? 0 : timeout_ms-(DWORD)elapsed;
     int ok=1;
     /* No more draws follow this call. A queue fence covers submitted work;
      * the unfinished command list is abandoned at process exit. Do not call
@@ -137,7 +144,7 @@ int haze_video_stop(unsigned timeout_ms) {
         if (FAILED(g.queue->lpVtbl->Signal(g.queue,g.fence,value))) ok=0;
         else if (g.fence->lpVtbl->GetCompletedValue(g.fence)<value) {
             if (FAILED(g.fence->lpVtbl->SetEventOnCompletion(g.fence,value,g.fence_event)) ||
-                WaitForSingleObject(g.fence_event,timeout_ms)!=WAIT_OBJECT_0) ok=0;
+                WaitForSingleObject(g.fence_event,remaining)!=WAIT_OBJECT_0) ok=0;
         }
     }
     if (g.swap && FAILED(g.swap->lpVtbl->SetFullscreenState(g.swap,FALSE,NULL))) ok=0;

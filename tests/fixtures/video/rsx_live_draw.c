@@ -93,6 +93,15 @@ static int g_ld_vsync;
 static rsx_postprocess g_ld_postprocess;
 static struct { unsigned host_w,host_h; } g_ld_resolution;
 static LONGLONG g_ld_qpc_frequency=1000000;
+static ULONGLONG shutdown_clock;
+static ULONGLONG fake_shutdown_clock(void) { return shutdown_clock; }
+#define GetTickCount64 fake_shutdown_clock
+static unsigned bundle_stop_calls,bundle_stop_ready,bundle_stop_limit,bundle_stop_cost;
+static int rsx_live_draw_finish_shader_bundle(unsigned timeout) {
+    ++bundle_stop_calls; bundle_stop_ready=g.ready; bundle_stop_limit=timeout;
+    shutdown_clock+=bundle_stop_cost;
+    return 1;
+}
 typedef struct { LONGLONG frequency,period,last_present; } fake_limiter;
 static fake_limiter g_ld_frame_limiter;
 static void rsx_frame_limiter_destroy(fake_limiter*) { ++timer_destroyed; }
