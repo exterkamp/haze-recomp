@@ -139,6 +139,8 @@ if(EXISTS "${HAZE_PACER_SOURCE}")
             "${HAZE_PRODUCER_PROFILE_PATCHED}" "${HAZE_SAVE_PATCHED}"
         COMMAND "${Python3_EXECUTABLE}" "${HAZE_PATCH_TOOL}" audio-tick
             "${HAZE_SAVE_PATCHED}" "${HAZE_SAVE_PATCHED}"
+        COMMAND "${Python3_EXECUTABLE}" "${HAZE_PATCH_TOOL}" teammate-name
+            "${HAZE_SAVE_PATCHED}" "${HAZE_SAVE_PATCHED}"
         DEPENDS ${HAZE_PATCH_DEPENDS} "${HAZE_PRODUCER_PROFILE_PATCHED}"
         VERBATIM)
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_PRODUCER_PROFILE_PATCHED}")
@@ -230,7 +232,8 @@ if(EXISTS "${RECOMP_DIR}/ppu_recomp_001.cpp")
     list(REMOVE_ITEM RECOMP_SOURCES "${HAZE_MENU_SOURCE}")
     list(APPEND RECOMP_SOURCES "${HAZE_MENU_PATCHED}" "${CMAKE_CURRENT_SOURCE_DIR}/haze_menu_guest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/haze_audio_guest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/haze_native_menu.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_native_menu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/haze_menu_cleanup.cpp")
     set_property(SOURCE "${HAZE_MENU_PATCHED}" APPEND PROPERTY INCLUDE_DIRECTORIES "${RECOMP_DIR}")
 endif()
 
@@ -500,6 +503,9 @@ add_executable(${PROJECT_NAME}
     haze_input.cpp
     haze_camera.cpp
     haze_menu.cpp
+    haze_player_profile.cpp
+    haze_player_profile_guest.cpp
+    haze_player_profile_menu.cpp
     haze_guest_pacer.cpp
     haze_job_wait.cpp
     haze_bulk_fill.cpp
@@ -531,6 +537,9 @@ add_executable(${PROJECT_NAME}
 )
 if(WIN32)
     target_sources(${PROJECT_NAME} PRIVATE haze_profile_transaction.cpp)
+    add_subdirectory(net)
+    target_sources(${PROJECT_NAME} PRIVATE haze_coop.cpp haze_coop_menu.cpp haze_coop_settings.cpp)
+    target_link_libraries(${PROJECT_NAME} PRIVATE haze_network)
 endif()
 set_property(SOURCE haze_spu_idle.c APPEND PROPERTY
     INCLUDE_DIRECTORIES "${PS3RECOMP_DIR}/runtime/spu")

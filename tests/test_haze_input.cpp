@@ -89,6 +89,7 @@ static bool native_menu_active;
 bool haze_menu_active() { return native_menu_active; }
 bool haze_menu_blocks_input() { return native_menu_active; }
 bool haze_menu_capture_key(int) { return false; }
+bool haze_menu_capture_text(uint32_t) { return false; }
 bool haze_menu_has_focus() { return false; }
 void haze_menu_update(void*,const HazeGamepadState&) {}
 static bool menu_exiting_process;
@@ -97,6 +98,10 @@ void haze_video_menu_register() {}
 void haze_audio_menu_register() {}
 void haze_controls_menu_register() {}
 void haze_steam_menu_register() {}
+void haze_player_profile_menu_register() {}
+void haze_coop_menu_register() {}
+void haze_coop_update() {}
+void haze_coop_leave() {}
 void haze_quit_menu_register() {}
 static bool quit_active=false,close_accepted=false;
 bool haze_quit_menu_active() { return quit_active; }
@@ -124,6 +129,9 @@ int main() {
     window=(HWND)1;
     for (auto& b : bindings) b.vk=key_code(b.fallback);
     assert(key_code("w")=='W'); assert(key_code("Mouse2")==VK_RBUTTON);
+    assert(key_code("Num5")==VK_NUMPAD5 && key_code("5")=='5' && key_code("semicolon")==VK_OEM_1);
+    assert(key_code("F9")==VK_F9 && key_code("WheelUp")==HAZE_VK_WHEEL_UP && key_code("WheelDown")==HAZE_VK_WHEEL_DOWN);
+    assert(key_code("F1")==0 && key_code("f6")==0 && key_code("F7")==0 && key_code("Bogus")==0);
     assert(sample().lx==128);
     native_menu_active=true; keys['W']=keys[VK_SPACE]=keys[VK_LBUTTON]=true;
     auto blocked=sample(); assert(!blocked.buttons && blocked.lx==128 && blocked.ly==128);
@@ -205,6 +213,31 @@ int main() {
     InterlockedExchange(&wheel,1);
     assert(sample().buttons&CELL_PAD_CTRL_CIRCLE);
     assert(!(sample().buttons&CELL_PAD_CTRL_CIRCLE));
+    // Wheel directions bind independently; an unused one still switches weapons.
+    const auto wheel_up=MAKEWPARAM(0,WHEEL_DELTA),wheel_down=MAKEWPARAM(0,WORD(-WHEEL_DELTA));
+    bindings[3].vk=HAZE_VK_WHEEL_UP;
+    window_proc(window,WM_MOUSEWHEEL,wheel_up,0);
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_TRIANGLE) && !(p.buttons&CELL_PAD_CTRL_CIRCLE));
+    assert(!(sample().buttons&CELL_PAD_CTRL_TRIANGLE)); // One pulse per notch burst.
+    window_proc(window,WM_MOUSEWHEEL,wheel_down,0);
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_CIRCLE) && !(p.buttons&CELL_PAD_CTRL_TRIANGLE));
+    bindings[2].vk=HAZE_VK_WHEEL_DOWN;
+    window_proc(window,WM_MOUSEWHEEL,wheel_down,0);
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_SQUARE) && !(p.buttons&(CELL_PAD_CTRL_CIRCLE|CELL_PAD_CTRL_TRIANGLE)));
+    window_proc(window,WM_MOUSEWHEEL,wheel_up,0); window_proc(window,WM_MOUSEWHEEL,wheel_down,0);
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_SQUARE) && (p.buttons&CELL_PAD_CTRL_TRIANGLE) && !(p.buttons&CELL_PAD_CTRL_CIRCLE));
+    assert(!(sample().buttons&(CELL_PAD_CTRL_SQUARE|CELL_PAD_CTRL_TRIANGLE)));
+    // Numpad and punctuation keys are distinct from their main-row lookalikes.
+    bindings[3].vk=VK_NUMPAD5; bindings[2].vk=VK_OEM_1;
+    keys['5']=true; p=sample(); assert(!(p.buttons&(CELL_PAD_CTRL_SQUARE|CELL_PAD_CTRL_TRIANGLE)));
+    keys['5']=false; keys[VK_NUMPAD5]=keys[VK_OEM_1]=true;
+    p=sample(); assert((p.buttons&CELL_PAD_CTRL_SQUARE) && (p.buttons&CELL_PAD_CTRL_TRIANGLE));
+    keys[VK_NUMPAD5]=keys[VK_OEM_1]=false;
+    bindings[2].vk=key_code(bindings[2].fallback); bindings[3].vk=key_code(bindings[3].fallback);
+    InterlockedExchange(&captured,0);
+    window_proc(window,WM_MOUSEWHEEL,wheel_up,0);
+    assert(!wheel && !(sample().buttons&CELL_PAD_CTRL_CIRCLE)); // Uncaptured scrolling is not gameplay input.
+    InterlockedExchange(&captured,1);
     focused=false; mouse_motion.add(100,0);
     p=sample(); assert(!p.buttons && p.lx==128 && p.ly==128 && p.rx==128);
     focused=true; memset(keys,0,sizeof(keys));
