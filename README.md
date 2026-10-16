@@ -117,6 +117,8 @@ Menus also support the pointer: left click selects, right click goes back.
 Enter and Esc keep their menu actions regardless of gameplay bindings. Holding
 either key across a menu boundary cannot trigger another action. Space remains
 jump during gameplay; Enter retains the Start binding outside menus by default.
+Bindings accept function, numpad and punctuation keys and separate WheelUp /
+WheelDown directions; see [docs/control-settings.md](docs/control-settings.md).
 SDL gamepads connect automatically. Bindings, mouse sensitivity, controller
 options, and startup skipping live in [config/input.ini](config/input.ini)
 and reload while running. Action names above assume Haze's default controller

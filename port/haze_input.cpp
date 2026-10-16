@@ -108,7 +108,11 @@ Binding bindings[] = {
 int movement[4] = {'W','S','A','D'};
 int key_code(const char* name) {
     const int code=haze_key_code(name);
+    if (code==VK_ESCAPE) fprintf(stderr,"[input] %s; its binding only acts on startup screens\n",haze_key_reserved(code));
     if (code>=0) return code;
+    for (int key:{VK_F1,VK_F6,VK_F7}) if (std::strlen(name)==2 && !_strnicmp(name,haze_key_reserved(key),2)) {
+        fprintf(stderr,"[input] %s; binding disabled\n",haze_key_reserved(key)); return 0;
+    }
     fprintf(stderr,"[input] Unknown key '%s'; binding disabled\n",name);
     return 0;
 }
@@ -387,6 +391,8 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     }
     case WM_MOUSEWHEEL:
+        if (GET_WHEEL_DELTA_WPARAM(wp) &&
+            haze_menu_capture_key(GET_WHEEL_DELTA_WPARAM(wp)>0 ? HAZE_VK_WHEEL_UP : HAZE_VK_WHEEL_DOWN)) return 0;
         if (enabled && menu_active) {
             pointer_position(hwnd);
             std::lock_guard lock(pointer_mutex);
@@ -396,7 +402,9 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             capture_policy.use_keyboard();
             return 0;
         }
-        if (captured) { InterlockedExchange(&wheel,1); last_family=HazeInputFamily::Keyboard; }
+        if (captured && GET_WHEEL_DELTA_WPARAM(wp)) {
+            InterlockedOr(&wheel,GET_WHEEL_DELTA_WPARAM(wp)>0 ? 1 : 2); last_family=HazeInputFamily::Keyboard;
+        }
         break;
     case WM_INPUT: {
         RAWINPUT input{}; UINT size = sizeof(input);
@@ -468,7 +476,10 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     const bool presentation_input=startup_skip.owns_input();
     const bool keyboard_menu=menu_active && !presentation_input;
     auto menu_key=[&](int vk) { return keyboard_menu && (vk==VK_RETURN || vk==VK_ESCAPE); };
+    // Each captured wheel direction is a pulse for one host report.
+    const LONG wheel_pulses=captured ? InterlockedExchange(&wheel,0) : 0;
     auto key_down=[&](int vk) {
+        if (vk==HAZE_VK_WHEEL_UP || vk==HAZE_VK_WHEEL_DOWN) return (wheel_pulses&(vk==HAZE_VK_WHEEL_UP ? 1 : 2))!=0;
         if (vk <= 0 || vk >= 256) return false;
         if (!sampled[vk]) { states[vk]=down(vk); sampled[vk]=true; }
         return states[vk];
@@ -494,9 +505,10 @@ int poll(u32 port, CellPadHostInput* input, void*) {
     const int vertical=(int)movement_down(movement[1])-(int)movement_down(movement[0]);
     if (horizontal) input->lx=(u8)(128+127*horizontal);
     if (vertical) input->ly=(u8)(128+127*vertical);
-    if (captured) {
-        if (InterlockedExchange(&wheel,0)) input->buttons |= CELL_PAD_CTRL_CIRCLE;
-    }
+    // A wheel direction no binding uses keeps the original switch-weapon pulse.
+    for (int vk : {HAZE_VK_WHEEL_UP,HAZE_VK_WHEEL_DOWN})
+        if (key_down(vk) && std::none_of(std::begin(bindings),std::end(bindings),[&](const Binding& b) { return b.vk==vk; }) &&
+            std::find(std::begin(movement),std::end(movement),vk)==std::end(movement)) input->buttons |= CELL_PAD_CTRL_CIRCLE;
     if ((input->buttons & CELL_PAD_CTRL_L2) && !input->l2) input->l2=255;
     if ((input->buttons & CELL_PAD_CTRL_R2) && !input->r2) input->r2=255;
     return finish();
