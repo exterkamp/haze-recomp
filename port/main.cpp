@@ -783,6 +783,7 @@ int main(int argc, char** argv)
     ppu_fs_register();       /* cellFs over the game directory */
     lv2_init_syscalls();     /* the lv2 syscall table */
 #ifdef _WIN32
+    haze_pad_guest_register(); /* cellPadSetActDirect -> selected SDL device */
     if (getenv("PS3_SAMPLE")) ps3_sampler_start();
 #endif
 

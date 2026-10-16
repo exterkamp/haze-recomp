@@ -44,6 +44,7 @@ std::atomic<bool> menu_return_pending{false};
 std::atomic<unsigned> quit_pause_polls{0};
 std::atomic<bool> menu_pop{true};
 std::atomic<HazeInputFamily> last_family{HazeInputFamily::Keyboard};
+std::atomic<unsigned> rumble_request{0};
 char config_path[MAX_PATH]{};
 ULONGLONG next_input_update=0, next_config_check=0;
 FILETIME config_time{};
@@ -647,6 +648,10 @@ void haze_input_update() {
             pointer_mode(false); capture(false);
         }
         sample_focused=focused;
+        // Overlay pages and other windows own input; the guest request resumes after.
+        const unsigned motors=controller_enabled && GetForegroundWindow()==window.load() &&
+            !haze_menu_active() && !haze_quit_menu_active() ? rumble_request.load() : 0;
+        haze_gamepad_rumble(u8(motors),u8(motors>>8));
     }
     capture_policy.focused=GetForegroundWindow()==window.load();
     capture_policy.menu_state(menu_active);
@@ -749,6 +754,7 @@ HazeMenuPointer haze_input_take_pointer() {
     return result;
 }
 HazeInputFamily haze_input_family() { return last_family.load(); }
+void haze_input_rumble(u32 port,u8 small,u8 large) { if (!port) rumble_request=small|unsigned(large)<<8; }
 const char* haze_input_config_path() { return config_path; }
 void haze_input_reload() {
     std::lock_guard<std::mutex> lock(settings_mutex);
@@ -834,4 +840,5 @@ HazeMenuPointer haze_input_take_pointer() { return {}; }
 void haze_input_update() {}
 void haze_input_shutdown() {}
 HazeInputFamily haze_input_family() { return HazeInputFamily::Keyboard; }
+void haze_input_rumble(u32,u8,u8) {}
 #endif

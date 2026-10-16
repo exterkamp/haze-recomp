@@ -7,12 +7,12 @@ check.
 
 The page lists keyboard movement, mouse look, all sixteen emulated controller
 buttons, controller movement/look axes, mouse sensitivity and inversion,
-controller deadzones and trigger threshold, controller look inversion, prompt
-family and an optional SDL mapping file. Action names describe Haze's Default
-layout. **Game control options** opens the original page for its controller
-layouts, toggle aim/crouch and other game preferences, discarding unapplied PC
-edits. Those game preferences can further change the actions or inversion
-associated with the emulated buttons and sticks.
+controller deadzones and trigger threshold, controller look inversion,
+vibration and its intensity, prompt family and an optional SDL mapping file.
+Action names describe Haze's Default layout. **Game control options** opens
+the original page for its controller layouts, toggle aim/crouch and other game
+preferences, discarding unapplied PC edits. Those game preferences can further
+change the actions or inversion associated with the emulated buttons and sticks.
 
 ## Editing
 
@@ -99,6 +99,7 @@ device activity also update the normal game prompt atlas. Controller style can
 be automatic, Xbox, PlayStation or Switch. Mouse sensitivity spans 0.01-10
 degrees per device count; movement/look deadzones and trigger threshold span
 0-0.94. Mouse look uses raw motion, independently of stick deadzones.
+Vibration intensity spans 0-1.
 
 The PC page retains arrow/Enter/Escape navigation. If controller Confirm, Back
 or Defaults is unbound, duplicated with another of those actions, or bound to
@@ -108,6 +109,18 @@ axes similarly retain a settings-only left-stick fallback. Gameplay bindings
 are unaffected by this fallback. Applying new bindings requires neutral input
 before navigation resumes. The host mapper suppresses gameplay input while
 the PC page or capture dialog owns it.
+
+## Vibration
+
+The game's `cellPadSetActDirect` motor requests are routed to the selected SDL
+controller instead of the SDK's XInput path, so PlayStation, Switch and Steam
+virtual pads receive them too. The large motor keeps its 0-255 strength; the
+small on/off motor runs at full strength. `RumbleIntensity` scales both and
+`Rumble=0` turns vibration off. Effects follow the most recently used
+controller and stop on the previous one. They also stop when the controller
+disconnects, when another window or a PC overlay page takes input, and on
+exit. Requests are refreshed briefly, so motors also stop by themselves if the
+window thread stalls. Controllers without motors are ignored.
 
 ## Validation and remaining acceptance
 
