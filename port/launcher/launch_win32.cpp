@@ -2,6 +2,7 @@
 #include <atomic>
 #include <fstream>
 #include <stdexcept>
+#include <thread>
 
 namespace haze_launch {
 struct Handle {
@@ -81,7 +82,7 @@ void write_report(const Plan& p,const Result& r) {
     path("ShaderCache",p.cache); path("InputConfig",p.input); path("GraphicsConfig",p.graphics); path("Session",r.session);
     file<<"InputMode="<<utf8(p.mode)<<"\nRenderResolution="<<utf8(p.resolution)<<"\nStarted="<<r.started<<"\nFinished="<<r.finished<<"\nExitCode="<<r.exit_code<<"\nError="<<utf8(r.error)<<"\n";
     for (const auto& [key,source]:p.sources) file<<"Source."<<utf8(key)<<"="<<utf8(source)<<"\n";
-    for (const auto& [key,value]:p.environment) if (diagnostic_variable(key)) file<<"Environment."<<utf8(key)<<"="<<utf8(value)<<"\n";
+    for (const auto& [key,value]:p.environment) if (diagnostic_variable(key)) file<<"Environment."<<utf8(key)<<"="<<(sensitive_variable(key) ? std::string("<redacted>") : utf8(value))<<"\n";
     file.flush(); if (!file) throw std::runtime_error("Cannot finish writing launcher.log.");
 }
 fs::path save_report(const std::string& bytes,const fs::path& folder,const std::wstring& base,std::wstring& error) {
@@ -153,11 +154,15 @@ Result run(const Plan& p) {
         startup.StartupInfo.dwFlags=STARTF_USESTDHANDLES; startup.StartupInfo.hStdOutput=output.value;
         startup.StartupInfo.hStdError=errors.value; startup.StartupInfo.hStdInput=input.value;
         PROCESS_INFORMATION process{};
+        std::thread identity; struct Join { std::thread& thread; ~Join() { if (thread.joinable()) thread.join(); } } join{identity};
+        auto record=[&] { try { record_identity(p,result.session); } catch (...) {} };
         if (!CreateProcessW(p.executable.c_str(),command.data(),nullptr,nullptr,TRUE,
             CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT|EXTENDED_STARTUPINFO_PRESENT,env.data(),result.session.c_str(),&startup.StartupInfo,&process)) {
-            result.exit_code=GetLastError(); result.error=windows_error(L"Haze could not start",result.exit_code);
+            result.exit_code=GetLastError(); result.error=windows_error(L"Haze could not start",result.exit_code); record();
         } else {
             result.started=true; Handle game(process.hProcess),thread(process.hThread); thread.close();
+            // Hash while the running image keeps the executable from being replaced.
+            identity=std::thread(record);
             // The launcher remains Steam's tracked process for the game's full
             // lifetime. No timeout or elapsed-time heuristic means success.
             if (WaitForSingleObject(game.value,INFINITE)!=WAIT_OBJECT_0 || !GetExitCodeProcess(game.value,&result.exit_code))

@@ -83,6 +83,13 @@ int wmain(int argc,wchar_t** argv) {
     assert(redact("E:/Shared Jane/game",r)=="<SharedRoot>/game");
     assert(redact("no personal data",r)=="no personal data");
     plan.root=L"C:\\"; assert(redactor(plan,{}).rules.size()==1); // drive roots and short names are retained
+    // Keys and identities are recognized by name, with or without the environment.
+    for (const wchar_t* name:{L"PS3_RIF_KEY",L"ps3_open_psid",L"PS3_NP_ONLINE_ID",L"PSNR_SERVER",L"HAZE_API_TOKEN",L"MY_KEY",L"PS3_ACT_DAT",L"HAZE_IDPS",L"RAP_PATH"})
+        assert(sensitive_variable(name));
+    for (const wchar_t* name:{L"PAD_NO_KEYBOARD",L"HAZE_INPUT",L"RSX_LIVE_DRAW",L"PS3_NET_ONLINE",L"MONKEY",L"PS3_EDAT"}) assert(!sensitive_variable(name));
+    assert(redact("Environment.PS3_RIF_KEY=00112233445566778899aabbccddeeff\nnext",Redactor{})=="Environment.PS3_RIF_KEY=<redacted>\nnext");
+    assert(redact("set PS3_OPEN_PSID = \"0011 2233\" done; MONKEY=1 HAZE_INPUT=keyboard",Redactor{})=="set PS3_OPEN_PSID = <redacted> done; MONKEY=1 HAZE_INPUT=keyboard");
+    assert(redact("$env:PS3_NP_ONLINE_ID='marge'",Redactor{})=="$env:PS3_NP_ONLINE_ID=<redacted>");
 
     // Bounded reads keep the head and tail and never read past the limit.
     std::string big; for (int i=0;i<2000;++i) big+="line "+std::to_string(i)+"\n";
@@ -124,10 +131,18 @@ int wmain(int argc,wchar_t** argv) {
     while (stderr_log.size()<300000) stderr_log+="noise from C:\\Users\\Jane Doe\\AppData and JANE-PC\n";
     stderr_log+="[haze-boot] last-hle=0x2 (cellGcmInit)\n[haze-crash-context] tid=7 module_base=0000 rip_offset=0x1234\n"
         "[haze-crash] exception=0xC0000005 address=0000 last-hle=0x2 (cellGcmInit)\nguest-lr 0x00123456\n";
+    stderr_log+="open psid 0000111122223333aaaabbbbccccdddd in use\n";
+    // A historical log from before redaction: the key is no longer in the environment.
+    put(crashed/L"launcher.log","Started=1\r\nFinished=1\r\nExitCode=3221225477\r\nError=Haze exited\r\nEnvironment.PS3_RIF_KEY=00112233445566778899aabbccddeeff\r\n");
     put(crashed/L"game.stderr.log",stderr_log); put(crashed/L"trace.csv","a,b\n1,2\n"); put(crashed/L"core.bin",std::string(4096,'\x7f'));
     const Values inherited={{L"USERPROFILE",L"C:\\Users\\Jane Doe"},{L"USERNAME",L"Jane"},{L"COMPUTERNAME",L"JANE-PC"},
-        {L"RSX_TEST_OVERRIDE",L"1"},{L"HAZE_INPUT",L"keyboard"},{L"HAZE_API_TOKEN",L"secret"},{L"UNRELATED",L"private"}};
+        {L"RSX_TEST_OVERRIDE",L"1"},{L"HAZE_INPUT",L"keyboard"},{L"HAZE_API_TOKEN",L"s3cr3t-value"},{L"UNRELATED",L"private"},
+        {L"PS3_OPEN_PSID",L"0000111122223333aaaabbbbccccdddd"}};
     plan=resolve(install/L"bin/HazeLauncher.exe",{},inherited);
+    // The session records the build it launched; the executable is replaced later.
+    record_identity(plan,crashed);
+    auto field=[](const std::string& text,const std::string& key) { const auto at=text.find(key+"="); assert(at!=text.npos); return text.substr(at+key.size()+1,text.find('\n',at)-at-key.size()-1); };
+    const auto launched=field(build_identity(plan,""),"Game.SHA256"); assert(launched.size()==64);
     Limits limits; limits.file=64*1024; limits.head=8*1024; limits.total=160*1024;
     const auto system=system_report();
     assert(has(system,"OS.Version=") && has(system,"CPU.Name=") && has(system,"Memory.TotalMiB=") && has(system,"GPU"));
@@ -141,19 +156,30 @@ int wmain(int argc,wchar_t** argv) {
     assert(has(summary,"[haze-boot] last-hle=0x2 (cellGcmInit)") && !has(summary,"(first)"));
     assert(has(summary,"TITLE_ID=BLUS30094") && has(summary,"APP_VER=01.00") && has(summary,"TITLE=HAZE?") && has(summary,"SupportedTitle=BLUS30094 (matches)"));
     assert(has(summary,"Game.SHA256=") && has(summary,"Game.Timestamp=0x") && has(summary,"Game.SymbolKey=") && has(summary,"ELF.SHA256="));
-    assert(has(summary,"Game.BuildInfo=absent") && has(summary,"Launcher.Version=") && has(summary,"InstallRoot.NonASCII=1") && has(summary,"InstallRoot.Spaces=1"));
+    assert(has(summary,"[Session build, recorded at launch]\nGame.Executable=<InstallRoot>") && has(summary,"\nGame.SHA256="+launched+"\n") && has(summary,"CurrentOnDisk.MatchesSession=yes"));
+    assert(has(summary,"BuildInfo.Game=absent") && has(summary,"Launcher.Version=") && has(summary,"InstallRoot.NonASCII=1") && has(summary,"InstallRoot.Spaces=1"));
     assert(has(manifest,"session/game.stdout.log: missing") && has(manifest,"session/game.stderr.log: truncated") && has(manifest,"1 non-text files excluded"));
     assert(has(manifest,"config/graphics.ini: not configured") && has(manifest,"build/build-info.json: missing"));
     assert(report["session/game.stderr.log"].size()<limits.file+256 && has(report["session/game.stderr.log"],"[haze-crash]"));
     assert(has(settings_text,"InputMode=keyboard\nInputMode.Source=environment HAZE_INPUT") && has(settings_text,"Savedata.Source=launcher configuration"));
-    assert(has(settings_text,"RSX_TEST_OVERRIDE=1  ; inherited") && has(settings_text,"PS3_NET_ONLINE=1  ; launcher") && !has(settings_text,"HAZE_API_TOKEN") && !has(settings_text,"UNRELATED"));
+    assert(has(settings_text,"RSX_TEST_OVERRIDE=1  ; inherited") && has(settings_text,"PS3_NET_ONLINE=1  ; launcher") && !has(settings_text,"UNRELATED"));
+    assert(has(settings_text,"HAZE_API_TOKEN=<redacted>  ; inherited") && has(settings_text,"PS3_OPEN_PSID=<redacted>  ; inherited"));
+    assert(has(report["session/launcher.log"],"Environment.PS3_RIF_KEY=<redacted>") && has(report["session/game.stderr.log"],"open psid <redacted> in use"));
     size_t total=0;
     for (const auto& e:entries) {
         total+=e.data.size();
         assert(!has(e.data,"Jane") && !has(e.data,"JANE") && !has(e.data,"Diagnostics \xc3\xa9"));
+        assert(!has(e.data,"00112233445566778899") && !has(e.data,"0000111122223333") && !has(e.data,"s3cr3t"));
     }
     assert(has(report["config/launcher.ini"],"Savedata=<UserProfile>\\Saves") && has(summary,"SessionFolder=<InstallRoot>") && has(summary,"sessions\\20260301-000000-c\n"));
     assert(total<=limits.total);
+    // Replacing the executable does not change the session's reported build.
+    { std::ofstream exe(install/L"bin/HazeRecomp.exe",std::ios::binary|std::ios::app); exe<<"rebuilt"; assert(exe.good()); }
+    const auto rebuilt=field(build_identity(plan,""),"Game.SHA256"); assert(rebuilt!=launched);
+    const auto again=collect(plan,session(crashed),inherited,system,limits)[0].data;
+    assert(has(again,"\nGame.SHA256="+launched+"\n") && has(again,"CurrentOnDisk.Game.SHA256="+rebuilt+"\n") && has(again,"CurrentOnDisk.MatchesSession=no"));
+    const auto unrecorded=collect(plan,session(sessions_root/L"20260201-000000-b"),inherited,system,limits)[0].data;
+    assert(has(unrecorded,"unknown (this session did not record its build identity)") && has(unrecorded,"CurrentOnDisk.Game.SHA256="+rebuilt) && has(unrecorded,"CurrentOnDisk.MatchesSession=unknown"));
     // A tiny total budget omits logs, but still records why.
     limits.total=33*1024; entries=collect(plan,session(crashed),inherited,system,limits);
     assert(entries[1].name=="manifest.txt" && has(entries[1].data,"omitted (archive size limit"));

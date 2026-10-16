@@ -18,16 +18,19 @@ struct Plan {
     Values environment,sources;
     std::wstring mode,resolution;
     std::wstring steam_arguments;
+    std::vector<std::wstring> problems; // tolerant resolution only
 };
 struct Result { DWORD exit_code=1; bool started=false,finished=false; fs::path session; std::wstring error; };
 std::wstring wide(const std::string& utf8);
 std::wstring error_text(const char* message);
 std::string utf8(const std::wstring& wide);
 std::wstring quote(const std::wstring& argument);
-Values read_config(const fs::path& path,bool required=false);
+Values read_config(const fs::path& path,bool required=false,std::vector<std::wstring>* problems=nullptr);
 Options parse(const std::vector<std::wstring>& args);
 Values environment();
-Plan resolve(const fs::path& launcher,const Options& options,const Values& inherited);
+// tolerant records configuration errors in Plan::problems and keeps the raw or
+// default value, so diagnostics can export with an invalid configuration.
+Plan resolve(const fs::path& launcher,const Options& options,const Values& inherited,bool tolerant=false);
 // Returns the setting that can repair a missing input (SharedRoot, Firmware,
 // Executable), or an empty key for a non-picker error.
 std::wstring validate(const Plan& plan,std::wstring& repair_key);
@@ -40,6 +43,8 @@ std::wstring windows_error(const wchar_t* action,DWORD code=GetLastError());
 // variables (HAZE_/RSX_/PS3_/SDL_/YDKJ_) recorded in reports.
 std::vector<std::pair<std::wstring,std::wstring>> settings(const Plan& plan);
 bool diagnostic_variable(const std::wstring& name);
+// License keys, console/online IDs and credential-like names: never recorded.
+bool sensitive_variable(const std::wstring& name);
 
 // Diagnostics export. Collection is independent of the launcher's dialogs.
 struct Limits { uintmax_t file=4u<<20,head=1u<<20,config=256u<<10,total=32u<<20; size_t files=32; };
@@ -56,6 +61,10 @@ std::vector<Session> sessions(const fs::path& root,size_t limit=16);
 fs::path find_session(const Plan& plan,const std::wstring& name);
 std::string describe(const Session& session);
 std::string system_report();
+// Executable/EBOOT SHA-256, PE and PDB identity and PARAM.SFO fields. The
+// launcher records this in each session so later exports name the right build.
+std::string build_identity(const Plan& plan,const std::string& prefix);
+void record_identity(const Plan& plan,const fs::path& session);
 std::vector<Entry> collect(const Plan& plan,const Session& session,const Values& environment,const std::string& system,const Limits& limits={});
 std::string zip(const std::vector<Entry>& entries);
 // Never replaces an existing file: picks base.zip, base-2.zip, ...

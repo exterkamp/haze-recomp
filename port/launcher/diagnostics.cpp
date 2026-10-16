@@ -28,8 +28,24 @@ std::vector<std::pair<std::wstring,std::wstring>> settings(const Plan& p) {
 static std::wstring upper(std::wstring text) { for (auto& c:text) if (c>=L'a' && c<=L'z') c-=32; return text; }
 bool diagnostic_variable(const std::wstring& name) {
     const auto key=upper(name);
-    for (const wchar_t* secret:{L"TOKEN",L"SECRET",L"PASSWORD",L"CREDENTIAL"}) if (key.find(secret)!=key.npos) return false;
     for (const wchar_t* prefix:{L"HAZE_",L"RSX_",L"PS3_",L"SDL_",L"YDKJ_"}) if (key.starts_with(prefix)) return true;
+    return false;
+}
+// Values never recorded or exported. The SDK reads the EDAT license key
+// (PS3_RIF_KEY), console PSID (PS3_OPEN_PSID), NP online ID and PSN relay host
+// from the environment; any other name with a credential-like word matches too.
+bool sensitive_variable(const std::wstring& name) {
+    const auto key=upper(name);
+    for (const wchar_t* exact:{L"PS3_RIF_KEY",L"PS3_OPEN_PSID",L"PS3_NP_ONLINE_ID",L"PSNR_SERVER"}) if (key==exact) return true;
+    for (const wchar_t* part:{L"TOKEN",L"SECRET",L"PASSWORD",L"PASSWD",L"CREDENTIAL",L"RIFKEY",L"APIKEY",L"KLICENSEE"}) if (key.find(part)!=key.npos) return true;
+    for (size_t start=0;start<=key.size();) {
+        auto end=key.find(L'_',start); if (end==key.npos) end=key.size();
+        const auto word=key.substr(start,end-start);
+        for (const wchar_t* token:{L"KEY",L"KEYS",L"RIF",L"RAP",L"IDPS",L"PSID",L"KLIC",L"ACT",L"ACTDAT",L"LICENSE",L"AUTH",L"TICKET",L"NPID",L"ONLINEID",L"PWD",L"CERT"})
+            if (word==token) return true;
+        if (word==L"ONLINE" && key.compare(end,3,L"_ID")==0) return true;
+        start=end+1;
+    }
     return false;
 }
 static std::string text(const std::wstring& value) { try { return utf8(value); } catch (...) { return "<invalid Unicode>"; } }
@@ -75,10 +91,32 @@ Redactor redactor(const Plan& p,const Values& env) {
     if (!get(L"HOMEDRIVE").empty() && !get(L"HOMEPATH").empty()) path(get(L"HOMEDRIVE")+get(L"HOMEPATH"),"<UserProfile>");
     for (const wchar_t* key:{L"OneDrive",L"OneDriveCommercial",L"OneDriveConsumer"}) path(get(key),"<OneDrive>");
     name(get(L"USERNAME"),"<user>"); name(get(L"COMPUTERNAME"),"<computer>"); name(get(L"USERDOMAIN"),"<domain>");
+    // Current values of sensitive variables, wherever the game printed them.
+    for (const auto* source:{&env,&p.environment})
+        for (const auto& [key,value]:*source) if (sensitive_variable(key) && value.size()>=4) try { r.rules.emplace_back(utf8(value),"<redacted>"); } catch (...) {}
     std::stable_sort(r.rules.begin(),r.rules.end(),[](const auto& a,const auto& b) { return a.first.size()>b.first.size(); });
     return r;
 }
-std::string redact(const std::string& s,const Redactor& r) {
+// NAME=value assignments of sensitive variables, independent of the current
+// environment, so a historical launcher.log or a game message is still scrubbed.
+static bool ident(unsigned char c) { return (c>='0' && c<='9') || (c>='a' && c<='z') || (c>='A' && c<='Z') || c=='_'; }
+static std::string scrub(const std::string& s) {
+    std::string out; out.reserve(s.size());
+    for (size_t i=0;i<s.size();) {
+        if (!ident(s[i]) || (i && ident(s[i-1]))) { out+=s[i++]; continue; }
+        size_t j=i; while (j<s.size() && ident(s[j])) ++j;
+        size_t k=j; while (k<s.size() && (s[k]==' ' || s[k]=='\t')) ++k;
+        if (k>=s.size() || s[k]!='=' || j-i>96 || !sensitive_variable(std::wstring(s.begin()+i,s.begin()+j))) { out.append(s,i,j-i); i=j; continue; }
+        ++k; while (k<s.size() && (s[k]==' ' || s[k]=='\t')) ++k;
+        out.append(s,i,k-i); out+="<redacted>";
+        if (k<s.size() && (s[k]=='"' || s[k]=='\'')) { const auto close=s.find_first_of(std::string(1,s[k])+"\r\n",k+1); k=close==s.npos ? s.size() : s[close]==s[k] ? close+1 : close; }
+        else while (k<s.size() && !std::strchr(" \t\r\n\";&",s[k])) ++k;
+        i=k;
+    }
+    return out;
+}
+std::string redact(const std::string& input,const Redactor& r) {
+    const auto s=scrub(input);
     bool first[256]{}; for (const auto& rule:r.rules) { first[lower(rule.first[0])]=true; first[(unsigned char)rule.first[0]]=true; if (slash(rule.first[0])) first['\\']=first['/']=true; }
     std::string out; out.reserve(s.size());
     for (size_t i=0;i<s.size();) {
@@ -294,6 +332,21 @@ std::string system_report() {
     return out;
 }
 
+std::string build_identity(const Plan& p,const std::string& prefix) {
+    std::error_code ec; std::string out=prefix+"Game.Executable="+text(p.executable.wstring())+"\n";
+    if (fs::is_regular_file(p.executable,ec))
+        out+=prefix+"Game.Size="+std::to_string(fs::file_size(p.executable,ec))+"\n"+prefix+"Game.SHA256="+sha256(p.executable)+"\n"+image(p.executable,prefix+"Game.");
+    else out+=prefix+"Game.SHA256=unavailable (executable missing)\n";
+    if (fs::is_regular_file(p.elf,ec)) out+=prefix+"ELF.Size="+std::to_string(fs::file_size(p.elf,ec))+"\n"+prefix+"ELF.SHA256="+sha256(p.elf)+"\n";
+    else out+=prefix+"ELF=missing\n";
+    const auto param=sfo(p.disc/L"PS3_GAME/PARAM.SFO");
+    for (size_t at=0;at<param.size();) { const auto end=param.find('\n',at); out+=prefix+param.substr(at,end==param.npos ? param.npos : end-at+1); at=end==param.npos ? param.size() : end+1; }
+    return out;
+}
+void record_identity(const Plan& p,const fs::path& session) {
+    const auto text="# Build identity recorded when this session launched.\n"+build_identity(p,"")+"Complete=1\n";
+    std::ofstream file(session/L"build-identity.txt",std::ios::binary|std::ios::trunc); file<<text;
+}
 std::vector<Entry> collect(const Plan& p,const Session& s,const Values& env,const std::string& system,const Limits& limits) {
     const auto r=redactor(p,env);
     std::vector<Entry> files; std::vector<std::string> manifest; uintmax_t used=0;
@@ -321,7 +374,11 @@ std::vector<Entry> collect(const Plan& p,const Session& s,const Values& env,cons
         if (!diagnostic_variable(key)) continue;
         auto inherited=env.find(key);
         const char* origin=inherited==env.end() ? "launcher" : inherited->second==value ? "inherited" : "launcher, overriding inherited";
-        configured+=text(key)+"="+text(value)+"  ; "+origin+"\n";
+        configured+=text(key)+"="+(sensitive_variable(key) ? std::string("<redacted>") : text(value))+"  ; "+origin+"\n";
+    }
+    if (!p.problems.empty()) {
+        configured+="\n# The configuration is not launchable; values above use defaults where it was invalid.\n[Problems]\n";
+        for (const auto& problem:p.problems) configured+=text(problem)+"\n";
     }
     add("settings.txt",redact(configured,r)); manifest.push_back("settings.txt: resolved at export time");
     file("config/launcher.ini",p.config,limits.config);
@@ -368,28 +425,42 @@ std::vector<Entry> collect(const Plan& p,const Session& s,const Values& env,cons
     summary+="\n[Last boot progress]\n"+(boot.empty() ? std::string("none recorded\n") : boot);
     summary+="\n[Build]\nLauncher.Version=" HAZE_LAUNCH_VERSION "\nLauncher.SourceCommit=" HAZE_LAUNCH_COMMIT "\nLauncher.SDK=" HAZE_LAUNCH_SDK
         "\n; Launcher identifiers are recorded when the launcher build is configured.\n";
-    summary+="Launcher.SHA256="+sha256(p.launcher)+"\nGame.Executable="+text(p.executable.wstring())+"\n";
-    std::error_code exists; const bool game=fs::is_regular_file(p.executable,exists);
-    std::string game_hash;
-    if (game) { game_hash=sha256(p.executable); summary+="Game.Size="+std::to_string(fs::file_size(p.executable,exists))+"\nGame.SHA256="+game_hash+"\n"+image(p.executable,"Game."); }
-    else summary+="Game.SHA256=unavailable (executable missing)\n";
+    summary+="Launcher.SHA256="+sha256(p.launcher)+"\n";
+    // The session's own build, recorded at launch, is authoritative; the file on
+    // disk may have been rebuilt or updated since.
+    std::string note; auto recorded=bounded(s.path/L"build-identity.txt",64*1024,64*1024,note);
+    if (!recorded.ends_with("Complete=1\n")) recorded.clear();
+    auto field=[](const std::string& text,const std::string& key) {
+        const auto at=text.find("\n"+key+"="); if (at==text.npos) return std::string{};
+        const auto start=at+key.size()+2; return text.substr(start,text.find('\n',start)-start);
+    };
+    if (recorded.empty()) summary+="\n[Session build, recorded at launch]\nunknown (this session did not record its build identity)\n";
+    else summary+="\n[Session build, recorded at launch]\n"+recorded.substr(recorded.find('\n')+1);
+    const auto current=build_identity(p,"CurrentOnDisk.");
+    summary+="\n[Current on disk at export; may differ from the session's build]\n"+current;
+    const auto session_hash=field("\n"+recorded,"Game.SHA256"),current_hash=field("\n"+current,"CurrentOnDisk.Game.SHA256");
+    summary+="CurrentOnDisk.MatchesSession="+std::string(session_hash.empty() ? "unknown" : session_hash==current_hash ? "yes" : "no")+"\n";
+    const auto game_hash=session_hash.empty() ? current_hash : session_hash;
     if (build_info) {
         const auto& json=std::find_if(files.begin(),files.end(),[](const Entry& e) { return e.name=="build/build-info.json"; })->data;
         const auto key=json.find("\"HazeRecomp.exe\""),colon=key==json.npos ? json.npos : json.find(':',key+16);
         const auto quote=colon==json.npos ? json.npos : json.find('"',colon+1);
-        const auto recorded=quote==json.npos ? std::string{} : json.substr(quote+1,64);
-        summary+="Game.BuildInfo="+std::string(recorded.empty() ? "no HazeRecomp.exe hash" : recorded==game_hash ? "matches build-info.json" : "does not match build-info.json")+"\n";
-    } else summary+="Game.BuildInfo=absent (development build)\n";
-    summary+="\n[Game data]\n";
-    if (fs::is_regular_file(p.elf,exists)) summary+="ELF.Size="+std::to_string(fs::file_size(p.elf,exists))+"\nELF.SHA256="+sha256(p.elf)+"\n";
-    else summary+="ELF=missing\n";
-    const auto param=sfo(p.disc/L"PS3_GAME/PARAM.SFO"); summary+=param;
-    summary+="SupportedTitle=BLUS30094 ("+std::string(param.find("TITLE_ID=BLUS30094\n")!=param.npos ? "matches" : "does not match or unknown")+")\n";
+        const auto listed=quote==json.npos ? std::string{} : json.substr(quote+1,64);
+        summary+="BuildInfo.Game="+std::string(listed.empty() ? "no HazeRecomp.exe hash" : listed==game_hash ? "matches " : "does not match ")+
+            (listed.empty() ? "" : session_hash.empty() ? "the current executable" : "the session's executable")+" (build-info.json is read at export time)\n";
+    } else summary+="BuildInfo.Game=absent (development build)\n";
+    const auto title=recorded.empty() ? field("\n"+current,"CurrentOnDisk.TITLE_ID") : field("\n"+recorded,"TITLE_ID");
+    summary+="SupportedTitle=BLUS30094 ("+std::string(title=="BLUS30094" ? "matches" : "does not match or unknown")+")\n";
+    if (!p.problems.empty()) {
+        summary+="\n[Configuration problems at export]\n";
+        for (const auto& problem:p.problems) summary+=text(problem)+"\n";
+    }
     const auto root=p.root.wstring();
     summary+="\n[Paths]\nInstallRoot.Length="+std::to_string(root.size())+"\nInstallRoot.Spaces="+std::to_string(root.find(L' ')!=root.npos)+
         "\nInstallRoot.NonASCII="+std::to_string(std::any_of(root.begin(),root.end(),[](wchar_t c) { return c>0x7f; }))+"\n";
     summary+="\n[Privacy]\nRedacted: install/shared roots, user profile and OneDrive folders, user, computer and domain names.\n"
         "Excluded: game and firmware files, saves, shader cache, keys, minidumps, and environment variables other than HAZE_/RSX_/PS3_/SDL_/YDKJ_.\n"
+        "Always redacted: license keys, console and online IDs and other credential-like variables such as PS3_RIF_KEY and PS3_OPEN_PSID.\n"
         "Nothing is uploaded. Review the files before sharing them.\n";
     std::string list="# Each item and whether it was collected.\n"; for (const auto& line:manifest) list+=line+"\n";
     std::vector<Entry> result={{"summary.txt",redact(summary,r)},{"manifest.txt",redact(list,r)}};

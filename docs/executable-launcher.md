@@ -128,8 +128,11 @@ rendering or audio fault, or a crash from an earlier run), use the **Haze Recomp
 diagnostics** Start menu shortcut or run `HazeLauncher.exe --diagnostics`. It
 lists the ten newest sessions with their recorded status; choose one, then a
 destination folder. Exporting runs in a fresh launcher process after the game
-has exited, so a run that crashed before the menu can still be exported, and it
-does not require a launchable configuration. Without dialogs:
+has exited, so a run that crashed before the menu can still be exported. It
+does not require a launchable configuration: an invalid setting (for example an
+unknown InputMode) or malformed INI lines are skipped, defaults are used for the
+affected values, and each validation error is listed in `summary.txt` and
+`settings.txt`. The raw INI files are included as they are. Without dialogs:
 
 ```powershell
 HazeLauncher.exe --no-ui --export-diagnostics D:\reports              # newest session
@@ -159,11 +162,20 @@ the diagnostics-relevant environment overrides used by that launch, so the
 session's own values remain distinguishable from current configuration. A
 session whose launcher never recorded its exit is reported as incomplete.
 
+While the game runs, the launcher also writes `build-identity.txt` into the
+session: the executable's SHA-256, PE timestamp/SizeOfImage and PDB GUID/age, and
+EBOOT.ELF's size and SHA-256 with its PARAM.SFO fields. Hashing happens while the
+running image prevents the executable from being replaced, and does not delay
+the game's start. Reports use this recorded identity for the session's build.
+They list the files currently on disk separately, as `CurrentOnDisk.*` with
+`CurrentOnDisk.MatchesSession`, so an executable rebuilt or updated since the
+session cannot be mistaken for the one that ran. Sessions recorded before this
+change report their build as unknown.
+
 Build identification combines the launcher's version, source commit and SDK
 gitlink (recorded when the launcher build is configured; `-modified` marks
-uncommitted tracked changes), SHA-256 of both executables, the game's PE
-timestamp/SizeOfImage and its CodeView PDB name and GUID/age symbol key, and
-whether the game matches `build-info.json`. Game data is identified by EBOOT.ELF's
+uncommitted tracked changes), the launcher's SHA-256, the session's recorded game
+identity above, and whether that game matches `build-info.json`. Game data is identified by EBOOT.ELF's
 size and SHA-256 and the PARAM.SFO TITLE_ID/VERSION/APP_VER fields; the supported
 title is BLUS30094. A developer can therefore match the report with a release
 build and its PDB without the user's game files.
@@ -185,6 +197,18 @@ separator style; names shorter than three characters and drive roots are left
 alone. Path length, spaces and non-ASCII characters in InstallRoot are reported
 instead. Only the PDB file name is kept, not its build path.
 
+License keys and identities are never written to `launcher.log` and never
+exported: the EDAT license key (`PS3_RIF_KEY`), console PSID (`PS3_OPEN_PSID`),
+NP online ID (`PS3_NP_ONLINE_ID`) and PSN relay host (`PSNR_SERVER`), plus any
+variable whose name contains a credential-like word (KEY, RIF, RAP, IDPS, PSID,
+KLIC, ACT, LICENSE, AUTH, TICKET, TOKEN, SECRET, PASSWORD, CREDENTIAL and
+similar). They are recorded as `<redacted>` so their presence stays visible. At
+export, every `NAME=value` assignment of such a variable in any collected file
+is replaced too, even when the variable is no longer set, so an older
+`launcher.log` that recorded a key is scrubbed. The current values of these
+variables are also replaced wherever the game printed them. `.rifkey` and other
+non-text files are never collected.
+
 Redaction is best effort. It does not recognize other names (for example a
 Steam persona or a folder named differently from the account), short 8.3 path
 forms or text the game writes in another encoding. Review the files before
@@ -192,7 +216,7 @@ sharing them.
 
 The report never includes game or firmware files, EBOOT/ELF contents, saves,
 the shader cache, keys, non-text session files, environment variables outside
-the prefixes above, or names containing TOKEN, SECRET, PASSWORD or CREDENTIAL.
+the prefixes above, or the values of the key and identity variables above.
 Minidumps are not written or collected. `haze_crash_filter` runs inside the
 failing process and already records the exception, registers, last HLE call and
 guest link registers; a full or heap dump would contain guest memory with
@@ -218,7 +242,15 @@ Windows' bundled `tar`), redaction of profile/root paths, user and computer
 names across separators and case, head/tail log bounds, the overall size limit,
 session ordering and status, missing and non-text files, setting sources and the
 environment allowlist, PARAM.SFO and PE symbol identification, and exports that
-never replace an existing report or leave a partial file. The Explorer dialogs
+never replace an existing report or leave a partial file. Regressions cover a
+historical launcher.log containing `PS3_RIF_KEY` after the variable is unset,
+key and PSID values in settings and game output, and an executable replaced
+between launch and export (recorded versus current-on-disk identity, and an
+unrecorded session reported as unknown). HazeLaunchTests also checks that a
+launch never writes the key to `launcher.log` and records `build-identity.txt`,
+and that the real `HazeLauncher.exe --no-ui --export-diagnostics` exports an
+existing session with an invalid InputMode or a malformed INI, while `--check`
+still rejects both. The Explorer dialogs
 and **Show in folder** have not been exercised interactively, and no export has
 been made from a real game crash.
 

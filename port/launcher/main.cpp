@@ -111,7 +111,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int) {
         const auto inherited=environment(); Plan plan;
         if (options.diagnostics || !options.export_to.empty()) {
             // Exporting does not require a launchable configuration.
-            plan=resolve(fs::path(module),options,inherited);
+            plan=resolve(fs::path(module),options,inherited,true);
             if (options.export_to.empty()) {
                 if (options.no_ui) { diagnostic(L"--diagnostics shows dialogs. Use --export-diagnostics FOLDER with --no-ui."); return 1; }
                 return diagnostics_ui(plan,options.session,inherited);
