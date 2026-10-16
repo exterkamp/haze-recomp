@@ -1,10 +1,12 @@
 #include "haze_input.h"
 #include "haze_graphics_reload.h"
 #include "haze_menu.h"
+#include "haze_player_profile.h"
 #include "haze_audio_settings.h"
 #include "haze_mouse.h"
 #include "haze_capture.h"
 #ifdef _WIN32
+#include "haze_coop.h"
 #include "haze_prompts.h"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -212,6 +214,9 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 haze_graphics_notice().c_str());
             return CallWindowProc(original_proc,hwnd,msg,wp,(LPARAM)caption);
         }
+        break;
+    case WM_CHAR:
+        if (!startup_skip.owns_input() && haze_menu_capture_text(uint32_t(wp))) return 0;
         break;
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
@@ -576,6 +581,8 @@ void haze_input_attach(void* hwnd) {
     haze_audio_menu_register();
     haze_controls_menu_register();
     haze_steam_menu_register();
+    haze_player_profile_menu_register();
+    haze_coop_menu_register();
     haze_quit_menu_register();
     if (controller_enabled) gamepad_initialized=haze_gamepad_initialize(config_path);
     RAWINPUTDEVICE device{0x01,0x02,0,window};
@@ -601,6 +608,7 @@ void haze_input_update() {
     const auto now=GetTickCount64();
     if (now<next_input_update) return;
     next_input_update=now+8;
+    haze_coop_update();
     // A pause key during loading may be ignored by the guest. Give the menu
     // time to open, but do not leave capture disabled forever if it does not.
     // Live menu ownership still gates both capture and camera independently.
@@ -749,6 +757,7 @@ unsigned haze_input_menu_button(int virtual_key) {
     return buttons;
 }
 void haze_input_shutdown() {
+    haze_coop_leave();
     haze_quit_menu_shutdown();
     haze_menu_shutdown(true);
     capture_policy.ready=false;
