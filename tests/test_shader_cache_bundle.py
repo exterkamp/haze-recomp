@@ -84,6 +84,70 @@ static int persist_one(const char* path, u8 value) {
                                       &saved_entries, &saved_bytes);
 }
 
+static void check_archive_size(size_t target_size, u32 count) {
+    const size_t overhead = sizeof(shader_bundle_header) +
+        (size_t)count * sizeof(shader_bundle_record) + (size_t)count * 4u;
+    assert(count && target_size <= SHADER_BUNDLE_MAX_BYTES && target_size > overhead);
+    std::vector<u8> blob(SHADER_DISK_CACHE_MAX_BLOB, 0xA5);
+    std::vector<u8> sources((size_t)count * 4u);
+    std::vector<shader_bundle_item> items(count);
+    size_t remaining = target_size - overhead;
+    for (u32 i = 0; i < count; ++i) {
+        u8* source = sources.data() + (size_t)i * 4u;
+        memcpy(source, &i, 4u);
+        const size_t blob_size = remaining > SHADER_DISK_CACHE_MAX_BLOB
+            ? SHADER_DISK_CACHE_MAX_BLOB : remaining;
+        assert(blob_size && blob_size <= SHADER_DISK_CACHE_MAX_BLOB);
+        items[i] = make_item((u32)'V', source, 4u, blob.data(),
+                             (u32)blob_size);
+        remaining -= blob_size;
+    }
+    assert(remaining == 0);
+    u8* bytes = NULL;
+    size_t bytes_size = 0;
+    assert(shader_bundle_serialize(items.data(), count, &bytes, &bytes_size));
+    assert(bytes_size == target_size);
+    shader_bundle_view view = {};
+    assert(shader_bundle_parse(bytes, bytes_size, &view));
+    assert(view.count == count && view.size == target_size);
+    free(bytes);
+}
+
+static bool overflow_merge_preserves_archive(const char* path) {
+    if (!persist_one(path, 'S')) return false;
+    u8* before = NULL;
+    size_t before_size = 0;
+    shader_bundle_view before_view = {};
+    if (shader_bundle_read_file(path, &before, &before_size, &before_view) != 1)
+        return false;
+    std::vector<u8> original(before, before + before_size);
+    free(before);
+
+    const u32 count = (u32)(SHADER_BUNDLE_MAX_BYTES /
+        SHADER_DISK_CACHE_MAX_BLOB) + 1u;
+    static const u8 fake_large_blob_byte = 0x6D;
+    std::vector<u8> sources((size_t)count * 4u);
+    std::vector<shader_bundle_item> items(count);
+    for (u32 i = 0; i < count; ++i) {
+        u8* source = sources.data() + (size_t)i * 4u;
+        memcpy(source, &i, 4u);
+        items[i] = make_item((u32)'V', source, 4u,
+            &fake_large_blob_byte, SHADER_DISK_CACHE_MAX_BLOB);
+    }
+    if (shader_bundle_persist_file(path, items.data(), count, NULL, NULL))
+        return false;
+
+    u8* after = NULL;
+    size_t after_size = 0;
+    shader_bundle_view after_view = {};
+    const int read_result = shader_bundle_read_file(
+        path, &after, &after_size, &after_view);
+    const bool preserved = read_result == 1 && after_size == original.size() &&
+        !memcmp(after, original.data(), original.size());
+    free(after);
+    return preserved;
+}
+
 int main(int argc, char** argv) {
     if (argc >= 3 && !strcmp(argv[1], "--write")) {
         if (argc != 4 || strlen(argv[3]) != 1) return 2;
@@ -119,6 +183,26 @@ int main(int argc, char** argv) {
         free(bytes);
         return 0;
     }
+    if (argc == 3 && !strcmp(argv[1], "--validate-seed")) {
+        u8* bytes = NULL;
+        size_t size = 0;
+        shader_bundle_view view = {};
+        if (shader_bundle_read_file(argv[2], &bytes, &size, &view) != 1)
+            return 9;
+        u32 vertex_count = 0, pixel_count = 0;
+        for (u32 i = 0; i < view.count; ++i) {
+            if (view.records[i].stage == (u32)'V') ++vertex_count;
+            else if (view.records[i].stage == (u32)'P') ++pixel_count;
+            else { free(bytes); return 10; }
+        }
+        printf("seed bytes=%llu entries=%u V=%u P=%u stage_limit=%u\n",
+            (unsigned long long)size, view.count, vertex_count, pixel_count,
+            MAX_SHADER_BLOBS);
+        free(bytes);
+        return 0;
+    }
+    if (argc == 3 && !strcmp(argv[1], "--overflow-preserves"))
+        return overflow_merge_preserves_archive(argv[2]) ? 0 : 11;
     if (argc != 1) return 2;
     static const u8 src_v[] = {'v','s',' ','m','a','i','n'};
     static const u8 src_p[] = {'p','s',' ','m','a','i','n'};
@@ -285,17 +369,27 @@ int main(int argc, char** argv) {
                                     &rejected, &rejected_size));
     free(too_many);
     free(unique_sources);
-    const u32 large_count = SHADER_BUNDLE_MAX_BYTES / SHADER_DISK_CACHE_MAX_BLOB + 1u;
-    shader_bundle_item* oversized = (shader_bundle_item*)calloc(large_count, sizeof(shader_bundle_item));
-    assert(oversized);
-    u8 sources[32][4];
+    const u32 large_count = SHADER_BUNDLE_MAX_BYTES /
+        SHADER_DISK_CACHE_MAX_BLOB + 1u;
+    std::vector<u8> large_sources((size_t)large_count * 4u);
+    std::vector<shader_bundle_item> oversized(large_count);
     for (u32 i = 0; i < large_count; ++i) {
-        memcpy(sources[i], &i, 4);
-        oversized[i] = make_item((u32)'V', sources[i], 4,
+        u8* source = large_sources.data() + (size_t)i * 4u;
+        memcpy(source, &i, 4u);
+        oversized[i] = make_item((u32)'V', source, 4u,
                                  &one_byte, SHADER_DISK_CACHE_MAX_BLOB);
     }
-    assert(!shader_bundle_serialize(oversized, large_count, &rejected, &rejected_size));
-    free(oversized);
+    assert(!shader_bundle_serialize(oversized.data(), large_count,
+                                    &rejected, &rejected_size));
+
+    /* Accept a valid archive just above the former 64 MiB limit and one at
+     * the new 128 MiB limit; reject a byte beyond the new parser limit. */
+    check_archive_size(64u * 1024u * 1024u + 1u, 16u);
+    check_archive_size(SHADER_BUNDLE_MAX_BYTES, 32u);
+    std::vector<u8> beyond_cap((size_t)SHADER_BUNDLE_MAX_BYTES + 1u);
+    shader_bundle_view beyond_view = {};
+    assert(!shader_bundle_parse(beyond_cap.data(), beyond_cap.size(), &beyond_view));
+    assert(!beyond_view.bytes && !beyond_view.count && !beyond_view.records);
 
     /* Concurrent parse/find on one immutable archive and serialize on
      * independent lists exercises the helper's shared-read/reentrant paths. */
@@ -368,6 +462,8 @@ def main() -> None:
     parser.add_argument("--source", type=Path,
                         default=ROOT / "external/ps3recomp/libs/video/rsx_live_draw.c")
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--seed", type=Path,
+                        help="optional real shader_cache.bundle to parse and report by stage")
     args = parser.parse_args()
     source_text = args.source.read_text(encoding="utf-8")
     block = extract_block(source_text, BEGIN, END)
@@ -389,7 +485,14 @@ def main() -> None:
         subprocess.run(command, check=True)
         subprocess.run([str(executable)], check=True)
         run_persistence_race(executable, temp_path)
-    print("PASS shader bundle codec/persistence: corruption, merge, caps, concurrent writers")
+        overflow_path = temp_path / "overflow-preserve.bundle"
+        subprocess.run([str(executable), "--overflow-preserves", str(overflow_path)], check=True)
+        if args.seed:
+            seed_result = subprocess.run(
+                [str(executable), "--validate-seed", str(args.seed)],
+                check=True, capture_output=True, text=True)
+            print(seed_result.stdout.strip())
+    print("PASS shader bundle codec/persistence: corruption, merge, 64/128 MiB bounds, overflow preservation, concurrent writers")
 
 
 if __name__ == "__main__":
